@@ -22,11 +22,46 @@ flowchart TD
 
 The exact reasoning experience depends on the connected client. The diagram describes the runtime boundary, not a claim that every MCP client implements all optional role-handoff conveniences. The dashboard reads the existing database and does not participate in workflow decisions or mutations. The [architecture illustrations](diagrams/README.md) provide supplementary views.
 
+## Adaptive Goal Graph (AGG) subsystem
+
+AGG is a planning/evidence subsystem layered above existing workflow contracts; it does not replace the workflow engine or create an alternate general-purpose execution path. The current RC.11 source separates candidate generation, persistent knowledge, external verification, reviewable Plan/Execution Graph proposals, and the normal immutable-plan approval/dispatch lifecycle.
+
+```mermaid
+flowchart TD
+    Caller[Caller graph or stored Goal/Idea graph] --> Validator[Closed schema and canonical content hash]
+    Validator --> Search[Bounded Phase 1 beam search]
+    Search --> Draft[Candidate and review-only Plan Graph draft]
+    Store[(Append-only Goal/Idea SQLite rows)] --> Snapshot[Snapshot + resolved evidence manifest]
+    Snapshot --> Verifier[Independent external verifier signature]
+    Verifier --> TrustedSearch[Revalidate current signed snapshot and lineage]
+    TrustedSearch --> Draft
+    Draft --> Map[Explicit step-to-task/template mapping]
+    Map --> Readiness[Typed evidence, role contracts and DAG readiness]
+    Readiness --> ExecProposal[Review-only Execution Graph proposal]
+    ExecProposal --> Intent[Versioned action intent and typed input bindings]
+    Intent --> Reviewer[Independent reviewer identity attestation]
+    Reviewer --> Compiler[Normal preflight/compiler and exact plan hash]
+    Compiler --> Approval[Explicit workflow approval]
+    Approval --> Dispatch[Standard workflow dispatch/task gates]
+```
+
+### AGG trust and state boundaries
+
+- **Candidate versus source knowledge:** a search candidate is a heuristic route through a graph; it is not a verified claim or executable plan. A caller-supplied shadow graph remains unverified. The store's append-only node revisions, memberships and edges preserve identity/history, but caller-created content remains unverified until a trusted external verifier adjudicates the exact current snapshot and evidence manifest.
+- **Source verification:** the runtime validates the Ed25519 signature, domain/scope, provider/root, freshness, nonce and exact snapshot/evidence hashes, then re-resolves durable source/artifact and producer lineage. The verifier's truth/independence decision is external authority; content hashes alone do not establish either.
+- **Reviewer verification:** a separate identity provider signs a decision bound to the exact candidate, action-intent semantics, typed-input contracts, role contracts and immutable plan hash. Source-verifier and reviewer providers/roots must be independently administered and distinct. Reviewer attestation only says the candidate was reviewed; it is not workflow approval.
+- **Workflow approval:** compatibility, readiness, Execution Graph proposal, candidate creation, reviewer attestation, compiler preflight, immutable-plan pinning, `workflow_approve`, and dispatch/task preparation are separate gates. Candidate and proposal tools do not create executable contracts or task rows on their own.
+- **Execution boundary:** the current supported AGG path projects typed action intents into existing built-in workflow task contracts. It is not an arbitrary natural-language-to-shell executor. `adaptive_goal_sandbox_action_execute` is experimental test-only functionality for one fixed fixture action, not production execution.
+- **Experimental algorithm phases:** the Phase 2 learned discriminator and Phase 3 MCTS tools are disabled by default and only exposed with explicit shadow-test environment flags; Phase 4 terminal-workflow capture is similarly opt-in. They return shadow/review data and do not open execution gates. These algorithmic phase names are distinct from Runalith's formal Phase 2 deployment-readiness audit.
+- **Telemetry:** planner-run telemetry is a separate observation record. A completed telemetry row means the MCP invocation returned; it is not evidence of goal success, plan acceptance, trusted claim truth or execution completion. The Dashboard uses read-only database access.
+
+For schemas, all AGG tools, storage details, search options, benchmark caveats, and operator steps, use the [AGG system guide](adaptive-goal-graph.md). The [RC.11 acceptance record](goal-plan-execution-acceptance-rc11-20261026.md) is the source of the current candidate identity and activation blockers. At the 2026-10-26 observation, production remains blocked on administrator-provisioned trust, an independently protected external monotonic checkpoint, and reconciliation of active workflows/tasks; see [Known issues](KNOWN_ISSUES.md).
+
 ## Trust and state boundaries
 
 ### MCP entrypoint
 
-The shipped entrypoint is `server/index.js`. It uses newline-delimited JSON-RPC over stdin/stdout and does not open an HTTP listener. Diagnostic output belongs on stderr so it does not corrupt the MCP transport.
+The versioned entrypoint named by `package.json` is `server/index-v1.0.9-rc.11.js` for this RC.11 checkout. It uses newline-delimited JSON-RPC over stdin/stdout and does not open an HTTP listener. `server/index.js` is retained as a historical/compatibility input, not the entrypoint named by the current package metadata. Diagnostic output belongs on stderr so it does not corrupt the MCP transport.
 
 ### Proposal, approval and plan
 
@@ -78,7 +113,7 @@ For batches, a retry reuses the durable batch ID and reconciles existing item/se
 
 | Concern | Starting point |
 |---|---|
-| MCP tool surface | `server/index.js` |
+| MCP tool surface for this RC.11 checkout | `server/index-v1.0.9-rc.11.js` and `docs/MCP_REFERENCE.md` |
 | Runtime lifecycle and persistence | `src/runtime/` |
 | Workflow contracts and artifact schemas | `src/runtime/workflow/` |
 | Structured execution protocol | `protocol/` |

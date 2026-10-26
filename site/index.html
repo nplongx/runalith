@@ -23,6 +23,7 @@
     </a>
     <nav aria-label="Main navigation">
       <a href="#capabilities">Capabilities</a>
+      <a href="#agg">AGG</a>
       <a href="#how-it-works">How it works</a>
       <a href="https://github.com/nplongx/runalith/tree/main/docs">Documentation</a>
       <a class="nav-github" href="https://github.com/nplongx/runalith">GitHub <span aria-hidden="true">↗</span></a>
@@ -73,6 +74,23 @@
       </div>
     </section>
 
+    <section class="agg-section" id="agg">
+      <div class="section-wrap agg-inner">
+        <div class="agg-intro">
+          <div class="eyebrow">ADAPTIVE GOAL GRAPH</div>
+          <h2>Explore pathways.<br><span>Keep authorization explicit.</span></h2>
+          <p>AGG combines bounded graph search with a persistent Goal/Idea knowledge graph and evidence-aware proposals. It is a planning and verification subsystem—not a second workflow engine or an unrestricted action executor.</p>
+          <a class="agg-link" href="https://github.com/nplongx/runalith/blob/main/docs/adaptive-goal-graph.md">Read the complete AGG system guide <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="agg-details">
+          <article><span>01</span><div><h3>Search and knowledge</h3><p>Validate graph structure, rank bounded candidate paths, and preserve node revisions, typed relations and provenance in local SQLite.</p></div></article>
+          <article><span>02</span><div><h3>Verify claims and evidence</h3><p>Bind an external verifier's signed decision to the exact snapshot and evidence manifest; recheck durable producer/result/attempt/completion lineage.</p></div></article>
+          <article><span>03</span><div><h3>Review before execution</h3><p>Map steps to existing workflow roles, check typed inputs and dependencies, verify the separate reviewer identity, then use normal preflight and approval.</p></div></article>
+        </div>
+        <div class="agg-status"><span class="status-dot status-warn"></span><p><strong>Testing-only boundary.</strong> RC.11 is not installed in the recorded target host. Production remains blocked on effective host trust, an independently protected external checkpoint, and owner/provider reconciliation of active jobs and tasks.</p><a href="https://github.com/nplongx/runalith/blob/main/docs/goal-plan-execution-acceptance-rc11-20261026.md">Current RC.11 acceptance status <span aria-hidden="true">→</span></a></div>
+      </div>
+    </section>
+
     <section class="process-section" id="how-it-works">
       <div class="section-wrap process-inner">
         <div class="eyebrow">A WORKFLOW, NOT A PROMPT CHAIN</div>
@@ -88,13 +106,13 @@
     </section>
 
     <section class="bundle-section section-wrap">
-      <div class="bundle-copy"><div class="eyebrow">BUILT FOR MCP</div><h2>Standard bundle.<br><span>Local-first runtime.</span></h2><p>The `.mcpb` file is a bundle container for compatible MCP clients. Runalith also supports direct stdio integration, so the package format and the client are separate choices.</p><div class="bundle-links"><a href="https://github.com/nplongx/runalith/blob/main/docs/quickstart.md">Connect a client <span aria-hidden="true">→</span></a><a href="https://github.com/nplongx/runalith/blob/main/docs/MCP_REFERENCE.md">Browse 46 MCP tools <span aria-hidden="true">→</span></a></div></div>
+      <div class="bundle-copy"><div class="eyebrow">BUILT FOR MCP</div><h2>Standard bundle.<br><span>Local-first runtime.</span></h2><p>The `.mcpb` file is a bundle container for compatible MCP clients. Runalith also supports direct stdio integration, so the package format and the client are separate choices.</p><div class="bundle-links"><a href="https://github.com/nplongx/runalith/blob/main/docs/quickstart.md">Connect a client <span aria-hidden="true">→</span></a><a href="https://github.com/nplongx/runalith/blob/main/docs/MCP_REFERENCE.md">Browse 74 MCP tool definitions <span aria-hidden="true">→</span></a></div></div>
       <div class="code-panel"><div class="code-top"><span><i></i><i></i><i></i></span><b>mcp server config</b><span class="code-file">JSON</span></div><pre><code><span class="code-punct">{</span>
   <span class="code-key">"mcpServers"</span><span class="code-punct">: {</span>
     <span class="code-key">"runalith"</span><span class="code-punct">: {</span>
       <span class="code-key">"command"</span><span class="code-punct">: </span><span class="code-string">"node"</span><span class="code-punct">,</span>
       <span class="code-key">"args"</span><span class="code-punct">: [</span>
-        <span class="code-string">"/path/to/runalith/server/index.js"</span>
+        <span class="code-string">"/path/to/runalith/server/index-v1.0.9-rc.11.js"</span>
       <span class="code-punct">],</span>
       <span class="code-key">"env"</span><span class="code-punct">: {</span>
         <span class="code-key">"RUNALITH_WORKSPACE"</span><span class="code-punct">: </span><span class="code-string">"/path/to/workspace"</span>

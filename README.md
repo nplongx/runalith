@@ -29,6 +29,7 @@ Runalith is a runtime, not a hosted model or remote execution service. Reasoning
 
 - [Why Runalith](#why-runalith)
 - [Capabilities](#capabilities)
+- [Adaptive Goal Graph (AGG)](#adaptive-goal-graph-agg)
 - [Workflow lifecycle](#workflow-lifecycle)
 - [Quick start](#quick-start)
 - [Connect an MCP client](#connect-an-mcp-client-directly)
@@ -52,8 +53,43 @@ Agent reasoning can be flexible; execution should still be reviewable. Runalith 
 
 - **Dependency-aware orchestration:** tasks become eligible only when planned dependencies and required evidence are satisfied.
 - **Reusable workflow policy:** versioned policy packs can pin supported constraints and success predicates before approval.
+- **Adaptive Goal Graph (AGG):** bounded graph search, append-only Goal/Idea knowledge, source/artifact evidence resolution, review-only Plan/Execution Graph proposals, and separate trust/approval gates. AGG does not bypass the standard workflow runtime.
 - **Local observability:** an optional loopback-only dashboard provides read-only inspection of workflow state.
 - **MCP-native integration:** connect compatible clients over stdio or install the `.mcpb` bundle in a client that supports it.
+
+## Adaptive Goal Graph (AGG)
+
+AGG is Runalith's graph-based planning and evidence subsystem. It is not a general-purpose autonomous agent, a hosted model, or an independent execution engine. It proposes and validates pathways, then hands any approved work to Runalith's existing workflow templates, immutable plans, task contracts, and lifecycle.
+
+```mermaid
+flowchart TD
+    In[Caller graph or persisted Goal/Idea knowledge] --> Search[Validate graph and run bounded search]
+    Search --> Candidate[Unverified candidate and Plan Graph draft]
+    Candidate --> Compat[Template compatibility and explicit step/task mapping]
+    Compat --> Readiness[Execution readiness: roles, DAG, typed evidence, lineage]
+    Readiness --> Proposal[Review-only Execution Graph proposal]
+    Proposal --> Intent[Typed action intent and input bindings]
+    Intent --> Reviewer[Independent reviewer identity attestation]
+    Reviewer --> Plan[Normal preflight and immutable workflow plan]
+    Plan --> Approval[Explicit workflow approval]
+    Approval --> Dispatch[Normal dispatch and task lifecycle]
+```
+
+Every stage can stop with an explicit blocker. A graph hash establishes content identity, not that a claim is true. A signed Goal/Idea snapshot verifies only the exact snapshot and the external verifier's adjudication; it does not by itself verify a proposed plan, authorize actions, approve a workflow, or permit dispatch. Plan Graph and Execution Graph records are review artifacts until the distinct downstream checks pass. The detailed [AGG system guide](docs/adaptive-goal-graph.md) documents the contracts and [MCP Reference](docs/MCP_REFERENCE.md) lists the exact tool schemas.
+
+### Main subsystems
+
+| Subsystem | Purpose and current boundary |
+|---|---|
+| Deterministic graph search (Phase 1) | Validates a caller-supplied schema-v1 graph, applies bounded beam search over nominal transitions, keeps an audit trace, and projects complete candidates into review-only Plan Graph drafts. Search is bounded/heuristic, not an optimality proof. |
+| Persistent Goal/Idea knowledge | Stores stable cross-goal nodes, immutable revisions, memberships, typed edges and provenance in SQLite. Save/capture operations do not mark claims verified or make them executable. |
+| Source/evidence verification | Resolves source-byte identity and durable artifact/result/attempt/completion lineage. Hashes and lineage do not alone establish claim truth or evidence independence. |
+| External trust | A verifier signs the exact snapshot/evidence-manifest decision; a separate reviewer identity provider attests an exact action candidate/plan binding. The two trust domains require different provider identities and disjoint Ed25519 roots. Human approval remains a separate step. |
+| Plan/Execution Graph integration | Checks mapping against existing workflow templates, typed role/artifact contracts, DAG ancestry and current evidence; may persist review-only proposals and candidates before the normal workflow compiler/preflight/approval path. Those records are not executable or authorized. It is not a standalone arbitrary-command executor. |
+| Shadow learning/reuse (Phases 2–4) | Learned-discriminator search, MCTS search and workflow-outcome capture are opt-in/experimental paths. The shadow searches do not authorize or execute; capture records bounded, unverified lessons/metadata. These are not production acceptance evidence. |
+| Observability | Planner invocation telemetry is recorded separately from graph/trust/acceptance semantics; the optional Dashboard reads telemetry/workflow state and does not make approval or execution decisions. |
+
+**Current operational status (2026-10-26): testing pre-release only; production rollout remains BLOCKED.** The RC.11 package is not installed in the recorded target host, which remains on RC.8. Host-owned verifier/reviewer trust configuration and the independently protected external checkpoint are not verified. A read-only reconciliation observed 60 `EXECUTING` jobs and 61 running tasks without lease rows; those records require per-owner/provider reconciliation. A missing lease does not prove a worker is dead. See [RC.11 acceptance](docs/goal-plan-execution-acceptance-rc11-20261026.md), [Known issues](docs/KNOWN_ISSUES.md), and [trust provisioning](docs/agg-production-trust-provisioning-runbook.md). The published pre-release is not a production certification.
 
 ## Workflow lifecycle
 
@@ -98,14 +134,14 @@ The packer creates a uniquely named candidate under `dist/`, validates the archi
 
 ### Connect an MCP client directly
 
-A client that supports stdio MCP can launch the source entrypoint directly. Configure its MCP server entry with the absolute path to `server/index.js`, for example:
+A client that supports stdio MCP can launch the versioned entrypoint named by this checkout's package metadata directly. For the RC.11 source in this repository, that is `server/index-v1.0.9-rc.11.js` (not the historical `server/index.js` compatibility input). Configure its MCP server entry with an absolute path, for example:
 
 ```json
 {
   "mcpServers": {
     "runalith": {
       "command": "node",
-      "args": ["/absolute/path/to/runalith/server/index.js"],
+      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.11.js"],
       "env": {
         "RUNALITH_DATA_DIR": "/absolute/path/to/private/runalith-data",
         "RUNALITH_WORKSPACE": "/absolute/path/to/workspace"
@@ -132,6 +168,9 @@ See the [documentation index](docs/README.md) for architecture, tool schemas, po
 | I want to… | Read |
 |---|---|
 | Build, connect and verify the MCP runtime | [Quickstart](docs/quickstart.md) |
+| Understand AGG from graph search through evidence and execution gates | [Adaptive Goal Graph system guide](docs/adaptive-goal-graph.md) |
+| Provision verifier/reviewer trust and understand blockers | [AGG trust provisioning runbook](docs/agg-production-trust-provisioning-runbook.md) and [RC.11 acceptance](docs/goal-plan-execution-acceptance-rc11-20261026.md) |
+| Understand AGG benchmark methodology and what has/has not been demonstrated | [AGG empirical evaluation](docs/research/agg-empirical-evaluation/README.md) and [Phase 1 benchmark methodology](docs/agg-phase1-benchmark-methodology.md) |
 | Understand approval, execution, recovery and synthesis | [Workflow lifecycle and recovery](docs/workflow-lifecycle.md) |
 | Understand runtime and trust boundaries | [Architecture](docs/architecture.md) |
 | Understand deterministic batch execution | [Durable batch execution](docs/batch-execution.md) |

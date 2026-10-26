@@ -59,6 +59,7 @@ Notable changes to this project are recorded here. This file summarizes reposito
 
 ## Unreleased
 
+- Expanded the public AGG documentation from a short capability mention into a system map spanning caller-graph search, persistent Goal/Idea knowledge, source/artifact lineage, external verifier and reviewer trust, Plan/Execution Graph proposals, action-intent semantics, workflow approval/dispatch boundaries, telemetry, algorithm-phase flags, runtime storage modules, and evaluation limits. Updated README, architecture, terminology, trust runbook, documentation index and GitHub Pages site; this is a documentation-only follow-up and does not change the published RC.11 package.
 - Hardened workflow recovery and diagnosis: revision guidance now matches the reviewer-revision eligibility guard, and the supported rework path preserves immutable plan/approval gates while invalidating superseded active evidence.
 - Expanded documentation link validation to cover full, collapsed, and shortcut reference-style Markdown links; added an opt-in external HTTP(S) link check while keeping default documentation checks offline.
 - Added regression coverage for specialist role/tool guidance and reference-style Markdown link parsing, and documented safe workflow recovery, current installed-runtime verification limits, and the remaining release blockers.

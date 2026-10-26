@@ -30,7 +30,12 @@ This index is the starting point for users, operators, and contributors. Visit t
 ## Understanding the implementation
 
 - [Architecture](architecture.md) — runtime components, durable state, execution, and recovery boundaries.
-- [Adaptive Goal Graph](adaptive-goal-graph.md) — Goal/Idea snapshot attestation, administrator-managed verifier/reviewer trust roots and rotation, evidence lineage, Plan/Execution Graph gating, bounded search, and review-only learning/shadow paths.
+- [Adaptive Goal Graph system guide](adaptive-goal-graph.md) — current AGG architecture end-to-end: bounded graph search, persistent Goal/Idea knowledge, evidence lineage, independent verifier/reviewer trust, Plan/Execution Graph integration, telemetry, experiments and hard execution boundaries.
+- [AGG production trust provisioning runbook](agg-production-trust-provisioning-runbook.md) — administrator-owned public roots, JSON configuration, independent providers, rotation/revocation and the missing external monotonic checkpoint gate.
+- [RC.11 Goal/Idea → Plan → Execution acceptance](goal-plan-execution-acceptance-rc11-20261026.md) — published candidate identity and current read-only host blockers; does not authorize installation/activation.
+- [RC.11 workflow recovery guidance](goal-plan-execution-recovery-guidance-rc11-followup.md) — per-job/task read-only reconciliation and owner/provider-authorized recovery procedure.
+- [AGG Phase 1 benchmark methodology](agg-phase1-benchmark-methodology.md) and [owner next steps (Vietnamese)](agg-phase1-owner-next-steps-vi.md) — benchmark evidence protocol, unclosed acceptance requirements and operator handoff.
+- [AGG empirical evaluation](research/agg-empirical-evaluation/README.md) — reproducible research artifacts, measured results, sample/corpus limits and claims not supported by current data.
 - [Architecture illustrations](diagrams/README.md) — GitHub-rendered static PNGs that supplement the written explanation.
 - [Release policy](RELEASE_POLICY.md) — minimum checks for experimental GitHub pre-releases versus formal frozen/production releases.
 - [Known issues and release blockers](KNOWN_ISSUES.md) — current limits and outstanding gates; this is not a general feature roadmap.
