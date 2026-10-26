@@ -4,6 +4,17 @@
 
 This release consolidates the Goal/Idea Graph → Plan Graph → Execution Graph implementation and workflow reliability hardening. It is intended for controlled testing and review, not unattended production activation.
 
+## Published artifact identity
+
+- GitHub release: [Runalith 1.0.9-rc.11 (Testing Pre-release)](https://github.com/nplongx/runalith/releases/tag/v1.0.9-rc.11), published 2026-10-26.
+- Tag: `v1.0.9-rc.11`.
+- Source commit: `ffee0815b8dfcac21d15d8eaeaf1d309aab2b7e2` (`feat: harden adaptive goal graph and workflow reliability`).
+- Asset: [`runalith-1.0.9-rc.11-goal-idea-authenticated-projection-v22.mcpb`](https://github.com/nplongx/runalith/releases/download/v1.0.9-rc.11/runalith-1.0.9-rc.11-goal-idea-authenticated-projection-v22.mcpb), 807,458 bytes.
+- SHA-256: `37c1d418f743190e1d1843995346c9e3296dafd29e47de1e42afb47b6f2870fd`.
+- Archive: 93 entries; manifest/runtime tool count: 74.
+
+The tag resolves to the recorded source commit, and the release asset digest was verified against the published asset metadata. The package was **not** installed or activated in the target host as part of publication. See the [RC.11 acceptance record](goal-plan-execution-acceptance-rc11-20261026.md) for scope and observed blockers.
+
 ## Highlights
 
 - Adds typed Goal/Idea snapshot verification and authenticated verifier-report provenance, exact graph/evidence binding, and fail-closed proposal reconstruction.
@@ -16,7 +27,7 @@ This release consolidates the Goal/Idea Graph → Plan Graph → Execution Graph
 
 ## Validation
 
-The recorded offline acceptance run passed the full `npm test` suite, package reproducibility, MCP fast test, archive integrity, source-to-bundle alignment, documentation/link checks, `git diff --check`, and historical checksum verification. The candidate archive SHA-256 is:
+The release-time offline acceptance run passed the full `npm test` suite, package reproducibility, MCP fast test, archive integrity, source-to-bundle alignment, documentation/link checks, `git diff --check`, and historical checksum verification. The release-time documentation check covered 87 Markdown files and 273 local links. The candidate archive SHA-256 is:
 
 `37c1d418f743190e1d1843995346c9e3296dafd29e47de1e42afb47b6f2870fd`
 

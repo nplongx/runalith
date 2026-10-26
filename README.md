@@ -19,7 +19,7 @@
 </p>
 
 > [!WARNING]
-> **Testing pre-release — not production-certified.** The strict Phase 2 readiness gate remains `BLOCKED_NOT_READY` (`execution_permitted=false`). Read the [latest release notes](https://github.com/nplongx/runalith/releases/tag/v1.0.9-rc.5) and [release policy](docs/RELEASE_POLICY.md) before evaluating or installing a candidate.
+> **Testing pre-release — not production-certified.** The strict Phase 2 readiness gate remains `BLOCKED_NOT_READY` (`execution_permitted=false`). Read the [latest RC.11 release notes](https://github.com/nplongx/runalith/releases/tag/v1.0.9-rc.11), the [RC.11 acceptance record](docs/goal-plan-execution-acceptance-rc11-20261026.md), and the [release policy](docs/RELEASE_POLICY.md) before evaluating or installing a candidate.
 
 Runalith turns multi-step agent work into an explicit, inspectable workflow: approved immutable plans, dependency-aware tasks, typed evidence, durable SQLite state, bounded local execution, and recovery records.
 

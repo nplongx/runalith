@@ -6,12 +6,15 @@ This index is the starting point for users, operators, and contributors. Visit t
 
 - [Quickstart](quickstart.md) — build or connect the local MCP runtime and understand the first workflow steps.
 - [Root README](../README.md) — project purpose, capabilities, security boundaries, commands, and navigation.
-- [Testing pre-release notes for 1.0.9-rc.5](release-notes-1.0.9-rc.5.md) — Runalith package identity, compatibility and testing boundaries.
+- [Testing pre-release notes for 1.0.9-rc.11](release-notes-1.0.9-rc.11.md) — published package identity, validation scope, production blockers and the no-install boundary for the current candidate.
+- [RC.11 Goal/Idea → Plan → Execution Graph acceptance (2026-10-26)](goal-plan-execution-acceptance-rc11-20261026.md) — exact tag/source/package identity, release-time verification, current host observations and authority-owned blockers.
+- [RC.11 workflow recovery guidance](goal-plan-execution-recovery-guidance-rc11-followup.md) — read-only reconciliation procedure and safe owner/provider recovery boundary.
+- [Historical RC.5 testing pre-release notes](release-notes-1.0.9-rc.5.md) — older package identity and testing boundaries; not the current release.
 - [Local RC.5 installation verification (2026-10-20)](installation-verification-1.0.9-rc.5-20261020.md) — evidence for a separate workspace-built candidate and installed file-content comparison; not the published release asset or release approval.
 - [RC.7 rollout readiness and rollback runbook](runalith-rollout-rc7.md) — versioned runtime identity, non-mutating preflight, installed-generation rollback snapshots, simulated switch/recovery, and explicit host-managed activation gates.
 - [RC.7 rollout-readiness evidence (2026-10-26)](rollout-readiness-1.0.9-rc.7-20261026.md) — candidate/rollback hashes, current host gate, live workflow counters, and exact missing evidence contracts for all nine Plan Graph steps.
-- [RC.8 rollout readiness and rollback runbook](runalith-rollout-rc8.md) — signed Goal/Idea snapshot verification, Plan/Execution Graph authorization gates, package parity, and non-mutating host preflight.
-- [RC.8 rollout-readiness evidence (2026-10-26)](rollout-readiness-1.0.9-rc.8-20261026.md) — historical and latest hardened candidate identities, JSON trust onboarding/rotation tests, isolated entrypoint acceptance, current read-only live blockers, and next safe step.
+- [RC.8 rollout readiness and rollback runbook](runalith-rollout-rc8.md) — historical RC.8 candidate-specific procedure; not activation approval for RC.11.
+- [RC.8 rollout-readiness evidence (2026-10-26)](rollout-readiness-1.0.9-rc.8-20261026.md) — historical candidate identities and scoped acceptance evidence; consult the RC.11 acceptance record for current package identity and blockers.
 
 ## Using the runtime
 
@@ -64,7 +67,7 @@ The remaining milestone (`m*`), phase (`p*`), proposal, implementation-plan, ben
 | Distributed provider integration | [GitHub Actions distributed-worker plan](github-actions-distributed-worker-implementation-plan.md), [GitHub Actions/OpenClaw contract matrix](github-actions-openclaw-contract-matrix.md) | The contract matrix explicitly records missing/unproven native Gateway requirements; do not infer a native provider from the presence of an adapter. |
 | Workflow benchmark | [Benchmark plan](plugin-workflow-benchmark-plan.md), [tracked benchmark repository README](../benchmarks/plugin-workflow-benchmark/README.md), [paired-host harness contract](../benchmarks/plugin-workflow-benchmark/paired-host-harness-contract.md) | Keep benchmark identity and authorization separate from general test results. Local, ignored phase-freeze/preflight copies are not links for GitHub readers. Consult [known issues](KNOWN_ISSUES.md) for current release blockers. |
 
-Use the [release policy](RELEASE_POLICY.md) to distinguish testing pre-releases from the production/frozen-release lane, [known issues](KNOWN_ISSUES.md) for current limitations, the [`1.0.9-rc.4` candidate record](review-candidate-1.0.9-rc.4.md) for historical RC.4 artifact evidence, and the [local RC.5 installation verification](installation-verification-1.0.9-rc.5-20261020.md) for the separately built local candidate. A testing pre-release or successful post-install smoke check does not satisfy or override formal production release gates.
+Use the [release policy](RELEASE_POLICY.md) to distinguish testing pre-releases from the production/frozen-release lane, [known issues](KNOWN_ISSUES.md) and the [RC.11 acceptance record](goal-plan-execution-acceptance-rc11-20261026.md) for current limitations, the [`1.0.9-rc.4` candidate record](review-candidate-1.0.9-rc.4.md) for historical RC.4 artifact evidence, and the [local RC.5 installation verification](installation-verification-1.0.9-rc.5-20261020.md) for that separately built local candidate. A testing pre-release or successful post-install smoke check does not satisfy or override formal production release gates.
 
 ## Where facts come from
 

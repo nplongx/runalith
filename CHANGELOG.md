@@ -2,6 +2,15 @@
 
 Notable changes to this project are recorded here. This file summarizes repository changes and is not a release certification.
 
+# 1.0.9-rc.11 — 2026-10-26 (testing-only pre-release)
+
+- Published the Goal/Idea Graph → Plan Graph → Execution Graph candidate with typed snapshot verification, authenticated verifier provenance, exact graph/evidence binding, fail-closed proposal reconstruction and reviewer identity/trust boundaries.
+- Added adversarial signature/scope, replay/staleness, provenance mutation, trust-root separation, rotation/revocation and anti-rollback coverage.
+- Added the Ed25519 external checkpoint-response protocol verifier and explicitly kept production authority blocked until a host-owned authenticated adapter and independently protected monotonic store are provisioned.
+- Added read-only per-job/task reconciliation across events, attempts, results, artifacts, leases and execution metadata. Missing leases/owner/provider identity do not authorize lifecycle actions.
+- Published tag `v1.0.9-rc.11` from commit `ffee0815b8dfcac21d15d8eaeaf1d309aab2b7e2`; asset SHA-256 `37c1d418f743190e1d1843995346c9e3296dafd29e47de1e42afb47b6f2870fd` (807,458 bytes). Full `npm test`, reproducibility, package/archive checks, source alignment, documentation checks and historical checksum verification passed for the release snapshot.
+- **Testing only; not production-certified.** The target host was not updated. Trust configuration, external checkpoint authority, and reconciliation of 60 executing jobs / 61 running tasks remain blocked. See [RC.11 release notes](docs/release-notes-1.0.9-rc.11.md), [acceptance record](docs/goal-plan-execution-acceptance-rc11-20261026.md), and [known issues](docs/KNOWN_ISSUES.md).
+
 # 1.0.9-rc.5 — 2026-10-19 (testing-only pre-release)
 
 - Rebranded the product, MCP server identity, package metadata and developer-facing command names to Runalith; repository renamed to `nplongx/runalith`.

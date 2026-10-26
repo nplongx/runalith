@@ -29,14 +29,14 @@ The packer creates a uniquely named `.mcpb` under `dist/`, validates the archive
 
 ## 3. Connect over stdio
 
-For clients that launch an MCP stdio server directly, configure the server with the absolute path to the **versioned runtime entry point selected by the checked-out package metadata**. For the current RC.8 source this is `server/index-v1.0.9-rc.8.js`; `server/index.js` remains a historical, hash-pinned compatibility input. Example configuration (adapt the outer shape to your client):
+For clients that launch an MCP stdio server directly, configure the server with the absolute path to the **versioned runtime entry point selected by the checked-out package metadata**. For the current RC.11 source this is `server/index-v1.0.9-rc.11.js`; `server/index.js` remains a historical, hash-pinned compatibility input. Example configuration (adapt the outer shape to your client):
 
 ```json
 {
   "mcpServers": {
     "runalith": {
       "command": "node",
-      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.8.js"],
+      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.11.js"],
       "env": {
         "RUNALITH_DATA_DIR": "/absolute/path/to/private/runalith-data",
         "RUNALITH_WORKSPACE": "/absolute/path/to/workspace"
@@ -90,4 +90,4 @@ Building or installing a candidate is not release approval. Follow the release p
 
 ### Local Chat On Steroids plugin upgrade
 
-Do not replace the live generation directory or kill its child process manually. Use the [RC.8 rollout readiness and rollback runbook](runalith-rollout-rc7.md): build and pin the exact MCPB, capture a tested rollback content snapshot, run the read-only host/database preflight, exercise the isolated switch/rollback simulation, and install only via the host's plugin UI after the running jobs/tasks/leases have drained. The repository deliberately has no live install/restart command.
+Do not replace the live generation directory or kill its child process manually. Treat the [RC.8 rollout runbook](runalith-rollout-rc8.md) as historical candidate-specific procedure, not current RC.11 approval. Before any activation, review the [RC.11 acceptance record](goal-plan-execution-acceptance-rc11-20261026.md), perform the read-only host/database preflight, and resolve its host-trust and per-workflow blockers with the responsible authorities. In particular, do not install while the rollout gate is `BLOCKED`, trust/checkpoint authority is unverified, or active jobs/tasks remain unreconciled. The repository deliberately has no live install/restart command.
