@@ -27,7 +27,7 @@ try {
   assert.deepEqual(Object.keys(packageMetadata).sort(),
     ['description', 'engines', 'main', 'name', 'scripts', 'type', 'version'].sort(),
     'local-only package metadata must contain only the explicitly reviewed runtime fields');
-  assert.equal(packageMetadata.main, 'server/index.js', 'packaged Node entry point must match the manifest');
+  assert.equal(packageMetadata.main, manifest.server?.entry_point, 'packaged Node entry point must match the manifest');
   assert.equal(packageMetadata.type, 'module');
   assert.equal(packageMetadata.version, manifest.version, 'packaged package.json version must match the MCP manifest');
   assert.equal(packageMetadata.engines?.node, '>=22.13.0', 'packaged runtime must declare its actual built-in node:sqlite requirement');
@@ -41,26 +41,32 @@ try {
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: {
       protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'phase2-schema-contract', version: '1' }
     } },
-    { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }
+    { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'adaptive_goal_trust_configuration_status', arguments: {} } }
   ].map(value => JSON.stringify(value)).join('\n') + '\n';
-  const runtime = spawnSync(process.execPath, [path.join(extracted, 'server/index.js')], {
+  const smokeEnv = {
+    ...process.env,
+    OPENAI_API_KEY: '',
+    CHAT_ON_STERIODS_DATA_DIR: path.join(temp, 'data'),
+    CHAT_ON_STERIODS_WORKSPACE: extracted,
+    WORKFLOW_DATA_DIR: path.join(temp, 'data'),
+    WORKFLOW_DB: path.join(temp, 'data', 'workflow.db')
+  };
+  for (const key of [
+    'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
+    'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM', 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON',
+    'AGG_REVIEW_IDENTITY_PROVIDER_ID', 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM'
+  ]) delete smokeEnv[key];
+  const runtime = spawnSync(process.execPath, [path.join(extracted, manifest.server.entry_point)], {
     cwd: extracted,
     input: request,
     encoding: 'utf8',
     timeout: 30_000,
-    env: {
-      ...process.env,
-      OPENAI_API_KEY: '',
-      CHAT_ON_STERIODS_DATA_DIR: path.join(temp, 'data'),
-      CHAT_ON_STERIODS_WORKSPACE: extracted,
-      CHAT_ON_STERIODS_DATA_DIR: path.join(temp, 'data'),
-      WORKFLOW_DATA_DIR: path.join(temp, 'data'),
-      WORKFLOW_DB: path.join(temp, 'data', 'workflow.db')
-    }
+    env: smokeEnv
   });
   assert.equal(runtime.status, 0, `extracted MCP runtime failed: ${runtime.stderr}\n${runtime.stdout}`);
   const lines = runtime.stdout.trim().split(/\r?\n/).map((line, index) => JSON.parse(line, (key, value) => value));
-  assert.equal(lines.length, 2, 'extracted MCP runtime must answer initialize and tools/list exactly once');
+  assert.equal(lines.length, 3, 'extracted MCP runtime must answer initialize, tools/list and trust configuration diagnostics exactly once');
   assert.equal(lines[0].id, 1);
   assert.equal(lines[0].result?.serverInfo?.name, manifest.name);
   assert.equal(lines[0].result?.serverInfo?.version, manifest.version,
@@ -71,6 +77,14 @@ try {
   assert.equal(tools.length, manifest.tools.length, 'runtime exposure count must match manifest declarations');
   assert.deepEqual(tools.map(tool => tool.name).sort(), manifest.tools.map(tool => tool.name).sort(),
     'runtime tool names must exactly match package manifest names');
+  assert.equal(lines[2].id, 3);
+  assert.equal(lines[2].result?.isError, false, 'trust configuration status must be a read-only diagnostic and not a protocol error');
+  const trustStatus = lines[2].result?.structuredContent ?? JSON.parse(lines[2].result?.content?.find(item => item.type === 'text')?.text || '{}');
+  assert.equal(trustStatus.status, 'blocked', 'missing production trust roots must remain visibly blocked in the exact extracted runtime');
+  assert.equal(trustStatus.domains?.goal_idea_verifier?.available, false);
+  assert.equal(trustStatus.domains?.action_intent_reviewer?.available, false);
+  assert.doesNotMatch(JSON.stringify(trustStatus), /BEGIN PRIVATE KEY|PRIVATE KEY-----/,
+    'trust diagnostics must never reveal private key material');
 
   for (const tool of tools) {
     assert.equal(typeof tool.name, 'string');
@@ -106,6 +120,7 @@ try {
     assert.deepEqual([...(schemaFor(name).required || [])].sort(), [...required].sort(),
       `${name}: required input contract must not be weakened`);
   };
+  assertRequired('adaptive_goal_trust_configuration_status', []);
   const workflowCreate = schemaFor('workflow_create');
   assertRequired('workflow_create', ['title', 'task']);
   assert.equal(workflowCreate.properties.title.type, 'string');

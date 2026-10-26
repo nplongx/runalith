@@ -7,10 +7,24 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { roleProfileHash } from '../src/runtime/workflow/role-profiles.js';
-import { resolveTaskBatchRoute, validateExecutionPlan } from '../src/runtime/workflow/plan.js';
+import { canonicalJson, resolveTaskBatchRoute, validateExecutionPlan } from '../src/runtime/workflow/plan.js';
 import { standardEngineeringValidationTaskSpecs } from '../src/runtime/workflow/catalog/standard-engineering.js';
+import { getAgentContract } from '../src/runtime/workflow/agent-contracts.js';
+import { canonicalAdaptiveGoalActionIntentDescription, getAdaptiveGoalActionIntentSemanticPolicy } from '../src/runtime/adaptive-goal-action-intent-policy.js';
+import { ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE } from '../src/runtime/adaptive-goal-reviewer-identity.js';
+import { ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_SCOPE } from '../src/runtime/adaptive-goal-knowledge-verifier.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtimeManifestPath = ['plugin/manifest.json', 'manifest.json']
+  .map(relative => path.join(root, relative)).find(candidate => fs.existsSync(candidate));
+if (!runtimeManifestPath) throw new Error('runtime manifest is missing');
+const runtimeManifest = JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8'));
+const runtimeEntryPoint = runtimeManifest.server?.entry_point;
+if (typeof runtimeEntryPoint !== 'string' || !runtimeEntryPoint || path.isAbsolute(runtimeEntryPoint) ||
+    runtimeEntryPoint.split(/[\\/]/).some(part => !part || part === '.' || part === '..')) {
+  throw new Error('runtime manifest entry point is unsafe or missing');
+}
+const runtimePath = path.join(root, runtimeEntryPoint);
 
 const expectedDefaultValidationTests = [
   ['standard-batch-test-execution-batch', 'tests/test-execution-batch.js'],
@@ -47,18 +61,78 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cos-local-plugin-'));
 // SQLite recovery transactions. Keep the protocol harness deadline bounded,
 // but avoid false failures when the local host is loaded by independent package
 // reproducibility builds that execute this same extracted test concurrently.
-const RPC_TIMEOUT_MS = 120_000;
+// A single workflow_next_task can legitimately wait for an immutable batch of
+// deterministic validation tasks, each individually bounded at 300 seconds.
+// Keep the RPC deadline finite but longer than that execution contract; 120s
+// incorrectly timed out valid six-task validation batches on loaded hosts.
+const RPC_TIMEOUT_MS = 360_000;
 const dataDir = path.join(temp, 'private-data');
 const workspace = path.join(temp, 'workspace');
 const case01AckBarrierDir = path.join(dataDir, 'case01-ack-lineage-barriers');
+const aggReviewerTestKeyPair = crypto.generateKeyPairSync('ed25519');
+const aggReviewerTestPublicKeyPem = aggReviewerTestKeyPair.publicKey.export({ type: 'spki', format: 'pem' });
+const aggReviewerTestProviderId = 'isolated-test-reviewer-provider';
+const aggKnowledgeTestKeyPair = crypto.generateKeyPairSync('ed25519');
+const aggKnowledgeTestPublicKeyPem = aggKnowledgeTestKeyPair.publicKey.export({ type: 'spki', format: 'pem' });
+const aggKnowledgeTestProviderId = 'isolated-test-goal-idea-verifier';
 fs.mkdirSync(workspace, { recursive: true });
 fs.mkdirSync(case01AckBarrierDir, { recursive: true, mode: 0o700 });
 const env = { ...process.env, NODE_ENV: 'test', CHAT_ON_STEROIDS_DATA_DIR: dataDir, CHAT_ON_STEROIDS_WORKSPACE: workspace,
   CHAT_ON_STEROIDS_WORKFLOW_DB: path.join(dataDir, 'workflow.db'), WORKFLOW_DB: path.join(dataDir, 'workflow.db'),
   CHAT_ON_STEROIDS_EXECUTION_TMP_DIR: path.join(dataDir, 'runtime'),
+  AGG_SANDBOX_EXECUTOR_MODE: 'fixture',
+  AGG_SANDBOX_ROOT: path.join(dataDir, 'agg-sandbox'),
+  AGG_SANDBOX_TEST_FAILPOINT: 'after-task-completion-before-completed-event',
   CHAT_ON_STEROIDS_TEST_CASE01_ACK_LINEAGE_BARRIER_DIR: case01AckBarrierDir,
-  CHAT_ON_STEROIDS_TEST_RPC_QUEUE_DELAY_ID: 'queue-cap-blocker' };
+  CHAT_ON_STEROIDS_TEST_RPC_QUEUE_DELAY_ID: 'queue-cap-blocker',
+  AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID: aggKnowledgeTestProviderId,
+  AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM: aggKnowledgeTestPublicKeyPem,
+  AGG_REVIEW_IDENTITY_PROVIDER_ID: aggReviewerTestProviderId,
+  AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM: aggReviewerTestPublicKeyPem };
 delete env.OPENAI_API_KEY;
+
+function signedAggReviewerAttestation(candidate, jobId, signingKey = aggReviewerTestKeyPair.privateKey) {
+  const unsigned = {
+    schema_version: 1,
+    kind: 'adaptive_goal_verified_reviewer_attestation',
+    provider_id: aggReviewerTestProviderId,
+    trust_root_sha256: crypto.createHash('sha256').update(aggReviewerTestPublicKeyPem).digest('hex'),
+    nonce: crypto.randomUUID(),
+    issued_at: new Date(Date.now() - 1000).toISOString(),
+    expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+    reviewer_subject: candidate.reviewedTaskInputs.review.reviewerId,
+    scope: ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE,
+    decision: 'reviewed_for_candidate_only',
+    candidate: {
+      wrapper_job_id: jobId,
+      candidate_id: candidate.candidateId,
+      candidate_fingerprint: candidate.fingerprint,
+      candidate_hash: candidate.candidateHash,
+      immutable_plan_hash: candidate.executionPlan.plan_hash,
+      reviewed_action_intent_hash: candidate.hashes.reviewedActionIntentHash,
+      reviewed_task_input_contract_hash: candidate.hashes.reviewedTaskInputContractHash,
+      semantic_policy_version: candidate.hashes.semanticPolicyVersion,
+      semantic_verification_hash: candidate.hashes.semanticVerificationHash,
+      role_contract_hash: candidate.hashes.roleContractHash
+    },
+    signature_algorithm: 'Ed25519'
+  };
+  return {
+    ...unsigned,
+    signature: crypto.sign(null, Buffer.from(canonicalJson(unsigned), 'utf8'), signingKey).toString('base64')
+  };
+}
+
+function persistAggReviewerAttestation(jobId, candidate, attestation) {
+  const database = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  const eventId = crypto.createHash('sha256')
+    .update(`${jobId}|${ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT}|${candidate.fingerprint}`)
+    .digest('hex');
+  database.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)')
+    .run(eventId, jobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, JSON.stringify(attestation), new Date().toISOString());
+  database.close();
+  return eventId;
+}
 
 // On POSIX, a host path such as /proc cannot be chmod'ed private. The plugin
 // must reject it before attempting to create/open SQLite rather than silently
@@ -75,7 +149,7 @@ if (process.platform === 'linux') {
   fs.chmodSync(privateDbData, 0o700);
   fs.chmodSync(publicDbParent, 0o777);
   try {
-    const publicDbProbe = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+    const publicDbProbe = spawnSync(process.execPath, [runtimePath], {
       cwd: root, encoding: 'utf8', timeout: 5000,
       input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'public-db-path-probe', version: '1' } } })}\n`,
       env: { ...env, CHAT_ON_STEROIDS_DATA_DIR: privateDbData, WORKFLOW_DATA_DIR: privateDbData,
@@ -93,7 +167,7 @@ if (process.platform === 'linux') {
     fs.mkdirSync(nestedPrivateParent, { mode: 0o700 });
     fs.chmodSync(nestedPrivateParent, 0o700);
     const replaceableAncestorDbPath = path.join(nestedPrivateParent, 'workflow.db');
-    const ancestorProbe = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+    const ancestorProbe = spawnSync(process.execPath, [runtimePath], {
       cwd: root, encoding: 'utf8', timeout: 5000,
       input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'writable-ancestor-db-probe', version: '1' } } })}\n`,
       env: { ...env, CHAT_ON_STEROIDS_DATA_DIR: privateDbData, WORKFLOW_DATA_DIR: privateDbData,
@@ -110,7 +184,7 @@ if (process.platform === 'linux') {
     existingReadableDb.exec('CREATE TABLE preserved(value TEXT NOT NULL); INSERT INTO preserved VALUES (\'preserved\');');
     existingReadableDb.close();
     fs.chmodSync(existingReadableDbPath, 0o644);
-    const existingDbProbe = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+    const existingDbProbe = spawnSync(process.execPath, [runtimePath], {
       cwd: root, encoding: 'utf8', timeout: 10000,
       input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'existing-readable-db-probe', version: '1' } } })}\n`,
       env: { ...env, CHAT_ON_STEROIDS_DATA_DIR: privateDbData, WORKFLOW_DATA_DIR: privateDbData,
@@ -128,7 +202,7 @@ if (process.platform === 'linux') {
     const externalDbBefore = crypto.createHash('sha256').update(fs.readFileSync(externalDbPath)).digest('hex');
     const linkedDbPath = path.join(privateDbData, 'linked-workflow.db');
     fs.symlinkSync(externalDbPath, linkedDbPath);
-    const linkProbe = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+    const linkProbe = spawnSync(process.execPath, [runtimePath], {
       cwd: root, encoding: 'utf8', timeout: 5000,
       input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'symlink-db-path-probe', version: '1' } } })}\n`,
       env: { ...env, CHAT_ON_STEROIDS_DATA_DIR: privateDbData, WORKFLOW_DATA_DIR: privateDbData,
@@ -142,7 +216,7 @@ if (process.platform === 'linux') {
 
     const hardLinkedDbPath = path.join(privateDbData, 'hardlinked-workflow.db');
     fs.linkSync(externalDbPath, hardLinkedDbPath);
-    const hardLinkProbe = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+    const hardLinkProbe = spawnSync(process.execPath, [runtimePath], {
       cwd: root, encoding: 'utf8', timeout: 5000,
       input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'hardlink-db-path-probe', version: '1' } } })}\n`,
       env: { ...env, CHAT_ON_STEROIDS_DATA_DIR: privateDbData, WORKFLOW_DATA_DIR: privateDbData,
@@ -155,7 +229,7 @@ if (process.platform === 'linux') {
       'SQLite must not modify a database inode rejected for external hard links');
 
     const privateDbPath = path.join(privateDbData, 'private-workflow.db');
-    const privateDbProbe = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+    const privateDbProbe = spawnSync(process.execPath, [runtimePath], {
       cwd: root, encoding: 'utf8', timeout: 10000,
       input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'private-db-path-probe', version: '1' } } })}\n`,
       env: { ...env, CHAT_ON_STEROIDS_DATA_DIR: privateDbData, WORKFLOW_DATA_DIR: privateDbData,
@@ -170,7 +244,7 @@ if (process.platform === 'linux') {
     fs.rmSync(publicDbParent, { recursive: true, force: true });
   }
 
-  const insecureStorage = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+  const insecureStorage = spawnSync(process.execPath, [runtimePath], {
     cwd: root, encoding: 'utf8', timeout: 5000,
     env: { ...env, CHAT_ON_STEROIDS_DATA_DIR: '/proc', CHAT_ON_STEROIDS_WORKSPACE: workspace,
       CHAT_ON_STEROIDS_EXECUTION_TMP_DIR: path.join(dataDir, 'insecure-storage-probe-runtime') }
@@ -185,7 +259,7 @@ if (process.platform === 'linux') {
 // and continue serving state-changing calls from an unknown SQLite/runtime state.
 for (const eventName of ['uncaughtException', 'unhandledRejection']) {
   const fatalDataDir = path.join(temp, `fatal-${eventName}`);
-  const injected = `await import(${JSON.stringify(pathToFileURL(path.join(root, 'server/index.js')).href)});` +
+  const injected = `await import(${JSON.stringify(pathToFileURL(runtimePath).href)});` +
     `setImmediate(() => process.emit(${JSON.stringify(eventName)}, new Error('injected-fatal-runtime-failure'), Promise.resolve()));`;
   const fatal = spawnSync(process.execPath, ['--input-type=module', '-e', injected], {
     cwd: root, encoding: 'utf8', timeout: 5000,
@@ -198,29 +272,34 @@ for (const eventName of ['uncaughtException', 'unhandledRejection']) {
     `${eventName} must log the fatal cause before fail-stop`);
 }
 
-const child = spawn(process.execPath, [path.join(root, 'server/index.js')], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] });
+let child;
 let stdout = '';
 let stderr = '';
-let buffer = '';
 const pending = new Map();
 let nextId = 1;
-child.stdout.setEncoding('utf8');
-child.stderr.setEncoding('utf8');
-child.stdout.on('data', chunk => {
-  stdout += chunk;
-  buffer += chunk;
-  let index;
-  while ((index = buffer.indexOf('\n')) >= 0) {
-    const line = buffer.slice(0, index).trim();
-    buffer = buffer.slice(index + 1);
-    if (!line) continue;
-    let response;
-    try { response = JSON.parse(line); } catch { continue; }
-    const waiter = pending.get(response.id);
-    if (waiter) { pending.delete(response.id); waiter(response); }
-  }
-});
-child.stderr.on('data', chunk => { stderr += chunk; });
+function startMcpServer() {
+  const server = spawn(process.execPath, [runtimePath], { cwd: root, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  let buffer = '';
+  server.stdout.setEncoding('utf8');
+  server.stderr.setEncoding('utf8');
+  server.stdout.on('data', chunk => {
+    stdout += chunk;
+    buffer += chunk;
+    let index;
+    while ((index = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, index).trim();
+      buffer = buffer.slice(index + 1);
+      if (!line) continue;
+      let response;
+      try { response = JSON.parse(line); } catch { continue; }
+      const waiter = pending.get(response.id);
+      if (waiter) { pending.delete(response.id); waiter(response); }
+    }
+  });
+  server.stderr.on('data', chunk => { stderr += chunk; });
+  return server;
+}
+child = startMcpServer();
 
 function rpc(method, params = {}) {
   const id = nextId++;
@@ -281,6 +360,1536 @@ assert.match(unknownToolField.result?.content?.[0]?.text || '', /not allowed/);
 const exposedToolSchemas = await rpc('tools/list', {});
 assert.ok(exposedToolSchemas.result.tools.every(tool => tool.inputSchema?.type !== 'object' || tool.inputSchema.additionalProperties === false),
   'all public object tool schemas must publish the same closed top-level boundary enforced by the runtime');
+const aggToolSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_graph_search');
+assert.ok(aggToolSchema, 'the MCP entrypoint must expose the read-only AGG shadow planner');
+assert.equal(aggToolSchema.inputSchema.additionalProperties, false);
+const aggGraphSchema = aggToolSchema.inputSchema.properties.graph;
+assert.equal(aggGraphSchema.additionalProperties, false, 'AGG graph schema must reject unknown graph fields');
+assert.deepEqual(aggGraphSchema.required, ['schemaVersion', 'startNodeId', 'goalNodeId', 'nodes', 'edges']);
+assert.equal(aggGraphSchema.properties.nodes.maxItems, 500);
+assert.equal(aggGraphSchema.properties.edges.maxItems, 2000);
+assert.equal(aggGraphSchema.properties.nodes.items.additionalProperties, false, 'AGG node schema must be closed');
+assert.equal(aggGraphSchema.properties.edges.items.additionalProperties, false, 'AGG edge schema must be closed');
+assert.equal(aggToolSchema.inputSchema.properties.options.additionalProperties, false, 'AGG search options must be closed');
+  for (const name of [
+    'adaptive_goal_recovery_resolve', 'adaptive_goal_knowledge_node_save', 'adaptive_goal_knowledge_edge_add',
+    'adaptive_goal_knowledge_search', 'adaptive_goal_knowledge_node_get', 'adaptive_goal_knowledge_node_history',
+  'adaptive_goal_knowledge_recovery_resolve', 'adaptive_goal_knowledge_snapshot_get',
+  'adaptive_goal_knowledge_snapshot_attest', 'adaptive_goal_knowledge_graph_search'
+  ]) assert.ok(exposedToolSchemas.result.tools.some(item => item.name === name), `missing integrated AGG knowledge/recovery tool ${name}`);
+const aggCompatibilitySchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_plan_compatibility_check');
+assert.ok(aggCompatibilitySchema, 'the MCP entrypoint must expose the read-only workflow compatibility checker');
+assert.equal(aggCompatibilitySchema.inputSchema.additionalProperties, false);
+assert.deepEqual(aggCompatibilitySchema.inputSchema.required, ['draft', 'workflow_id', 'task_bindings']);
+assert.equal(aggCompatibilitySchema.inputSchema.properties.draft.additionalProperties, false);
+assert.equal(aggCompatibilitySchema.inputSchema.properties.draft.properties.gates.additionalProperties, false);
+assert.deepEqual(aggCompatibilitySchema.inputSchema.properties.draft.properties.gates.properties.dispatchAllowed.enum, [false],
+  'compatibility input schema must never accept a draft that authorizes dispatch');
+const aggProposalCreateSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_plan_proposal_create');
+assert.ok(aggProposalCreateSchema, 'the MCP entrypoint must expose controlled AGG proposal creation');
+assert.equal(aggProposalCreateSchema.inputSchema.additionalProperties, false);
+assert.deepEqual(aggProposalCreateSchema.inputSchema.required, ['candidate_plan_id', 'workflow_id', 'task_bindings']);
+assert.equal(aggProposalCreateSchema.inputSchema.oneOf.length, 2,
+  'Plan Graph creation must choose either caller-supplied shadow graph or the signed persisted Goal/Idea snapshot route');
+assert.deepEqual(aggProposalCreateSchema.inputSchema.oneOf[0].required, ['graph']);
+assert.deepEqual(aggProposalCreateSchema.inputSchema.oneOf[1].required,
+  ['knowledge_goal_id', 'knowledge_start_node_id', 'knowledge_goal_node_id', 'knowledge_snapshot_hash']);
+assert.equal(aggProposalCreateSchema.inputSchema.properties.workflow_id.enum.includes('standard-engineering'), true);
+assert.equal(Object.hasOwn(aggProposalCreateSchema.inputSchema.properties, 'approval'), false);
+assert.equal(Object.hasOwn(aggProposalCreateSchema.inputSchema.properties, 'dispatch'), false);
+const aggProposalGetSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_plan_proposal_get');
+assert.ok(aggProposalGetSchema, 'reviewers must be able to retrieve a stored AGG snapshot by proposal job_id');
+assert.deepEqual(aggProposalGetSchema.inputSchema.required, ['job_id']);
+const aggExecutionReadinessSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_execution_readiness_check');
+assert.ok(aggExecutionReadinessSchema, 'the MCP entrypoint must expose the read-only contract/evidence readiness checker');
+assert.equal(aggExecutionReadinessSchema.inputSchema.additionalProperties, false);
+assert.deepEqual(aggExecutionReadinessSchema.inputSchema.required, ['draft', 'workflow_id', 'task_bindings']);
+assert.deepEqual(aggExecutionReadinessSchema.inputSchema.properties.task_bindings.items.required, ['step_id', 'task_id', 'capability']);
+assert.equal(Object.hasOwn(aggExecutionReadinessSchema.inputSchema.properties, 'execution_authorized'), false);
+const aggExecutionGraphCreateSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_execution_graph_proposal_create');
+assert.ok(aggExecutionGraphCreateSchema, 'the MCP entrypoint must expose review-only Execution Graph proposal creation');
+assert.equal(aggExecutionGraphCreateSchema.inputSchema.additionalProperties, false);
+assert.deepEqual(aggExecutionGraphCreateSchema.inputSchema.required, ['plan_proposal_job_id', 'task_bindings']);
+assert.equal(Object.hasOwn(aggExecutionGraphCreateSchema.inputSchema.properties, 'dispatch'), false);
+assert.equal(Object.hasOwn(aggExecutionGraphCreateSchema.inputSchema.properties, 'execution'), false);
+const aggExecutionGraphGetSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_execution_graph_proposal_get');
+assert.ok(aggExecutionGraphGetSchema, 'the MCP entrypoint must expose revalidating Execution Graph proposal readback');
+assert.deepEqual(aggExecutionGraphGetSchema.inputSchema.required, ['job_id']);
+const aggExecutionPlanCandidateCreateSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_execution_plan_candidate_create');
+assert.ok(aggExecutionPlanCandidateCreateSchema, 'the MCP entrypoint must expose compiler/validator-backed Execution Plan Candidate creation');
+assert.equal(aggExecutionPlanCandidateCreateSchema.inputSchema.additionalProperties, false);
+assert.deepEqual(aggExecutionPlanCandidateCreateSchema.inputSchema.required, ['job_id', 'reviewed_action_intents']);
+assert.equal(aggExecutionPlanCandidateCreateSchema.inputSchema.properties.reviewed_action_intents.additionalProperties, false);
+assert.equal(aggExecutionPlanCandidateCreateSchema.inputSchema.properties.reviewed_action_intents.properties.review.properties.decision.const, 'reviewed_for_candidate_only');
+assert.equal(aggExecutionPlanCandidateCreateSchema.inputSchema.properties.reviewed_action_intents.properties.actions.items.additionalProperties, false);
+const aggExecutionPlanCandidateGetSchema = exposedToolSchemas.result.tools.find(item => item.name === 'adaptive_goal_execution_plan_candidate_get');
+assert.ok(aggExecutionPlanCandidateGetSchema, 'the MCP entrypoint must expose revalidated Execution Plan Candidate readback');
+assert.equal(aggExecutionPlanCandidateGetSchema.inputSchema.additionalProperties, false);
+assert.deepEqual(aggExecutionPlanCandidateGetSchema.inputSchema.required, ['job_id']);
+
+const aggGraph = {
+  schemaVersion: 1,
+  startNodeId: 'start',
+  goalNodeId: 'finish',
+  nodes: [
+    { id: 'start', type: 'goal', label: 'Goal to achieve' },
+    { id: 'idea', type: 'idea', estimatedRisk: 0.1, estimatedSuccessConfidence: 0.9 },
+    { id: 'finish', type: 'goal', label: 'Target state' }
+  ],
+  edges: [
+    { from: 'start', to: 'idea', type: 'next_step' },
+    { from: 'idea', to: 'finish', type: 'next_step' }
+  ]
+};
+const aggStateBefore = await tool('workflow_list', { limit: 100 });
+const aggSearch = await tool('adaptive_goal_graph_search', { graph: aggGraph, options: { beamWidth: 4 } });
+assert.equal(aggSearch.mode, 'shadow');
+assert.equal(aggSearch.status, 'proposals_found');
+assert.equal(aggSearch.candidates.length, 1);
+assert.deepEqual(aggSearch.candidates[0].pathNodeIds, ['start', 'idea', 'finish']);
+assert.equal(aggSearch.candidates[0].verification.status, 'unverified');
+assert.equal(aggSearch.candidates[0].verification.verified, false);
+assert.equal(aggSearch.search.heuristicVersion, 'lexicographic-unknown-aware@2');
+assert.equal(aggSearch.auditTrace.deterministic, true);
+assert.ok(aggSearch.auditTrace.events.some(event => event.type === 'state_expanded'));
+assert.equal(aggSearch.candidates[0].metrics.estimatedCost, null, 'unknown cost must not default to zero');
+assert.equal(aggSearch.candidates[0].metrics.metricProvenance.estimatedCost.classification, 'unknown');
+assert.deepEqual(aggSearch.planGraphDrafts, [],
+  'a candidate containing only conceptual nodes must not invent Plan Graph action steps');
+assert.equal(aggSearch.unprojectableCandidates.length, 1);
+assert.match(aggSearch.unprojectableCandidates[0].reason, /no task or experiment nodes/);
+
+const aggTaskGraph = {
+  ...aggGraph,
+  nodes: aggGraph.nodes.map(item => item.id === 'idea'
+    ? { ...item, type: 'task', label: 'Proposed action' }
+    : item)
+};
+const aggProjected = await tool('adaptive_goal_graph_search', { graph: aggTaskGraph, options: { beamWidth: 4 } });
+assert.equal(aggProjected.planGraphDrafts.length, 1);
+const aggDraft = aggProjected.planGraphDrafts[0];
+assert.equal(aggDraft.kind, 'adaptive_goal_plan_graph_draft');
+assert.equal(aggDraft.steps.length, 1);
+assert.equal(aggDraft.steps[0].title, 'Proposed action');
+assert.equal(aggDraft.steps[0].execution.enabled, false);
+assert.equal(aggDraft.steps[0].estimates.cost, null);
+assert.equal(aggDraft.steps[0].estimates.successConfidence, 0.9);
+assert.equal(aggDraft.steps[0].evidenceAssessment.status, 'missing');
+assert.equal(aggDraft.gates.humanReviewRequired, true);
+assert.equal(aggDraft.gates.workflowApprovalRequired, true);
+assert.equal(aggDraft.gates.immutableExecutionPlanCreated, false);
+assert.equal(aggDraft.gates.dispatchAllowed, false);
+assert.equal(aggDraft.gates.executionAuthorized, false);
+assert.equal(aggProjected.unprojectableCandidates.length, 0);
+
+// Content-addressed source bytes are resolved at the package boundary but never
+// promoted to proof that a hypothesis is true or that a runtime event occurred.
+const recoveryVerifierSha256 = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'server/index.js'))).digest('hex');
+const sourceEvidenceGraph = {
+  ...aggTaskGraph,
+  nodes: aggTaskGraph.nodes.map(item => item.id === 'idea'
+    ? { ...item, evidenceRefs: [`file:server/index.js#sha256=${recoveryVerifierSha256}`] }
+    : item)
+};
+const sourceEvidenceSearch = await tool('adaptive_goal_graph_search', { graph: sourceEvidenceGraph, options: { beamWidth: 4 } });
+const verifiedSourceBytes = sourceEvidenceSearch.sourceEvidence.find(item => item.reference === `file:server/index.js#sha256=${recoveryVerifierSha256}`);
+assert.equal(verifiedSourceBytes?.integrityVerified, true, JSON.stringify(verifiedSourceBytes));
+assert.equal(verifiedSourceBytes?.claimVerified, false, 'matching source bytes do not prove the claim asserted about them');
+assert.equal(sourceEvidenceSearch.evidenceBoundary.allCandidateVerificationRemainsUnverified, true);
+assert.equal(sourceEvidenceSearch.planGraphDrafts[0].steps[0].evidenceAssessment.references[0].verified, false);
+const sourceCandidate = sourceEvidenceSearch.candidates[0];
+const sourceCandidateAssessment = sourceEvidenceSearch.candidateEvidenceAssessments.find(item => item.targetBinding.candidatePlanId === sourceCandidate.planId);
+assert.equal(sourceCandidateAssessment?.targetBinding.graphHash, sourceEvidenceSearch.graphHash);
+assert.equal(sourceCandidateAssessment?.sourceIntegrityVerifiedCount, 1, 'candidate-bound resolver assessment reports byte integrity separately');
+assert.equal(sourceCandidateAssessment?.sourceIntegrityCoverage, 1);
+assert.equal(sourceCandidateAssessment?.durableArtifactLineageVerifiedCount, 0, 'source-file hashes do not count as durable workflow artifacts');
+assert.equal(sourceCandidateAssessment?.claimVerifiedReferenceCount, 0);
+assert.equal(sourceCandidateAssessment?.independentAttestationVerifiedReferenceCount, 0);
+assert.equal(sourceCandidateAssessment?.claimCoverage, 0);
+assert.equal(sourceCandidateAssessment?.independentAttestationCoverage, 0);
+assert.equal(sourceCandidateAssessment?.candidateVerified, false);
+assert.equal(sourceCandidate.evidence.verifiedReferenceCount, 0, 'the runtime assessment must not rewrite the pure AGG ledger');
+assert.equal(sourceCandidate.evidence.coverage, 0);
+
+// A shared hypothesis is stored once across two goals, linked to a persisted
+// experiment via tested_by, then explicitly selected/bound into a nominal search.
+// All knowledge remains unverified and unusable for execution readiness.
+const sharedKnowledgeProvenance = {
+  source: 'tests/test-runalith-plugin.js', actor: 'isolated-mcp-e2e',
+  reference: 'MCP fixture only; not evidence about a live incident'
+};
+const sharedHypothesis = await tool('adaptive_goal_knowledge_node_save', {
+  goal_id: 'agg-recovery-verifier-review', stable_key: 'recovery-phase-pre-execution-invariant', node_type: 'hypothesis',
+  content: { label: 'Pre-execution phases should not require spawned child rows', hypothesis: true },
+  provenance: sharedKnowledgeProvenance, evidence_refs: ['placeholder:collect-runtime-trace-before-claiming-live-cause']
+});
+assert.equal(sharedHypothesis.status, 'unverified');
+assert.equal(sharedHypothesis.verified, false);
+assert.equal(sharedHypothesis.usableForPlanning, false);
+assert.equal(sharedHypothesis.executionAuthorized, false);
+assert.match(sharedHypothesis.contentHash, /^[a-f0-9]{64}$/);
+assert.match(sharedHypothesis.provenanceHash, /^[a-f0-9]{64}$/);
+const sharedExperiment = await tool('adaptive_goal_knowledge_node_save', {
+  goal_id: 'agg-recovery-verifier-review', stable_key: 'inspect-phase-aware-regression', node_type: 'experiment',
+  content: { label: 'Inspect phase-aware recovery regression' }, provenance: sharedKnowledgeProvenance,
+  evidence_refs: ['placeholder:run-isolated-regression']
+});
+const recoveryCapability = await tool('adaptive_goal_knowledge_node_save', {
+  goal_id: 'agg-recovery-verifier-review', stable_key: 'recovery-verification-capability', node_type: 'capability',
+  content: { label: 'Validate recovery invariants from source and isolated tests' }, provenance: sharedKnowledgeProvenance
+});
+const sharedEvidence = await tool('adaptive_goal_knowledge_node_save', {
+  goal_id: 'agg-recovery-verifier-review', stable_key: 'live-runtime-cause-not-yet-verified', node_type: 'evidence',
+  content: { label: 'Need independent runtime trace before asserting a live cause' }, provenance: sharedKnowledgeProvenance,
+  evidence_refs: ['placeholder:independent-runtime-trace-required']
+});
+const testedBy = await tool('adaptive_goal_knowledge_edge_add', {
+  goal_id: 'agg-recovery-verifier-review', from_id: sharedHypothesis.id, to_id: sharedExperiment.id,
+  edge_type: 'tested_by', provenance: sharedKnowledgeProvenance, evidence_refs: ['placeholder:experiment-not-run-yet']
+});
+assert.equal(testedBy.type, 'tested_by');
+assert.equal(testedBy.reused, false);
+const recoveryKnowledgeEdge = await tool('adaptive_goal_knowledge_edge_add', {
+  goal_id: 'agg-recovery-verifier-review', from_id: sharedExperiment.id, to_id: recoveryCapability.id,
+  edge_type: 'recovers_to', provenance: sharedKnowledgeProvenance,
+  condition: { when: 'verification_failed', predicate: 'verification_failed_with_evidence' },
+  outcome: { state: 'review-recovery-route', effects: ['inspect-failure-evidence', 'stop-if-evidence-missing'], evidenceRefs: ['placeholder:independent-runtime-trace-required'] },
+  evidence_refs: ['placeholder:recovery-route-not-verified']
+});
+assert.equal(recoveryKnowledgeEdge.type, 'recovers_to');
+  const placeholderRecoveryResolve = await tool('adaptive_goal_knowledge_recovery_resolve', {
+    goal_id: 'agg-recovery-verifier-review', source_node_id: sharedExperiment.id,
+    observed_outcome: 'verification_failed', evidence_refs: ['placeholder:independent-runtime-trace-required']
+  });
+  assert.equal(placeholderRecoveryResolve.status, 'recovery_blocked', 'a declared placeholder cannot activate a persistent recovery edge');
+  assert.equal(placeholderRecoveryResolve.options.length, 0);
+  assert.ok(placeholderRecoveryResolve.evidenceChecks.some(item => item.status === 'placeholder_not_evidence'));
+  assert.equal(placeholderRecoveryResolve.gates.executionAuthorized, false);
+  assert.equal(placeholderRecoveryResolve.gates.dispatchAllowed, false);
+const sharedAgain = await tool('adaptive_goal_knowledge_node_save', {
+  goal_id: 'agg-tamper-regression-review', stable_key: 'recovery-phase-pre-execution-invariant', node_type: 'hypothesis',
+  content: { label: 'Pre-execution phases should not require spawned child rows', hypothesis: true },
+  provenance: sharedKnowledgeProvenance, evidence_refs: ['placeholder:collect-runtime-trace-before-claiming-live-cause']
+});
+assert.equal(sharedAgain.id, sharedHypothesis.id, 'the same typed stable key must re-use the same knowledge identity across goals');
+assert.deepEqual(sharedAgain.memberships, ['agg-recovery-verifier-review', 'agg-tamper-regression-review']);
+const reuseSearch = await tool('adaptive_goal_knowledge_search', { goal_id: 'agg-tamper-regression-review', include_recovery_edges: true });
+assert.equal(reuseSearch.reusedNodes.length, 1);
+assert.equal(reuseSearch.planning.verifierAvailable, true,
+  'a configured verifier provider may be available even though this caller-authored graph has no valid signed snapshot');
+assert.deepEqual(reuseSearch.planning.usableNodeIds, []);
+const historicalHypothesis = await tool('adaptive_goal_knowledge_node_history', { node_id: sharedHypothesis.id });
+assert.equal(historicalHypothesis.length, 1);
+assert.equal(historicalHypothesis[0].status, 'unverified');
+const selectedKnowledgeSearch = await tool('adaptive_goal_graph_search', {
+  graph: {
+    schemaVersion: 1, startNodeId: 'start', goalNodeId: 'goal',
+    nodes: [{ id: 'start', type: 'goal' }, { id: 'inspect', type: 'task', label: 'Inspect source/test invariants', estimatedRisk: 0.1 }, { id: 'goal', type: 'goal' }],
+    edges: [{ from: 'inspect', to: 'goal', type: 'next_step' }]
+  },
+  knowledge_goal_id: 'agg-recovery-verifier-review',
+  knowledge_node_ids: [sharedHypothesis.id, sharedExperiment.id],
+  knowledge_bindings: [
+    { from_node_id: 'start', to_node_id: sharedHypothesis.id, edge_type: 'next_step' },
+    { from_node_id: sharedHypothesis.id, to_node_id: sharedExperiment.id, edge_type: 'next_step' },
+    { from_node_id: sharedExperiment.id, to_node_id: 'inspect', edge_type: 'enables' }
+  ],
+  options: { beamWidth: 4 }
+});
+assert.equal(selectedKnowledgeSearch.knowledgeSnapshot.persistedNodesVerified, false);
+assert.equal(selectedKnowledgeSearch.knowledgeSnapshot.persistedNodesUsableForPlanning, false);
+assert.ok(selectedKnowledgeSearch.knowledgeSnapshot.storedEdgeIds.includes(testedBy.edgeId));
+assert.ok(selectedKnowledgeSearch.candidates[0].pathNodeIds.includes(sharedHypothesis.id));
+assert.equal(selectedKnowledgeSearch.candidates[0].semantics.testedHypothesisCount, 1,
+  'the persisted tested_by relation must participate in candidate scoring');
+assert.deepEqual(selectedKnowledgeSearch.planGraphDrafts[0].gates, {
+  humanReviewRequired: true, workflowApprovalRequired: true, immutableExecutionPlanCreated: false,
+  dispatchAllowed: false, executionAuthorized: false
+});
+const compatibility = await tool('adaptive_goal_plan_compatibility_check', {
+  draft: aggDraft,
+  workflow_id: 'standard-engineering',
+  task_bindings: [{ step_id: aggDraft.steps[0].id, task_id: 'standard-engineer' }]
+});
+assert.equal(compatibility.eligible, false,
+  'a one-step draft must not satisfy the complete mandatory standard-engineering child-task mapping');
+assert.equal(compatibility.status, 'incompatible');
+assert.equal(compatibility.workflow.id, 'standard-engineering');
+assert.ok(compatibility.blockers.some(item => item.code === 'WORKFLOW_CHILD_TASK_UNMAPPED'));
+assert.ok(compatibility.blockers.filter(item => item.code === 'WORKFLOW_CHILD_TASK_UNMAPPED').length >= 8);
+assert.equal(compatibility.gates.workflowProposalCreated, false);
+assert.equal(compatibility.gates.immutableExecutionPlanCreated, false);
+assert.equal(compatibility.gates.dispatchAllowed, false);
+assert.equal(compatibility.gates.executionAuthorized, false);
+
+const unsupportedCompatibility = await tool('adaptive_goal_plan_compatibility_check', {
+  draft: aggDraft,
+  workflow_id: 'unregistered-workflow',
+  task_bindings: [{ step_id: aggDraft.steps[0].id, task_id: 'standard-engineer' }]
+});
+assert.equal(unsupportedCompatibility.eligible, false);
+assert.ok(unsupportedCompatibility.blockers.some(item => item.code === 'UNSUPPORTED_WORKFLOW'));
+
+const aggTwoStepGraph = {
+  schemaVersion: 1,
+  startNodeId: 'start',
+  goalNodeId: 'finish',
+  nodes: [
+    { id: 'start', type: 'goal' },
+    { id: 'step-a', type: 'task', label: 'First required action' },
+    { id: 'step-b', type: 'experiment', label: 'Second required action' },
+    { id: 'finish', type: 'goal' }
+  ],
+  edges: [
+    { from: 'start', to: 'step-a', type: 'next_step' },
+    { from: 'step-a', to: 'step-b', type: 'next_step' },
+    { from: 'step-b', to: 'finish', type: 'next_step' }
+  ]
+};
+const aggTwoStep = await tool('adaptive_goal_graph_search', { graph: aggTwoStepGraph, options: { beamWidth: 4 } });
+assert.equal(aggTwoStep.planGraphDrafts.length, 1);
+assert.equal(aggTwoStep.planGraphDrafts[0].steps.length, 2);
+const dependencyMismatch = await tool('adaptive_goal_plan_compatibility_check', {
+  draft: aggTwoStep.planGraphDrafts[0],
+  workflow_id: 'standard-engineering',
+  task_bindings: [
+    { step_id: aggTwoStep.planGraphDrafts[0].steps[0].id, task_id: 'standard-qa' },
+    { step_id: aggTwoStep.planGraphDrafts[0].steps[1].id, task_id: 'standard-engineer' }
+  ]
+});
+assert.equal(dependencyMismatch.eligible, false);
+assert.ok(dependencyMismatch.blockers.some(item => item.code === 'DEPENDENCY_NOT_PRESERVED'));
+
+const readinessBefore = await tool('workflow_list', { limit: 100 });
+const contractReadiness = await tool('adaptive_goal_execution_readiness_check', {
+  draft: aggDraft,
+  workflow_id: 'standard-engineering',
+  task_bindings: [{ step_id: aggDraft.steps[0].id, task_id: 'standard-engineer', capability: 'code.modify' }]
+});
+assert.equal(contractReadiness.contractReady, false, 'the compiled template ancestry must not be allowed to fill inputs absent from the mapped Plan Graph ancestry');
+assert.equal(contractReadiness.evidenceReady, false, 'source evidence labels must not be treated as durable verified evidence');
+assert.equal(contractReadiness.readyForExecutionGraphReview, false);
+assert.equal(contractReadiness.status, 'blocked');
+assert.ok(contractReadiness.blockers.some(item => item.code === 'INPUT_ARTIFACTS_UNAVAILABLE'));
+assert.ok(contractReadiness.evidenceBlockers.some(item => item.code === 'STEP_EVIDENCE_MISSING'));
+assert.equal(contractReadiness.actions[0].roleContract.id, 'agent.engineer');
+assert.equal(contractReadiness.actions[0].outputEvidenceContract.type, 'implementation');
+assert.ok(contractReadiness.actions[0].outputEvidenceContract.requiredContentFields.includes('verification'));
+assert.equal(contractReadiness.actions[0].execution.enabled, false);
+assert.equal(contractReadiness.gates.executionGraphCreated, false);
+assert.equal(contractReadiness.gates.executableContractsCreated, false);
+assert.equal(contractReadiness.gates.dispatchAllowed, false);
+assert.equal(contractReadiness.gates.executionAuthorized, false);
+const wrongCapabilityReadiness = await tool('adaptive_goal_execution_readiness_check', {
+  draft: aggDraft,
+  workflow_id: 'standard-engineering',
+  task_bindings: [{ step_id: aggDraft.steps[0].id, task_id: 'standard-engineer', capability: 'research.collect' }]
+});
+assert.equal(wrongCapabilityReadiness.contractReady, false);
+assert.ok(wrongCapabilityReadiness.blockers.some(item => item.code === 'CAPABILITY_CONTRACT_MISMATCH'));
+const readinessAfter = await tool('workflow_list', { limit: 100 });
+assert.deepEqual(readinessAfter.stats, readinessBefore.stats,
+  'contract/evidence readiness assessment must not create jobs, tasks, approvals or immutable plans');
+
+// Seed a closed, internally consistent evidence ledger fixture directly in the
+// test's disposable SQLite database. These completed local tasks never run a
+// workflow runner and are not used as execution authorization.
+const executionGraphFixtureJobId = 'job_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const executionGraphFixtureDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+const executionGraphFixtureNow = new Date().toISOString();
+const executionGraphHash = value => crypto.createHash('sha256').update(value).digest('hex');
+const executionGraphEvent = (jobId, type, key, payload) => executionGraphFixtureDb.prepare(
+  'INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)'
+).run(executionGraphHash(`${jobId}|${type}|${key}`), jobId, type, JSON.stringify(payload), executionGraphFixtureNow);
+executionGraphFixtureDb.prepare("INSERT INTO jobs(job_id,conversation_key,title,state,status,created_at,updated_at,completed_at) VALUES(?,?,?,'COMPLETED','completed',?,?,?)")
+  .run(executionGraphFixtureJobId, 'agg-execution-graph-evidence-fixture', 'AGG Execution Graph evidence fixture', executionGraphFixtureNow, executionGraphFixtureNow, executionGraphFixtureNow);
+const executionGraphEvidenceFixtures = [
+  {
+    artifactId: 'artifact-requirements', taskId: 'task-agg-requirements', role: 'product-owner', resultId: 'result-agg-requirements', attemptId: 'attempt-agg-requirements', type: 'requirements',
+    content: { scope: 'bounded test fixture', acceptance_criteria: ['artifact content validated'], non_goals: ['do not execute an AGG action'] }
+  },
+  {
+    artifactId: 'artifact-research', taskId: 'task-agg-research', role: 'researcher', resultId: 'result-agg-research', attemptId: 'attempt-agg-research', type: 'research',
+    content: { findings: ['isolated MCP contract test only'], sources: ['fixture://test-only'], limitations: ['not evidence for a production claim'] }
+  },
+  {
+    artifactId: 'artifact-architecture', taskId: 'task-agg-architecture', role: 'architect', resultId: 'result-agg-architecture', attemptId: 'attempt-agg-architecture', type: 'architecture',
+    content: { components: ['Execution Graph proposal checker'], interfaces: ['read-only MCP proposal API'], failure_modes: ['stale artifact evidence'], implementation_boundary: 'fixture only; no execution graph runtime' }
+  },
+  {
+    artifactId: 'artifact-implementation', taskId: 'task-agg-implementation', role: 'engineer', resultId: 'result-agg-implementation', attemptId: 'attempt-agg-implementation', type: 'implementation',
+    content: {
+      summary: 'Disposable typed-artifact fixture; no production implementation or side effect.',
+      files_changed: [],
+      verification: ['schema and resolver integration fixture only; no command or code was executed'],
+      execution: { mode: 'chat-on-steroids-local-tools', exit_code: null, session_id: null, evidence_refs: ['fixture-only:typed-artifact-schema'] }
+    }
+  },
+  {
+    artifactId: 'artifact-security-review', taskId: 'task-agg-security-review', role: 'security', resultId: 'result-agg-security-review', attemptId: 'attempt-agg-security-review', type: 'security-review',
+    content: {
+      threats: [{ asset: 'test fixture', threat: 'unregistered fixture evidence must not satisfy readiness' }],
+      findings: [{ id: 'FIXTURE-ONLY', severity: 'info', status: 'test-only' }],
+      decision: 'needs_changes'
+    }
+  },
+  {
+    artifactId: 'artifact-qa-report', taskId: 'task-agg-qa', role: 'qa', resultId: 'result-agg-qa', attemptId: 'attempt-agg-qa', type: 'qa-report',
+    content: { checks: ['isolated schema and lineage assertions'], results: ['test-only fixture; no production claim'], decision: 'needs_changes' }
+  },
+  {
+    artifactId: 'artifact-platform-review', taskId: 'task-agg-platform', role: 'platform', resultId: 'result-agg-platform', attemptId: 'attempt-agg-platform', type: 'platform-review',
+    content: {
+      runtime: { mode: 'isolated-test', database: 'disposable SQLite', networkRequired: false },
+      deployment: { installed: false, restarted: false, released: false },
+      recovery: { temporaryStateRemovedAfterTest: true, activeStateUntouched: true }
+    }
+  },
+  {
+    artifactId: 'artifact-documentation', taskId: 'task-agg-writer', role: 'writer', resultId: 'result-agg-writer', attemptId: 'attempt-agg-writer', type: 'documentation',
+    content: { summary: 'Test-only artifact contract fixture.', user_facing_changes: ['No active plugin changes.'], verification: ['Schema and lineage path only.'] }
+  },
+  {
+    artifactId: 'artifact-review', taskId: 'task-agg-reviewer', role: 'reviewer', resultId: 'result-agg-reviewer', attemptId: 'attempt-agg-reviewer', type: 'review',
+    content: {
+      requirementsSatisfied: true, architectureConformant: true, securityAccepted: false, qaAccepted: false,
+      platformAccepted: false, documentationAccepted: true, implementationIssues: [],
+      evidenceIssues: ['Disposable test fixture only; not production evidence.'],
+      securityIssues: ['No independent attestation is present.'], blockingIssues: ['Deployment remains blocked.'], decision: 'needs_changes'
+    }
+  }
+];
+const executionGraphInputTypesByNode = {
+  'execution-product-owner': [],
+  'execution-researcher': ['requirements'],
+  'execution-architect': ['requirements', 'research'],
+  'execution-engineer': ['requirements', 'architecture'],
+  'execution-security': ['requirements', 'architecture', 'implementation'],
+  'execution-qa': ['requirements', 'architecture', 'implementation'],
+  'execution-platform': ['architecture', 'implementation'],
+  'execution-writer': ['requirements', 'implementation'],
+  'execution-reviewer': ['requirements', 'architecture', 'implementation', 'security-review', 'qa-report', 'platform-review', 'documentation']
+};
+for (const fixture of executionGraphEvidenceFixtures) {
+  executionGraphFixtureDb.prepare("INSERT INTO tasks(task_id,job_id,role,description,status,created_at,updated_at) VALUES(?,?,?,?, 'completed',?,?)")
+    .run(fixture.taskId, executionGraphFixtureJobId, fixture.role, 'synthetic completed evidence producer for isolated regression test', executionGraphFixtureNow, executionGraphFixtureNow);
+  executionGraphFixtureDb.prepare("INSERT INTO results(result_id,task_id,outcome,content,created_at) VALUES(?,?,'success',?,?)")
+    .run(fixture.resultId, fixture.taskId, `successful isolated evidence fixture for ${fixture.type}`, executionGraphFixtureNow);
+  executionGraphFixtureDb.prepare("INSERT INTO attempts(attempt_id,task_id,status,openclaw_run_id,started_at,finished_at,error) VALUES(?,?,'completed',NULL,?,?,NULL)")
+    .run(fixture.attemptId, fixture.taskId, executionGraphFixtureNow, executionGraphFixtureNow);
+  const completionPayload = { taskId: fixture.taskId, resultId: fixture.resultId, attemptId: fixture.attemptId, executor: 'chat-on-steroids-plugin' };
+  executionGraphEvent(executionGraphFixtureJobId, 'task.local_completed', fixture.resultId, completionPayload);
+  const artifactContent = JSON.stringify(fixture.content);
+  const contentHash = executionGraphHash(artifactContent);
+  executionGraphFixtureDb.prepare("INSERT INTO artifacts(artifact_id,job_id,task_id,kind,uri,metadata_json,created_at,schema_version,producer_role,content,evidence_json,status,supersedes,content_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,'active',NULL,?)")
+    .run(fixture.artifactId, executionGraphFixtureJobId, fixture.taskId, fixture.type, `artifact://${fixture.artifactId}`, JSON.stringify({ schema_version: 1 }), executionGraphFixtureNow, 1, fixture.role, artifactContent, JSON.stringify([fixture.resultId]), contentHash);
+  const createdArtifactPayload = { artifactId: fixture.artifactId, taskId: fixture.taskId, type: fixture.type, status: 'active', supersedes: null, contentHash };
+  executionGraphEvent(executionGraphFixtureJobId, 'artifact.created', fixture.artifactId, createdArtifactPayload);
+}
+// Each action gets its own uniquely referenced, schema-valid input artifact.
+// This preserves the resolver's global duplicate-reference rejection while
+// allowing the same upstream typed output to be consumed by parallel branches.
+for (const [nodeId, inputTypes] of Object.entries(executionGraphInputTypesByNode)) {
+  for (const type of inputTypes) {
+    const source = executionGraphEvidenceFixtures.find(item => item.type === type);
+    assert.ok(source, `isolated evidence fixture must provide typed input ${type}`);
+    const artifactId = `artifact-input-${nodeId}-${type}`;
+    const content = JSON.stringify(source.content);
+    const contentHash = executionGraphHash(content);
+    executionGraphFixtureDb.prepare("INSERT INTO artifacts(artifact_id,job_id,task_id,kind,uri,metadata_json,created_at,schema_version,producer_role,content,evidence_json,status,supersedes,content_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,'active',NULL,?)")
+      .run(artifactId, executionGraphFixtureJobId, source.taskId, source.type, `artifact://${artifactId}`, JSON.stringify({ schema_version: 1 }), executionGraphFixtureNow, 1, source.role, content, JSON.stringify([source.resultId]), contentHash);
+    executionGraphEvent(executionGraphFixtureJobId, 'artifact.created', artifactId, {
+      artifactId, taskId: source.taskId, type: source.type, status: 'active', supersedes: null, contentHash
+    });
+  }
+}
+executionGraphFixtureDb.close();
+
+const executionGraphSourceGraph = {
+  schemaVersion: 1,
+  startNodeId: 'execution-start',
+  goalNodeId: 'execution-goal',
+  nodes: [
+    { id: 'execution-start', type: 'goal', label: 'Requirements and architecture exist' },
+    { id: 'execution-product-owner', type: 'task', label: 'Define bounded requirements', evidenceRefs: ['artifact://artifact-requirements'] },
+    { id: 'execution-researcher', type: 'experiment', label: 'Research required constraints', evidenceRefs: executionGraphInputTypesByNode['execution-researcher'].map(type => `artifact://artifact-input-execution-researcher-${type}`) },
+    { id: 'execution-architect', type: 'task', label: 'Design architecture', evidenceRefs: executionGraphInputTypesByNode['execution-architect'].map(type => `artifact://artifact-input-execution-architect-${type}`) },
+    { id: 'execution-engineer', type: 'task', label: 'Proposed implementation action', evidenceRefs: [
+      'artifact://artifact-input-execution-engineer-requirements', 'artifact://artifact-architecture'
+    ] },
+    { id: 'execution-security', type: 'experiment', label: 'Review security implications', evidenceRefs: executionGraphInputTypesByNode['execution-security'].map(type => `artifact://artifact-input-execution-security-${type}`) },
+    { id: 'execution-qa', type: 'task', label: 'Verify acceptance criteria', evidenceRefs: executionGraphInputTypesByNode['execution-qa'].map(type => `artifact://artifact-input-execution-qa-${type}`) },
+    { id: 'execution-platform', type: 'task', label: 'Review runtime and deployment boundary', evidenceRefs: executionGraphInputTypesByNode['execution-platform'].map(type => `artifact://artifact-input-execution-platform-${type}`) },
+    { id: 'execution-writer', type: 'task', label: 'Document verified boundaries', evidenceRefs: executionGraphInputTypesByNode['execution-writer'].map(type => `artifact://artifact-input-execution-writer-${type}`) },
+    { id: 'execution-reviewer', type: 'task', label: 'Reconcile all typed evidence', evidenceRefs: executionGraphInputTypesByNode['execution-reviewer'].map(type => `artifact://artifact-input-execution-reviewer-${type}`) },
+    { id: 'execution-goal', type: 'goal', label: 'Implementation reviewed' }
+  ],
+  edges: [
+    { from: 'execution-start', to: 'execution-product-owner', type: 'next_step' },
+    { from: 'execution-product-owner', to: 'execution-researcher', type: 'next_step' },
+    { from: 'execution-researcher', to: 'execution-architect', type: 'next_step' },
+    { from: 'execution-architect', to: 'execution-engineer', type: 'next_step' },
+    { from: 'execution-engineer', to: 'execution-security', type: 'next_step' },
+    { from: 'execution-security', to: 'execution-qa', type: 'next_step' },
+    { from: 'execution-qa', to: 'execution-platform', type: 'next_step' },
+    { from: 'execution-platform', to: 'execution-writer', type: 'next_step' },
+    { from: 'execution-writer', to: 'execution-reviewer', type: 'next_step' },
+    { from: 'execution-reviewer', to: 'execution-goal', type: 'next_step' },
+    { from: 'execution-product-owner', to: 'execution-researcher', type: 'requires_all' },
+    { from: 'execution-product-owner', to: 'execution-architect', type: 'requires_all' },
+    { from: 'execution-researcher', to: 'execution-architect', type: 'requires_all' },
+    { from: 'execution-architect', to: 'execution-engineer', type: 'requires_all' },
+    { from: 'execution-engineer', to: 'execution-security', type: 'requires_all' },
+    { from: 'execution-engineer', to: 'execution-qa', type: 'requires_all' },
+    { from: 'execution-engineer', to: 'execution-platform', type: 'requires_all' },
+    { from: 'execution-engineer', to: 'execution-writer', type: 'requires_all' },
+    { from: 'execution-security', to: 'execution-reviewer', type: 'requires_all' },
+    { from: 'execution-qa', to: 'execution-reviewer', type: 'requires_all' },
+    { from: 'execution-platform', to: 'execution-reviewer', type: 'requires_all' },
+    { from: 'execution-writer', to: 'execution-reviewer', type: 'requires_all' }
+  ]
+};
+const executionGraphSourceTaskIds = [
+  'standard-product-owner', 'standard-researcher', 'standard-architect', 'standard-engineer',
+  'standard-security', 'standard-qa', 'standard-platform', 'standard-writer', 'standard-reviewer'
+];
+const executionGraphSourceCapabilities = [
+  'product.requirements', 'research.collect', 'architecture.design', 'code.modify', 'security.audit',
+  'code.verify', 'infrastructure.verify', 'documentation.write', 'change.review'
+];
+const executionGraphSourceShadowSearch = await tool('adaptive_goal_graph_search', {
+  graph: executionGraphSourceGraph, options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' }
+});
+assert.equal(executionGraphSourceShadowSearch.planGraphDrafts.length, 1);
+assert.equal(executionGraphSourceShadowSearch.planGraphDrafts[0].source.verification.verified, false,
+  'caller-supplied graph search must stay unverified even when its referenced artifact bytes have lineage');
+
+// The source proposal below must use the append-only persistent Goal/Idea
+// store, not the caller graph above. All evidence refs resolve to the current
+// isolated typed-artifact fixtures; the separately generated test-only Ed25519
+// key signs only this disposable snapshot and is never used in production.
+const executionGraphKnowledgeGoalId = 'plugin-e2e-verified-execution-source';
+const executionGraphKnowledgeNodeIds = new Map();
+const executionGraphKnowledgeProvenance = reference => ({
+  source: 'tests/test-runalith-plugin.js', actor: 'isolated-test-goal-idea-verifier', reference,
+  note: 'Test-only source graph; no production claim is made.'
+});
+for (const node of executionGraphSourceGraph.nodes) {
+  const result = await tool('adaptive_goal_knowledge_node_save', {
+    goal_id: executionGraphKnowledgeGoalId,
+    stable_key: node.id,
+    node_type: node.type === 'goal' ? 'goal' : 'experiment',
+    content: { label: node.label, test_only: true },
+    provenance: executionGraphKnowledgeProvenance(`graph-node://${node.id}`),
+    expected_revision: 0,
+    evidence_refs: node.evidenceRefs || []
+  });
+  assert.equal(result.verified, false, 'persisting test graph nodes does not self-attest them');
+  executionGraphKnowledgeNodeIds.set(node.id, result.id);
+}
+for (const edge of executionGraphSourceGraph.edges) {
+  const edgeType = edge.type === 'next_step' ? 'enables' : edge.type;
+  const added = await tool('adaptive_goal_knowledge_edge_add', {
+    goal_id: executionGraphKnowledgeGoalId,
+    from_id: executionGraphKnowledgeNodeIds.get(edge.from),
+    to_id: executionGraphKnowledgeNodeIds.get(edge.to),
+    edge_type: edgeType,
+    provenance: executionGraphKnowledgeProvenance(`graph-edge://${edge.from}/${edge.type}/${edge.to}`),
+    evidence_refs: []
+  });
+  assert.ok(added.edgeId);
+}
+const executionGraphKnowledgeSnapshotRequest = await tool('adaptive_goal_knowledge_snapshot_get', { goal_id: executionGraphKnowledgeGoalId });
+assert.equal(executionGraphKnowledgeSnapshotRequest.snapshot.integrity_valid, true,
+  JSON.stringify(executionGraphKnowledgeSnapshotRequest.snapshot.integrity_issues));
+assert.equal(executionGraphKnowledgeSnapshotRequest.evidenceManifest.every(item => item.valid === true), true,
+  JSON.stringify(executionGraphKnowledgeSnapshotRequest.evidenceManifest.filter(item => !item.valid)));
+const executionGraphKnowledgeAttestationUnsigned = {
+  schema_version: 1,
+  kind: 'adaptive_goal_verified_knowledge_graph_attestation',
+  provider_id: aggKnowledgeTestProviderId,
+  trust_root_sha256: crypto.createHash('sha256').update(aggKnowledgeTestPublicKeyPem, 'utf8').digest('hex'),
+  nonce: crypto.randomUUID(),
+  issued_at: new Date().toISOString(),
+  expires_at: new Date(Date.now() + 25 * 60_000).toISOString(),
+  scope: ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_SCOPE,
+  goal_id: executionGraphKnowledgeGoalId,
+  snapshot_hash: executionGraphKnowledgeSnapshotRequest.snapshot.snapshot_hash,
+  node_ids: executionGraphKnowledgeSnapshotRequest.snapshot.node_ids,
+  edge_ids: executionGraphKnowledgeSnapshotRequest.snapshot.edge_ids,
+  membership_ids: executionGraphKnowledgeSnapshotRequest.snapshot.membership_ids,
+  evidence_manifest_hash: executionGraphKnowledgeSnapshotRequest.evidenceManifestHash,
+  claim_status: 'verified',
+  independence_status: 'verified',
+  signature_algorithm: 'Ed25519'
+};
+const executionGraphKnowledgeAttestation = {
+  ...executionGraphKnowledgeAttestationUnsigned,
+  signature: crypto.sign(null, Buffer.from(canonicalJson(executionGraphKnowledgeAttestationUnsigned), 'utf8'), aggKnowledgeTestKeyPair.privateKey).toString('base64')
+};
+const executionGraphKnowledgeAttested = await tool('adaptive_goal_knowledge_snapshot_attest', { attestation: executionGraphKnowledgeAttestation });
+assert.equal(executionGraphKnowledgeAttested.verified, true);
+assert.equal(executionGraphKnowledgeAttested.claimVerified, true);
+assert.equal(executionGraphKnowledgeAttested.independenceVerified, true);
+const executionGraphSourceSearch = await tool('adaptive_goal_knowledge_graph_search', {
+  goal_id: executionGraphKnowledgeGoalId,
+  start_node_id: executionGraphKnowledgeNodeIds.get(executionGraphSourceGraph.startNodeId),
+  goal_node_id: executionGraphKnowledgeNodeIds.get(executionGraphSourceGraph.goalNodeId),
+  expected_snapshot_hash: executionGraphKnowledgeSnapshotRequest.snapshot.snapshot_hash,
+  options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' }
+});
+assert.equal(executionGraphSourceSearch.source.claimVerified, true);
+assert.equal(executionGraphSourceSearch.source.independenceVerified, true);
+assert.equal(executionGraphSourceSearch.knowledgeSnapshot.attestationId, executionGraphKnowledgeAttested.attestationId);
+assert.equal(executionGraphSourceSearch.planGraphDrafts.length, 1);
+const executionGraphSourceDraft = executionGraphSourceSearch.planGraphDrafts[0];
+assert.equal(executionGraphSourceDraft.steps.length, 9, 'the source Plan Graph must map all nine mandatory specialist children');
+assert.equal(executionGraphSourceDraft.source.verification.verified, true);
+const executionGraphEngineerStep = executionGraphSourceDraft.steps.find(step => step.sourceNodeId === executionGraphKnowledgeNodeIds.get('execution-engineer'));
+assert.ok(executionGraphEngineerStep);
+const executionGraphSourceBindings = executionGraphSourceDraft.steps.map((step, index) => ({
+  step_id: step.id, task_id: executionGraphSourceTaskIds[index], capability: executionGraphSourceCapabilities[index]
+}));
+const executionGraphSourceStatsBefore = await tool('workflow_list', { limit: 100 });
+const executionGraphSourceProposal = await tool('adaptive_goal_plan_proposal_create', {
+  knowledge_goal_id: executionGraphKnowledgeGoalId,
+  knowledge_start_node_id: executionGraphKnowledgeNodeIds.get(executionGraphSourceGraph.startNodeId),
+  knowledge_goal_node_id: executionGraphKnowledgeNodeIds.get(executionGraphSourceGraph.goalNodeId),
+  knowledge_snapshot_hash: executionGraphKnowledgeSnapshotRequest.snapshot.snapshot_hash,
+  candidate_plan_id: executionGraphSourceSearch.candidates[0].planId,
+  options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' },
+  workflow_id: 'standard-engineering',
+  task_bindings: executionGraphSourceBindings.map(({ step_id, task_id }) => ({ step_id, task_id })),
+  workspace,
+  title: 'Execution Graph source Plan Graph review fixture'
+});
+assert.equal(executionGraphSourceProposal.created, true);
+assert.equal(executionGraphSourceProposal.status, 'PROPOSED');
+assert.equal(executionGraphSourceProposal.immutable_plan_pinned, false);
+assert.equal(executionGraphSourceProposal.execution_authorized, false);
+const executionGraphSourceApproval = await tool('workflow_approve', {
+  job_id: executionGraphSourceProposal.job_id,
+  confirmation: 'TEST ONLY: approve the Plan Graph review checklist in the isolated MCP database; this is not approval to execute mapped AGG actions.'
+});
+assert.equal(executionGraphSourceApproval.approved, true);
+assert.equal(executionGraphSourceApproval.execution_authorized, false,
+  'Plan Graph review approval must not grant AGG action execution authority');
+assert.equal(executionGraphSourceApproval.execution_enabled, false);
+assert.equal(executionGraphSourceApproval.review_only_graph_wrapper, true);
+assert.equal(executionGraphSourceApproval.graph_review_kind, 'plan_graph');
+const executionGraphSourceDispatchDenied = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+  name: 'workflow_dispatch', arguments: { job_id: executionGraphSourceProposal.job_id }
+} });
+assert.equal(executionGraphSourceDispatchDenied.result?.isError, true,
+  'an approved Plan Graph review wrapper must remain non-dispatchable');
+assert.match(executionGraphSourceDispatchDenied.result?.content?.[0]?.text || '', /Plan Graph approval pins only the review-checklist plan/);
+const sourceReviewAfterDispatchDenial = await tool('workflow_get', { job_id: executionGraphSourceProposal.job_id });
+assert.equal(sourceReviewAfterDispatchDenial.job.state, 'APPROVED');
+assert.equal(sourceReviewAfterDispatchDenial.job.active_task_id, null);
+assert.equal(sourceReviewAfterDispatchDenial.tasks.length, 0);
+const executionGraphReadiness = await tool('adaptive_goal_execution_readiness_check', {
+  draft: executionGraphSourceDraft,
+  workflow_id: 'standard-engineering',
+  task_bindings: executionGraphSourceBindings
+});
+assert.equal(executionGraphReadiness.readyForExecutionGraphReview, true, JSON.stringify(executionGraphReadiness, null, 2));
+const executionGraphEngineerReadiness = executionGraphReadiness.actions.find(action => action.taskId === 'standard-engineer');
+assert.equal(executionGraphEngineerReadiness.supportingEvidence.verified, true);
+assert.deepEqual(executionGraphEngineerReadiness.supportingEvidence.verifiedArtifacts.map(item => item.type).sort(), ['architecture', 'requirements']);
+
+// Full three-graph positive control in the disposable MCP database. These five
+// records are test fixtures only: they validate the resolver plumbing and are
+// never references for the live Goal/Idea Graph probe or production evidence.
+const readinessSourceRelativePath = 'src/runtime/adaptive-goal-execution-readiness.js';
+const readinessSourceSha256 = crypto.createHash('sha256')
+  .update(fs.readFileSync(path.join(root, readinessSourceRelativePath))).digest('hex');
+const threeGraphWorkflowStatsBefore = await tool('workflow_list', { limit: 100 });
+const threeGraphKnowledgeDbBefore = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
+const threeGraphKnowledgeNodesBefore = threeGraphKnowledgeDbBefore.prepare('SELECT COUNT(*) AS count FROM adaptive_goal_knowledge_nodes').get().count;
+threeGraphKnowledgeDbBefore.close();
+const threeGraphEvidenceSource = {
+  schemaVersion: 1,
+  startNodeId: 'three-graph-start',
+  goalNodeId: 'three-graph-goal',
+  nodes: [
+    { id: 'three-graph-start', type: 'goal', label: 'Current verified baseline' },
+    { id: 'three-graph-hybrid-idea', type: 'idea', label: 'Hybrid authority and fail-closed boundaries' },
+    { id: 'three-graph-safety-hypothesis', type: 'hypothesis', label: 'Unknown authority or lineage must block high-impact actions' },
+    { id: 'three-graph-requirements', type: 'task', label: 'Review requirements/invariants', evidenceRefs: ['artifact://artifact-requirements'] },
+    { id: 'three-graph-research', type: 'experiment', label: 'Review prior research and test limits', evidenceRefs: ['artifact://artifact-research'] },
+    { id: 'three-graph-architecture', type: 'task', label: 'Review architecture and dependency contracts', evidenceRefs: ['artifact://artifact-architecture'] },
+    { id: 'three-graph-implementation', type: 'task', label: 'Plan the current-scope implementation and regression work; prior MVP output is historical context only', evidenceRefs: ['artifact://artifact-implementation'] },
+    { id: 'three-graph-fixture-contract', type: 'condition', label: 'Future build-monitor-test-fixture remains planning/contract testing only; no implementation is claimed or executed', evidenceRefs: [] },
+    { id: 'three-graph-security-review', type: 'experiment', label: 'Review security boundary and lineage failures', evidenceRefs: [
+      'artifact://artifact-security-review', `file:${readinessSourceRelativePath}#sha256=${readinessSourceSha256}`
+    ] },
+    { id: 'three-graph-qa', type: 'task', label: 'Validate regression contract', evidenceRefs: ['artifact://artifact-qa-report'] },
+    { id: 'three-graph-platform', type: 'task', label: 'Assess deployment and recovery boundary', evidenceRefs: ['artifact://artifact-platform-review'] },
+    { id: 'three-graph-writer', type: 'task', label: 'Document evidence limits', evidenceRefs: ['artifact://artifact-documentation'] },
+    { id: 'three-graph-reviewer', type: 'task', label: 'Reconcile evidence and blockers', evidenceRefs: ['artifact://artifact-review'] },
+    { id: 'three-graph-goal', type: 'goal', label: 'Evidence and dependency gates assessed without execution authority' }
+  ],
+  edges: [
+    { from: 'three-graph-start', to: 'three-graph-hybrid-idea', type: 'next_step' },
+    { from: 'three-graph-hybrid-idea', to: 'three-graph-safety-hypothesis', type: 'next_step' },
+    { from: 'three-graph-safety-hypothesis', to: 'three-graph-requirements', type: 'next_step' },
+    { from: 'three-graph-requirements', to: 'three-graph-research', type: 'next_step' },
+    { from: 'three-graph-research', to: 'three-graph-architecture', type: 'next_step' },
+    { from: 'three-graph-architecture', to: 'three-graph-implementation', type: 'next_step' },
+    { from: 'three-graph-implementation', to: 'three-graph-fixture-contract', type: 'next_step' },
+    { from: 'three-graph-fixture-contract', to: 'three-graph-security-review', type: 'next_step' },
+    { from: 'three-graph-security-review', to: 'three-graph-qa', type: 'next_step' },
+    { from: 'three-graph-qa', to: 'three-graph-platform', type: 'next_step' },
+    { from: 'three-graph-platform', to: 'three-graph-writer', type: 'next_step' },
+    { from: 'three-graph-writer', to: 'three-graph-reviewer', type: 'next_step' },
+    { from: 'three-graph-reviewer', to: 'three-graph-goal', type: 'next_step' },
+    { from: 'three-graph-safety-hypothesis', to: 'three-graph-security-review', type: 'tested_by' },
+    { from: 'three-graph-requirements', to: 'three-graph-research', type: 'requires_all' },
+    { from: 'three-graph-requirements', to: 'three-graph-architecture', type: 'requires_all' },
+    { from: 'three-graph-research', to: 'three-graph-architecture', type: 'requires_all' },
+    { from: 'three-graph-architecture', to: 'three-graph-implementation', type: 'requires_all' },
+    { from: 'three-graph-implementation', to: 'three-graph-security-review', type: 'requires_all' },
+    { from: 'three-graph-implementation', to: 'three-graph-qa', type: 'requires_all' },
+    { from: 'three-graph-implementation', to: 'three-graph-platform', type: 'requires_all' },
+    { from: 'three-graph-implementation', to: 'three-graph-writer', type: 'requires_all' },
+    { from: 'three-graph-security-review', to: 'three-graph-reviewer', type: 'requires_all' },
+    { from: 'three-graph-qa', to: 'three-graph-reviewer', type: 'requires_all' },
+    { from: 'three-graph-platform', to: 'three-graph-reviewer', type: 'requires_all' },
+    { from: 'three-graph-writer', to: 'three-graph-reviewer', type: 'requires_all' }
+  ]
+};
+const threeGraphSearch = await tool('adaptive_goal_graph_search', {
+  graph: threeGraphEvidenceSource, options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256, maxAuditEvents: 200 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' }
+});
+assert.equal(threeGraphSearch.status, 'proposals_found');
+assert.equal(threeGraphSearch.mode, 'shadow');
+assert.equal(threeGraphSearch.candidates[0].verification.verified, false);
+assert.equal(threeGraphSearch.telemetry?.persisted, true,
+  'the source MCP runtime must expose the durable audit row for the actual search');
+assert.equal(threeGraphSearch.planGraphDrafts.length, 1);
+const threeGraphDraft = threeGraphSearch.planGraphDrafts[0];
+assert.equal(threeGraphDraft.steps.length, 9,
+  'all nine mandatory Plan Graph action steps must remain distinct; fixture context cannot stand in for implementation');
+assert.equal(threeGraphDraft.steps.some(step => step.sourceNodeId === 'three-graph-fixture-contract'), false);
+assert.ok(threeGraphDraft.contextNodes.some(node => node.id === 'three-graph-fixture-contract' && node.type === 'condition'));
+assert.ok(threeGraphDraft.contextNodes.find(node => node.id === 'three-graph-fixture-contract').label.includes('no implementation is claimed or executed'));
+assert.ok(threeGraphDraft.steps.some(step => step.sourceNodeId === 'three-graph-implementation' &&
+  step.supportingEvidenceRefs.includes('artifact://artifact-implementation')),
+  'the implementation step may cite the prior implementation only as historical supporting context, not claim current completion');
+assert.ok(!threeGraphDraft.steps.find(step => step.sourceNodeId === 'three-graph-security-review').supportingEvidenceRefs.includes('artifact://artifact-implementation'),
+  'historical implementation evidence must be attached to the implementation step, not silently borrowed by security review');
+assert.equal(threeGraphDraft.gates.dispatchAllowed, false);
+assert.equal(threeGraphDraft.gates.executionAuthorized, false);
+const threeGraphTaskIds = [
+  'standard-product-owner', 'standard-researcher', 'standard-architect', 'standard-engineer',
+  'standard-security', 'standard-qa', 'standard-platform', 'standard-writer', 'standard-reviewer'
+];
+const threeGraphCapabilities = [
+  'product.requirements', 'research.collect', 'architecture.design', 'code.modify', 'security.audit',
+  'code.verify', 'infrastructure.verify', 'documentation.write', 'change.review'
+];
+const threeGraphBindings = threeGraphDraft.steps.map((step, index) => ({
+  step_id: step.id, task_id: threeGraphTaskIds[index], capability: threeGraphCapabilities[index]
+}));
+const threeGraphCompatibility = await tool('adaptive_goal_plan_compatibility_check', {
+  draft: threeGraphDraft, workflow_id: 'standard-engineering',
+  task_bindings: threeGraphBindings.map(({ step_id, task_id }) => ({ step_id, task_id }))
+});
+assert.equal(threeGraphCompatibility.eligible, true, JSON.stringify(threeGraphCompatibility.blockers));
+assert.deepEqual(threeGraphCompatibility.blockers, []);
+const threeGraphReadiness = await tool('adaptive_goal_execution_readiness_check', {
+  draft: threeGraphDraft, workflow_id: 'standard-engineering', task_bindings: threeGraphBindings
+});
+assert.equal(threeGraphReadiness.contractReady, true, JSON.stringify(threeGraphReadiness.blockers));
+assert.equal(threeGraphReadiness.evidenceReady, true, JSON.stringify(threeGraphReadiness.evidenceBlockers));
+assert.equal(threeGraphReadiness.readyForExecutionGraphReview, true);
+assert.deepEqual(threeGraphReadiness.actions.map(action => action.taskId), threeGraphTaskIds);
+assert.equal(threeGraphReadiness.actions.every(action => action.supportingEvidence.verified), true);
+assert.equal(threeGraphReadiness.sourceEvidence[0].integrityVerified, true);
+assert.equal(threeGraphReadiness.sourceEvidence[0].claimVerified, false);
+assert.equal(threeGraphReadiness.sourceEvidence[0].independenceVerified, false);
+assert.equal(threeGraphReadiness.gates.executionGraphCreated, false);
+assert.equal(threeGraphReadiness.gates.immutableExecutionPlanCreated, false);
+assert.equal(threeGraphReadiness.gates.dispatchAllowed, false);
+assert.equal(threeGraphReadiness.gates.executionAuthorized, false);
+assert.equal(threeGraphSearch.candidateEvidenceAssessments[0].durableArtifactLineageVerifiedCount, 9);
+assert.equal(threeGraphSearch.candidateEvidenceAssessments[0].sourceIntegrityVerifiedCount, 1);
+assert.equal(threeGraphSearch.candidateEvidenceAssessments[0].claimVerifiedReferenceCount, 0);
+assert.equal(threeGraphSearch.candidateEvidenceAssessments[0].independentAttestationVerifiedReferenceCount, 0);
+
+// Read back the exact append-only telemetry snapshot from the disposable DB:
+// nine typed artifacts have byte/hash + producer/result/completion lineage but
+// no claim attestation, and the one source file proves bytes only. Neither
+// knowledge nodes nor workflow proposals/jobs are created by these shadow probes.
+const threeGraphAuditDb = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
+try {
+  const run = threeGraphAuditDb.prepare('SELECT * FROM adaptive_goal_planner_runs WHERE run_id=?')
+    .get(threeGraphSearch.telemetry.run_id);
+  assert.ok(run);
+  assert.equal(run.status, 'completed');
+  assert.equal(run.tool_name, 'adaptive_goal_graph_search');
+  assert.equal(run.graph_hash, threeGraphSearch.graphHash);
+  assert.equal(run.search_run_id, threeGraphSearch.search.searchRunId);
+  assert.equal(run.input_node_count, threeGraphEvidenceSource.nodes.length);
+  assert.equal(run.input_edge_count, threeGraphEvidenceSource.edges.length);
+  const resolverRows = threeGraphAuditDb.prepare(
+    "SELECT reference,kind,classification,artifact_id,content_hash,lineage_verified,claim_verified,details_json FROM adaptive_goal_planner_run_evidence WHERE run_id=? AND observation_source='runtime_resolver' ORDER BY reference"
+  ).all(threeGraphSearch.telemetry.run_id);
+  const durableRows = resolverRows.filter(row => row.kind === 'durable_artifact');
+  assert.equal(durableRows.length, 9);
+  assert.ok(durableRows.every(row => row.lineage_verified === 1 && row.claim_verified === 0));
+  assert.ok(durableRows.every(row => row.content_hash && JSON.parse(row.details_json).independentAttestationVerified === false));
+  const sourceRow = resolverRows.find(row => row.kind === 'source_file');
+  assert.ok(sourceRow);
+  assert.equal(sourceRow.classification, 'source_bytes_verified_claim_unverified');
+  assert.equal(sourceRow.claim_verified, 0);
+  assert.equal(JSON.parse(sourceRow.details_json).integrityVerified, true);
+  const declaredRows = threeGraphAuditDb.prepare(
+    "SELECT COUNT(*) AS count FROM adaptive_goal_planner_run_evidence WHERE run_id=? AND observation_source='declared_graph_reference'"
+  ).get(threeGraphSearch.telemetry.run_id);
+  assert.equal(declaredRows.count, 10,
+    'the nine durable refs and one source ref are recorded as declarations separately from runtime-resolver observations');
+  const persistedKnowledgeNodes = threeGraphAuditDb.prepare('SELECT COUNT(*) AS count FROM adaptive_goal_knowledge_nodes').get().count;
+  assert.equal(persistedKnowledgeNodes, threeGraphKnowledgeNodesBefore,
+    'shadow planning must not write or mutate shared Idea Graph knowledge nodes');
+} finally { threeGraphAuditDb.close(); }
+
+// A reference that exists only in test source, not as a row in the active DB,
+// must not be promoted merely because other evidence is complete.
+const unregisteredFixtureGraph = structuredClone(threeGraphEvidenceSource);
+unregisteredFixtureGraph.nodes.find(node => node.id === 'three-graph-security-review').evidenceRefs = [
+  'artifact://artifact-security-review', 'artifact://artifact-fixture-only-unregistered',
+  `file:${readinessSourceRelativePath}#sha256=${readinessSourceSha256}`
+];
+const unregisteredSearch = await tool('adaptive_goal_graph_search', {
+  graph: unregisteredFixtureGraph, options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256, maxAuditEvents: 200 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' }
+});
+const unregisteredDraft = unregisteredSearch.planGraphDrafts[0];
+const unregisteredReadiness = await tool('adaptive_goal_execution_readiness_check', {
+  draft: unregisteredDraft, workflow_id: 'standard-engineering',
+  task_bindings: unregisteredDraft.steps.map((step, index) => ({
+    step_id: step.id, task_id: threeGraphTaskIds[index], capability: threeGraphCapabilities[index]
+  }))
+});
+assert.equal(unregisteredReadiness.contractReady, true);
+assert.equal(unregisteredReadiness.evidenceReady, false);
+assert.equal(unregisteredReadiness.readyForExecutionGraphReview, false);
+assert.ok(unregisteredReadiness.evidenceBlockers.some(item => item.code === 'SOURCE_EVIDENCE_UNVERIFIED' &&
+  item.reference === 'artifact://artifact-fixture-only-unregistered'));
+assert.equal(unregisteredReadiness.gates.executionGraphCreated, false);
+assert.deepEqual((await tool('workflow_list', { limit: 100 })).stats, threeGraphWorkflowStatsBefore.stats,
+  'the three-graph compatibility/readiness probes must not create proposal jobs/tasks or approvals');
+console.log(`AGG_THREE_GRAPH_CHAIN=PASS candidate=${threeGraphSearch.candidates[0].planId} graphSha256=${threeGraphSearch.graphHash} draftSha256=${threeGraphDraft.draftHash} actions=${threeGraphDraft.steps.length} durableLineageVerified=9 sourceBytesVerified=1 claimVerified=0 independentAttestations=0`);
+console.log('AGG_THREE_GRAPH_NEGATIVE_CONTROL=PASS unregistered-reference-blocked; dependency-inversion-covered-by-separate-compatibility-regression; workflow-proposals-created=false; knowledge-graph-writes=false');
+
+// The server must reject duplicate evidence references instead of silently
+// Set-deduplicating caller input into an apparently well-formed evidence set.
+// This exercises the real MCP boundary against the disposable SQLite fixture.
+const duplicateEvidenceStatsBefore = await tool('workflow_list', { limit: 100 });
+const duplicateEvidenceDraft = structuredClone(executionGraphSourceDraft);
+const duplicateEvidenceStep = duplicateEvidenceDraft.steps.find(step => step.sourceNodeId === executionGraphKnowledgeNodeIds.get('execution-engineer'));
+const duplicateEvidenceRef = duplicateEvidenceStep.supportingEvidenceRefs[0];
+duplicateEvidenceStep.supportingEvidenceRefs.push(duplicateEvidenceRef);
+const duplicateEvidenceResponse = await rawRpc({ jsonrpc: '2.0', id: 'agg-duplicate-evidence-reference', method: 'tools/call', params: {
+  name: 'adaptive_goal_execution_readiness_check', arguments: {
+    draft: duplicateEvidenceDraft, workflow_id: 'standard-engineering',
+    task_bindings: executionGraphSourceBindings
+  }
+} });
+assert.equal(duplicateEvidenceResponse.result?.isError, true,
+  'duplicate caller evidence references must be rejected at the actual MCP resolver boundary');
+assert.match(duplicateEvidenceResponse.result?.content?.[0]?.text || '', /EVIDENCE_REFERENCE_DUPLICATE/);
+assert.deepEqual(await tool('workflow_list', { limit: 100 }), duplicateEvidenceStatsBefore,
+  'rejected duplicate evidence input must not mutate workflow state');
+
+// Exercise the production MCP readiness resolver against durable fixture rows:
+// a content hash or a completed task label must not substitute for an exact
+// successful attempt and one canonical completion event. Restore every row
+// after each injected failure; this DB belongs to this test process only.
+const lineageFailureDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+const architectureFixture = executionGraphEvidenceFixtures.find(item => item.type === 'architecture');
+const savedArchitectureAttempt = lineageFailureDb.prepare('SELECT * FROM attempts WHERE attempt_id=?').get(architectureFixture.attemptId);
+const architectureCompletionEventId = executionGraphHash(`${executionGraphFixtureJobId}|task.local_completed|${architectureFixture.resultId}`);
+const savedArchitectureCompletion = lineageFailureDb.prepare('SELECT * FROM events WHERE event_id=?').get(architectureCompletionEventId);
+const savedArchitectureArtifactEvidence = lineageFailureDb.prepare('SELECT evidence_json FROM artifacts WHERE artifact_id=?').get(architectureFixture.artifactId)?.evidence_json;
+const savedArchitectureArtifactBytes = lineageFailureDb.prepare('SELECT content,content_hash FROM artifacts WHERE artifact_id=?').get(architectureFixture.artifactId);
+const savedArchitectureArtifactSchema = lineageFailureDb.prepare('SELECT schema_version,metadata_json FROM artifacts WHERE artifact_id=?').get(architectureFixture.artifactId);
+const savedArchitectureProducerTaskStatus = lineageFailureDb.prepare('SELECT status FROM tasks WHERE task_id=?').get(architectureFixture.taskId)?.status;
+const savedArchitectureProducerResultOutcome = lineageFailureDb.prepare('SELECT outcome FROM results WHERE result_id=?').get(architectureFixture.resultId)?.outcome;
+const ghostCompletionResultId = 'result-agg-ghost-completion';
+const ghostCompletionEventId = executionGraphHash(`${executionGraphFixtureJobId}|task.local_completed|${ghostCompletionResultId}`);
+const rerunFixtureReadiness = () => tool('adaptive_goal_execution_readiness_check', {
+  draft: executionGraphSourceDraft,
+  workflow_id: 'standard-engineering',
+  task_bindings: executionGraphSourceBindings
+});
+const rerunThreeGraphReadiness = () => tool('adaptive_goal_execution_readiness_check', {
+  draft: threeGraphDraft,
+  workflow_id: 'standard-engineering',
+  task_bindings: threeGraphBindings
+});
+try {
+  lineageFailureDb.prepare('DELETE FROM attempts WHERE attempt_id=?').run(architectureFixture.attemptId);
+  const missingAttemptReadiness = await rerunFixtureReadiness();
+  assert.equal(missingAttemptReadiness.readyForExecutionGraphReview, false);
+  assert.ok(missingAttemptReadiness.evidenceBlockers.some(item => item.code === 'SOURCE_EVIDENCE_RESULT_LINEAGE_INVALID' && /attempt/i.test(item.message)),
+    'missing producer attempt must be distinguished from source-byte integrity and rejected by the actual MCP resolver');
+  lineageFailureDb.prepare('INSERT INTO attempts(attempt_id,task_id,status,openclaw_run_id,started_at,finished_at,error) VALUES(?,?,?,?,?,?,?)')
+    .run(savedArchitectureAttempt.attempt_id, savedArchitectureAttempt.task_id, savedArchitectureAttempt.status, savedArchitectureAttempt.openclaw_run_id,
+      savedArchitectureAttempt.started_at, savedArchitectureAttempt.finished_at, savedArchitectureAttempt.error);
+
+  lineageFailureDb.prepare("UPDATE attempts SET status='failed',error='injected evidence-lineage regression' WHERE attempt_id=?").run(architectureFixture.attemptId);
+  const failedAttemptReadiness = await rerunFixtureReadiness();
+  assert.equal(failedAttemptReadiness.readyForExecutionGraphReview, false);
+  assert.ok(failedAttemptReadiness.evidenceBlockers.some(item => item.code === 'SOURCE_EVIDENCE_RESULT_LINEAGE_INVALID'),
+    'failed producer attempt must not become usable evidence');
+  lineageFailureDb.prepare("UPDATE attempts SET status='completed',error=NULL WHERE attempt_id=?").run(architectureFixture.attemptId);
+
+  lineageFailureDb.prepare('DELETE FROM events WHERE event_id=?').run(architectureCompletionEventId);
+  const missingCompletionReadiness = await rerunFixtureReadiness();
+  assert.equal(missingCompletionReadiness.readyForExecutionGraphReview, false);
+  assert.ok(missingCompletionReadiness.evidenceBlockers.some(item => item.code === 'SOURCE_EVIDENCE_RESULT_LINEAGE_INVALID' && /completion events/i.test(item.message)),
+    'missing completion event must not be hidden by a successful result or content hash');
+  lineageFailureDb.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)')
+    .run(savedArchitectureCompletion.event_id, savedArchitectureCompletion.job_id, savedArchitectureCompletion.type,
+      savedArchitectureCompletion.payload_json, savedArchitectureCompletion.created_at);
+
+  const restoredReadiness = await rerunFixtureReadiness();
+  assert.equal(restoredReadiness.readyForExecutionGraphReview, true, JSON.stringify(restoredReadiness, null, 2));
+
+  // The artifact-created event and row may agree on a stale claimed digest.
+  // Mutate the actual persisted content without changing either digest claim;
+  // the resolver must hash the bytes itself and refuse readiness.
+  lineageFailureDb.prepare('UPDATE artifacts SET content=? WHERE artifact_id=?')
+    .run(`${savedArchitectureArtifactBytes.content} `, architectureFixture.artifactId);
+  const tamperedArtifactBytesReadiness = await rerunFixtureReadiness();
+  assert.equal(tamperedArtifactBytesReadiness.readyForExecutionGraphReview, false);
+  assert.ok(tamperedArtifactBytesReadiness.evidenceBlockers.some(item =>
+    /artifact|lineage|hash|integrity/i.test(`${item.code} ${item.message}`)),
+    'artifact bytes that no longer match their stored content hash must be blocked even when event and row digest claims still agree');
+  const hashFailureThreeGraph = await rerunThreeGraphReadiness();
+  assert.equal(hashFailureThreeGraph.contractReady, true,
+    'an evidence-integrity failure must not be misreported as a role/task contract failure when DAG input contracts still pass');
+  assert.equal(hashFailureThreeGraph.evidenceReady, false);
+  assert.equal(hashFailureThreeGraph.status, 'contract_ready_evidence_pending');
+  assert.ok(hashFailureThreeGraph.evidenceBlockers.some(item => item.code === 'SOURCE_ARTIFACT_CONTENT_HASH_INVALID'),
+    'an existing artifact with invalid content bytes must have a specific hash blocker, not look like an absent artifact');
+  lineageFailureDb.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?')
+    .run(savedArchitectureArtifactBytes.content, savedArchitectureArtifactBytes.content_hash, architectureFixture.artifactId);
+  assert.equal((await rerunFixtureReadiness()).readyForExecutionGraphReview, true,
+    'restoring exact artifact bytes and their original digest must restore fixture readiness');
+
+  // Keep artifact-schema failures distinct from byte-integrity failures. The
+  // corrupted record remains in the disposable DB, but its invalid typed shape
+  // must never promote to source evidence or flip the durable gate.
+  const invalidArchitectureContentObject = JSON.parse(savedArchitectureArtifactBytes.content);
+  delete invalidArchitectureContentObject.interfaces;
+  const invalidArchitectureContent = JSON.stringify(invalidArchitectureContentObject);
+  lineageFailureDb.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?')
+    .run(invalidArchitectureContent, executionGraphHash(invalidArchitectureContent), architectureFixture.artifactId);
+  const schemaFailureThreeGraph = await rerunThreeGraphReadiness();
+  assert.equal(schemaFailureThreeGraph.contractReady, true);
+  assert.equal(schemaFailureThreeGraph.evidenceReady, false);
+  assert.ok(schemaFailureThreeGraph.evidenceBlockers.some(item => item.code === 'SOURCE_ARTIFACT_SCHEMA_INVALID'),
+    'an existing artifact with a matching byte hash but invalid typed schema must produce a schema blocker');
+  lineageFailureDb.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?')
+    .run(savedArchitectureArtifactBytes.content, savedArchitectureArtifactBytes.content_hash, architectureFixture.artifactId);
+
+  // A positive content hash does not make an obsolete typed artifact schema
+  // current. Verify the schema-version gate independently of content bytes.
+  lineageFailureDb.prepare('UPDATE artifacts SET schema_version=2,metadata_json=? WHERE artifact_id=?')
+    .run(JSON.stringify({ schema_version: 2 }), architectureFixture.artifactId);
+  const schemaVersionMismatchReadiness = await rerunThreeGraphReadiness();
+  assert.equal(schemaVersionMismatchReadiness.contractReady, true);
+  assert.equal(schemaVersionMismatchReadiness.evidenceReady, false);
+  assert.ok(schemaVersionMismatchReadiness.evidenceBlockers.some(item => item.code === 'SOURCE_EVIDENCE_SCHEMA_MISMATCH'),
+    'unsupported schema versions must remain evidence blockers despite valid content bytes');
+  lineageFailureDb.prepare('UPDATE artifacts SET schema_version=?,metadata_json=? WHERE artifact_id=?')
+    .run(savedArchitectureArtifactSchema.schema_version, savedArchitectureArtifactSchema.metadata_json, architectureFixture.artifactId);
+
+  // A failed producer task or result is not repaired by retaining the old
+  // artifact, content hash, or completion event. Restore the isolated fixture
+  // immediately after each negative control.
+  lineageFailureDb.prepare("UPDATE tasks SET status='failed' WHERE task_id=?").run(architectureFixture.taskId);
+  const failedProducerTaskReadiness = await rerunThreeGraphReadiness();
+  assert.equal(failedProducerTaskReadiness.contractReady, true);
+  assert.equal(failedProducerTaskReadiness.evidenceReady, false);
+  assert.ok(failedProducerTaskReadiness.evidenceBlockers.some(item =>
+    item.code === 'SOURCE_EVIDENCE_RESULT_LINEAGE_INVALID' && /producer task is not completed/i.test(item.message)),
+    'a failed producer task must remain an evidence-lineage failure');
+  lineageFailureDb.prepare("UPDATE tasks SET status=? WHERE task_id=?")
+    .run(savedArchitectureProducerTaskStatus, architectureFixture.taskId);
+
+  lineageFailureDb.prepare("UPDATE results SET outcome='failure' WHERE result_id=?").run(architectureFixture.resultId);
+  const failedProducerResultReadiness = await rerunThreeGraphReadiness();
+  assert.equal(failedProducerResultReadiness.contractReady, true);
+  assert.equal(failedProducerResultReadiness.evidenceReady, false);
+  assert.ok(failedProducerResultReadiness.evidenceBlockers.some(item =>
+    item.code === 'SOURCE_EVIDENCE_RESULT_LINEAGE_INVALID' && /non-success outcome failure/i.test(item.message)),
+    'a failed producer result must be distinct from a missing artifact and remain blocked');
+  lineageFailureDb.prepare('UPDATE results SET outcome=? WHERE result_id=?')
+    .run(savedArchitectureProducerResultOutcome, architectureFixture.resultId);
+  assert.equal((await rerunThreeGraphReadiness()).readyForExecutionGraphReview, true,
+    'restoring the actual fixture producer status/result and exact artifact bytes restores readiness');
+
+  const alteredCompletionPayload = { ...JSON.parse(savedArchitectureCompletion.payload_json), taskId: 'task-foreign-payload' };
+  lineageFailureDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
+    .run(JSON.stringify(alteredCompletionPayload), architectureCompletionEventId);
+  const alteredCanonicalCompletionReadiness = await rerunFixtureReadiness();
+  assert.equal(alteredCanonicalCompletionReadiness.readyForExecutionGraphReview, false);
+  assert.ok(alteredCanonicalCompletionReadiness.evidenceBlockers.some(item =>
+    /canonical event identity but conflicting task\/result payload/i.test(item.message)),
+    'a canonical completion event ID must not be ignored when its payload is rewritten to name another task');
+  lineageFailureDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
+    .run(savedArchitectureCompletion.payload_json, architectureCompletionEventId);
+
+  const duplicateCompletionEventId = `${architectureCompletionEventId}-duplicate`;
+  lineageFailureDb.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)')
+    .run(duplicateCompletionEventId, savedArchitectureCompletion.job_id, savedArchitectureCompletion.type,
+      savedArchitectureCompletion.payload_json, savedArchitectureCompletion.created_at);
+  const duplicateCompletionReadiness = await rerunFixtureReadiness();
+  assert.equal(duplicateCompletionReadiness.readyForExecutionGraphReview, false);
+  assert.ok(duplicateCompletionReadiness.evidenceBlockers.some(item => /exactly one matching the referenced result/i.test(item.message)),
+    'a duplicate completion record with the same result must not be collapsed into one canonical lineage');
+  lineageFailureDb.prepare('DELETE FROM events WHERE event_id=?').run(duplicateCompletionEventId);
+
+  const mixedProducerEvidence = JSON.stringify([architectureFixture.resultId, executionGraphEvidenceFixtures[0].resultId]);
+  lineageFailureDb.prepare('UPDATE artifacts SET evidence_json=? WHERE artifact_id=?').run(mixedProducerEvidence, architectureFixture.artifactId);
+  const foreignProducerResultReadiness = await rerunFixtureReadiness();
+  assert.equal(foreignProducerResultReadiness.readyForExecutionGraphReview, false);
+  assert.ok(foreignProducerResultReadiness.evidenceBlockers.some(item => /different producer task/i.test(item.message)),
+    'a valid producer result cannot mask a second evidence result owned by another task');
+  lineageFailureDb.prepare('UPDATE artifacts SET evidence_json=? WHERE artifact_id=?').run(savedArchitectureArtifactEvidence, architectureFixture.artifactId);
+
+  lineageFailureDb.prepare('UPDATE artifacts SET evidence_json=? WHERE artifact_id=?')
+    .run(JSON.stringify([architectureFixture.resultId, 17]), architectureFixture.artifactId);
+  const nonStringEvidenceReadiness = await rerunFixtureReadiness();
+  assert.equal(nonStringEvidenceReadiness.readyForExecutionGraphReview, false);
+  assert.ok(nonStringEvidenceReadiness.evidenceBlockers.some(item =>
+    ['SOURCE_EVIDENCE_UNVERIFIED', 'SOURCE_EVIDENCE_RESULT_LINEAGE_INVALID'].includes(item.code)),
+    'non-string evidence entries must make the artifact unresolved or lineage-invalid rather than allowing readiness');
+  lineageFailureDb.prepare('UPDATE artifacts SET evidence_json=? WHERE artifact_id=?').run(savedArchitectureArtifactEvidence, architectureFixture.artifactId);
+
+  const ghostCompletionPayload = {
+    taskId: architectureFixture.taskId, resultId: ghostCompletionResultId,
+    attemptId: architectureFixture.attemptId, executor: 'chat-on-steroids-plugin'
+  };
+  lineageFailureDb.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)')
+    .run(ghostCompletionEventId, executionGraphFixtureJobId, 'task.local_completed', JSON.stringify(ghostCompletionPayload), executionGraphFixtureNow);
+  const conflictingCompletionReadiness = await rerunFixtureReadiness();
+  assert.equal(conflictingCompletionReadiness.readyForExecutionGraphReview, false);
+  assert.ok(conflictingCompletionReadiness.evidenceBlockers.some(item => /missing, foreign-task, or non-success result result-agg-ghost-completion/i.test(item.message)),
+    'a conflicting completion event for the same task cannot be hidden by filtering only the expected result ID');
+  lineageFailureDb.prepare('DELETE FROM events WHERE event_id=?').run(ghostCompletionEventId);
+  const afterConflictingCompletionReadiness = await rerunFixtureReadiness();
+  assert.equal(afterConflictingCompletionReadiness.readyForExecutionGraphReview, true,
+    JSON.stringify(afterConflictingCompletionReadiness, null, 2));
+} finally {
+  const attemptStillExists = lineageFailureDb.prepare('SELECT 1 AS present FROM attempts WHERE attempt_id=?').get(architectureFixture.attemptId);
+  if (!attemptStillExists && savedArchitectureAttempt) {
+    lineageFailureDb.prepare('INSERT INTO attempts(attempt_id,task_id,status,openclaw_run_id,started_at,finished_at,error) VALUES(?,?,?,?,?,?,?)')
+      .run(savedArchitectureAttempt.attempt_id, savedArchitectureAttempt.task_id, savedArchitectureAttempt.status, savedArchitectureAttempt.openclaw_run_id,
+        savedArchitectureAttempt.started_at, savedArchitectureAttempt.finished_at, savedArchitectureAttempt.error);
+  } else if (savedArchitectureAttempt) {
+    lineageFailureDb.prepare('UPDATE attempts SET status=?,openclaw_run_id=?,started_at=?,finished_at=?,error=? WHERE attempt_id=?')
+      .run(savedArchitectureAttempt.status, savedArchitectureAttempt.openclaw_run_id, savedArchitectureAttempt.started_at,
+        savedArchitectureAttempt.finished_at, savedArchitectureAttempt.error, savedArchitectureAttempt.attempt_id);
+  }
+  const completionStillExists = lineageFailureDb.prepare('SELECT 1 AS present FROM events WHERE event_id=?').get(architectureCompletionEventId);
+  if (!completionStillExists && savedArchitectureCompletion) {
+    lineageFailureDb.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)')
+      .run(savedArchitectureCompletion.event_id, savedArchitectureCompletion.job_id, savedArchitectureCompletion.type,
+        savedArchitectureCompletion.payload_json, savedArchitectureCompletion.created_at);
+  }
+  if (savedArchitectureArtifactEvidence !== undefined) {
+    lineageFailureDb.prepare('UPDATE artifacts SET evidence_json=? WHERE artifact_id=?')
+      .run(savedArchitectureArtifactEvidence, architectureFixture.artifactId);
+  }
+  if (savedArchitectureArtifactBytes) {
+    lineageFailureDb.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?')
+      .run(savedArchitectureArtifactBytes.content, savedArchitectureArtifactBytes.content_hash, architectureFixture.artifactId);
+  }
+  lineageFailureDb.prepare('DELETE FROM events WHERE event_id=?').run(ghostCompletionEventId);
+  lineageFailureDb.close();
+}
+
+const executionGraphProposal = await tool('adaptive_goal_execution_graph_proposal_create', {
+  plan_proposal_job_id: executionGraphSourceProposal.job_id,
+  task_bindings: executionGraphSourceBindings,
+  title: 'Read-only Execution Graph proposal fixture'
+});
+assert.equal(executionGraphProposal.created, true, JSON.stringify(executionGraphProposal, null, 2));
+assert.equal(executionGraphProposal.status, 'PROPOSED');
+assert.equal(executionGraphProposal.readiness.readyForExecutionGraphReview, true);
+assert.equal(executionGraphProposal.proposal.source.verification.verified, true,
+  'a downstream Execution Graph must retain the trusted source Goal/Idea snapshot identity');
+assert.equal(executionGraphProposal.proposal.nodes.length, 9);
+const executionGraphEngineerNode = executionGraphProposal.proposal.nodes.find(node => node.sourceStepId === executionGraphEngineerStep.id);
+assert.equal(executionGraphEngineerNode.outputEvidenceContract.type, 'implementation');
+assert.deepEqual(executionGraphEngineerNode.supportingEvidence.artifacts.map(item => item.type).sort(), ['architecture', 'requirements']);
+assert.equal(executionGraphEngineerNode.execution.enabled, false);
+assert.equal(executionGraphEngineerNode.execution.executable, null);
+assert.equal(executionGraphEngineerNode.execution.args, null);
+assert.equal(executionGraphProposal.proposal.gates.executableContractsCreated, false);
+assert.equal(executionGraphProposal.proposal.gates.immutableExecutionPlanCreated, false);
+assert.equal(executionGraphProposal.proposal.gates.dispatchAllowed, false);
+assert.equal(executionGraphProposal.proposal.gates.executionAuthorized, false);
+assert.equal(executionGraphProposal.immutable_plan_pinned, false);
+assert.equal(executionGraphProposal.execution_authorized, false);
+assert.equal(executionGraphProposal.dispatch_started, false);
+const executionGraphDispatchWithoutActionCandidate = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+  name: 'workflow_dispatch', arguments: { job_id: executionGraphProposal.job_id }
+} });
+assert.equal(executionGraphDispatchWithoutActionCandidate.result?.isError, true,
+  'an Execution Graph review wrapper cannot dispatch until an exact trusted action-intent candidate is current');
+assert.match(executionGraphDispatchWithoutActionCandidate.result?.content?.[0]?.text || '', /AGG_EXECUTION_AUTHORIZATION_NOT_VERIFIED/);
+const executionGraphAfterUnauthorizedDispatch = await tool('workflow_get', { job_id: executionGraphProposal.job_id });
+assert.equal(executionGraphAfterUnauthorizedDispatch.job.state, 'IDLE');
+assert.equal(executionGraphAfterUnauthorizedDispatch.plan, null);
+assert.equal(executionGraphAfterUnauthorizedDispatch.tasks.length, 0);
+
+const executionGraphReviewProposal = executionGraphProposal.proposal;
+const executionGraphReviewBindings = new Map(executionGraphReviewProposal.bindings.map(binding => [binding.stepId, binding]));
+const reviewedExecutionGraphActionIntents = {
+  schemaVersion: 1,
+  kind: 'adaptive_goal_reviewed_action_intents',
+  source: {
+    executionGraphFingerprint: executionGraphReviewProposal.fingerprint,
+    executionGraphProposalHash: executionGraphReviewProposal.proposalHash,
+    sourcePlanProposalJobId: executionGraphReviewProposal.source.planProposalJobId,
+    sourceGraphHash: executionGraphReviewProposal.source.graphHash,
+    planGraphDraftHash: executionGraphReviewProposal.source.draftHash,
+    sourceCandidateId: executionGraphReviewProposal.source.candidatePlanId
+  },
+  review: {
+    decision: 'reviewed_for_candidate_only',
+    reviewerId: 'mcp-e2e-human-review-fixture',
+    reviewedAt: '2026-10-21T00:00:00.000Z',
+    acknowledgment: 'I_REVIEWED_ACTION_INTENTS_AND_INPUT_BINDINGS_FOR_CANDIDATE_REVIEW_ONLY'
+  },
+  actions: executionGraphReviewProposal.nodes.map(node => {
+    const binding = executionGraphReviewBindings.get(node.sourceStepId);
+    assert.ok(binding, 'each graph node must have a one-to-one explicit task binding');
+    const taskInputs = [...node.inputContract.requiredArtifactTypes].sort().map(inputType => {
+      const evidence = node.supportingEvidence.artifacts.filter(item => item.type === inputType)
+        .sort((a, b) => a.reference.localeCompare(b.reference))[0];
+      assert.ok(evidence, `E2E review fixture needs exact ${inputType} source evidence`);
+      return { inputType, source: { kind: 'evidence', reference: evidence.reference } };
+    });
+    return {
+      stepId: node.sourceStepId,
+      taskId: binding.taskId,
+      role: binding.role,
+      capability: binding.capability,
+      roleContractId: binding.roleContractId,
+      roleContractVersion: binding.roleContractVersion,
+      actionIntent: {
+        operation: getAdaptiveGoalActionIntentSemanticPolicy(binding.role).operation,
+        target: { kind: 'work_item', reference: node.sourceStepId },
+        description: canonicalAdaptiveGoalActionIntentDescription({
+          operation: getAdaptiveGoalActionIntentSemanticPolicy(binding.role).operation,
+          target: { kind: 'work_item', reference: node.sourceStepId },
+          outputArtifactType: node.outputEvidenceContract.type,
+          successCriteria: [...getAgentContract(binding.role).completionCriteria].sort()
+        }),
+        successCriteria: [...getAgentContract(binding.role).completionCriteria].sort()
+      },
+      taskInputs,
+      dependencyStepIds: node.dependencies.map(id => executionGraphReviewProposal.nodes.find(item => item.id === id).sourceStepId).sort(),
+      evidenceRefs: node.supportingEvidence.artifacts.map(item => item.reference).sort()
+    };
+  })
+};
+
+const executionGraphWrapper = await tool('workflow_get', { job_id: executionGraphProposal.job_id });
+assert.equal(executionGraphWrapper.job.state, 'IDLE');
+assert.equal(executionGraphWrapper.plan, null);
+assert.equal(executionGraphWrapper.tasks.length, 0);
+assert.equal(executionGraphWrapper.approvals.length, 0);
+assert.equal(executionGraphWrapper.proposal.required_operations.length, 0);
+assert.equal(executionGraphWrapper.proposal.workspace_write_scopes.length, 0);
+const executionGraphPreflight = await tool('workflow_preflight', { job_id: executionGraphProposal.job_id });
+assert.equal(executionGraphPreflight.ready, true);
+assert.equal(executionGraphPreflight.immutable_plan_pinned, false);
+assert.equal(executionGraphPreflight.execution_started, false);
+
+const executionGraphGet = await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionGraphProposal.job_id });
+assert.equal(executionGraphGet.found, true);
+assert.equal(executionGraphGet.status, 'fresh', JSON.stringify(executionGraphGet, null, 2));
+assert.equal(executionGraphGet.proposalHash, executionGraphProposal.proposalHash);
+assert.equal(executionGraphGet.fingerprint, executionGraphProposal.fingerprint);
+assert.equal(executionGraphGet.wrapperApproved, false);
+assert.equal(executionGraphGet.wrapperImmutablePlanPinned, false);
+assert.equal(executionGraphGet.gates.executionAuthorized, false);
+
+// First force an actual SQLite write failure and verify the enclosing candidate
+// create transaction rolls back; then retry normally. This is a disposable
+// MCP E2E database fixture, not the user's durable workflow database.
+const candidateFailureDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+candidateFailureDb.exec(`CREATE TRIGGER inject_agg_execution_plan_candidate_write_failure
+  BEFORE INSERT ON events WHEN NEW.type='adaptive_goal.execution_plan_candidate_created'
+  BEGIN SELECT RAISE(ABORT, 'injected candidate event write failure'); END;`);
+candidateFailureDb.close();
+const failedCandidateCreate = await rawRpc({ jsonrpc: '2.0', id: 'agg-plan-candidate-transaction-failure', method: 'tools/call', params: {
+  name: 'adaptive_goal_execution_plan_candidate_create', arguments: { job_id: executionGraphProposal.job_id, reviewed_action_intents: reviewedExecutionGraphActionIntents }
+} });
+assert.equal(failedCandidateCreate.result?.isError, true, 'candidate persistence trigger must fail closed');
+assert.match(failedCandidateCreate.result?.content?.[0]?.text || '', /injected candidate event write failure/);
+const candidateFailureReadDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+candidateFailureReadDb.exec('DROP TRIGGER inject_agg_execution_plan_candidate_write_failure');
+assert.equal(candidateFailureReadDb.prepare("SELECT COUNT(*) AS n FROM events WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created'")
+  .get(executionGraphProposal.job_id).n, 0, 'failed transaction must not leave a partial candidate event');
+assert.equal(candidateFailureReadDb.prepare('SELECT COUNT(*) AS n FROM workflow_plans WHERE job_id=?').get(executionGraphProposal.job_id).n, 0);
+assert.equal(candidateFailureReadDb.prepare('SELECT COUNT(*) AS n FROM tasks WHERE job_id=?').get(executionGraphProposal.job_id).n, 0);
+assert.equal(candidateFailureReadDb.prepare('SELECT COUNT(*) AS n FROM approvals WHERE job_id=?').get(executionGraphProposal.job_id).n, 0);
+candidateFailureReadDb.close();
+
+const executionPlanCandidate = await tool('adaptive_goal_execution_plan_candidate_create', { job_id: executionGraphProposal.job_id, reviewed_action_intents: reviewedExecutionGraphActionIntents });
+assert.equal(executionPlanCandidate.created, true, JSON.stringify(executionPlanCandidate, null, 2));
+assert.equal(executionPlanCandidate.status, 'fresh');
+assert.equal(executionPlanCandidate.candidate.kind, 'adaptive_goal_execution_plan_candidate');
+assert.equal(executionPlanCandidate.candidate.source.verification.verified, false);
+assert.equal(executionPlanCandidate.candidate.compiler.validator, 'validateExecutionPlan');
+const executionPlanCandidatePreflight = await tool('workflow_preflight', { job_id: executionGraphProposal.job_id });
+assert.equal(executionPlanCandidatePreflight.ready, false,
+  'a caller-supplied reviewerId/acknowledgement cannot satisfy the trust-root-verified identity gate');
+assert.ok(executionPlanCandidatePreflight.blockers.some(item => item.code === 'AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED'));
+assert.notEqual(executionPlanCandidate.candidate.compiler.compilerPlanHash, executionGraphPreflight.candidate_plan_hash,
+  'the opt-in candidate plan must hash the exact typed action-intent extension, not the earlier intent-free preview');
+assert.equal(executionPlanCandidate.candidate.compiler.compilerPlanHash, executionPlanCandidate.candidate.compiler.preflightCandidatePlanHash);
+assert.equal(executionPlanCandidate.candidate.executionPlan.plan_hash, executionPlanCandidate.candidate.compiler.preflightCandidatePlanHash);
+assert.equal(executionPlanCandidate.candidate.compiler.typedActionIntentBindings, 9);
+assert.equal(executionPlanCandidatePreflight.immutable_plan_pinned, false);
+assert.equal(executionPlanCandidate.candidate.executionPlan.job_id, executionGraphProposal.job_id);
+const executionPlanEngineerProjection = executionPlanCandidate.candidate.actionProjection.find(action => action.compilerTaskId === 'standard-engineer');
+assert.equal(executionPlanEngineerProjection.compilerTaskId, 'standard-engineer');
+assert.equal(executionPlanEngineerProjection.roleContract.id, 'agent.engineer');
+assert.equal(executionPlanEngineerProjection.outputEvidenceContract.type, 'implementation');
+assert.equal(executionPlanCandidate.candidate.reviewedTaskInputs.status, 'review_only_blocked');
+assert.equal(executionPlanCandidate.candidate.reviewedTaskInputs.review.identityVerified, false);
+const reviewedTaskEngineerInput = executionPlanCandidate.candidate.reviewedTaskInputs.actions.find(action => action.taskId === 'standard-engineer');
+assert.equal(reviewedTaskEngineerInput.actionIntent.operation, 'implement');
+assert.equal(reviewedTaskEngineerInput.taskInputBindings.length, 2);
+assert.ok(executionPlanCandidate.candidate.reviewedTaskInputs.blockers.some(item => item.code === 'AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED'));
+assert.ok(!executionPlanCandidate.candidate.reviewedTaskInputs.blockers.some(item => item.code === 'AGG_ACTION_INTENT_ROLE_SEMANTIC_EQUIVALENCE_UNVERIFIED'));
+assert.equal(executionPlanCandidate.candidate.reviewedTaskInputs.gates.actionIntentSemanticEquivalenceVerified, true);
+assert.equal(executionPlanCandidate.candidate.reviewedTaskInputs.gates.reviewerIdentityVerified, false);
+assert.equal(executionPlanCandidate.candidate.reviewedTaskInputs.gates.actionIntentRepresentableInCompiledTaskInputs, true);
+assert.equal(executionPlanCandidate.candidate.reviewedTaskInputs.gates.actionIntentPassedToTask, false);
+const compiledReviewedEngineer = executionPlanCandidate.candidate.executionPlan.children.find(task => task.id === 'standard-engineer');
+assert.equal(compiledReviewedEngineer.execution.input_contract, undefined);
+assert.equal(compiledReviewedEngineer.execution.action_intent.operation, 'implement');
+assert.equal(compiledReviewedEngineer.execution.action_intent.semantic_verification.policy_version, 1);
+assert.equal(compiledReviewedEngineer.execution.action_intent.semantic_verification.semantic_hash.length, 64);
+assert.equal(compiledReviewedEngineer.execution.action_intent.source_step_id, executionGraphEngineerStep.id);
+assert.equal(compiledReviewedEngineer.execution.action_intent.task_input_bindings.length, 2);
+assert.equal(compiledReviewedEngineer.execution.action_intent.source.reviewed_task_input_contract_hash, executionPlanCandidate.candidate.hashes.reviewedTaskInputContractHash);
+assert.equal(JSON.stringify(executionPlanCandidate.candidate.executionPlan).includes(reviewedExecutionGraphActionIntents.actions.find(action => action.taskId === 'standard-engineer').actionIntent.description), true,
+  'the compiler pins the typed intent into the plan, but candidate creation does not pass it to a task or authorize execution');
+assert.equal(executionPlanCandidate.candidate.hashes.executionGraphProposalHash, executionGraphProposal.proposalHash);
+assert.equal(executionPlanCandidate.candidate.gates.executionGraphMaterialized, false);
+assert.equal(executionPlanCandidate.candidate.gates.aggActionsExecutable, false);
+assert.equal(executionPlanCandidate.candidate.gates.immutableExecutionPlanCreated, false);
+assert.equal(executionPlanCandidate.candidate.gates.dispatchAllowed, false);
+assert.equal(executionPlanCandidate.candidate.gates.executionAuthorized, false);
+assert.equal(executionPlanCandidate.immutable_plan_pinned, false);
+assert.equal(executionPlanCandidate.wrapper_approved, false);
+assert.equal(executionPlanCandidate.task_rows_created, false);
+assert.equal(executionPlanCandidate.dispatch_started, false);
+assert.equal(executionPlanCandidate.execution_authorized, false);
+
+const executionPlanCandidateRead = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id });
+assert.equal(executionPlanCandidateRead.found, true);
+assert.equal(executionPlanCandidateRead.status, 'fresh', JSON.stringify(executionPlanCandidateRead, null, 2));
+assert.equal(executionPlanCandidateRead.candidateHash, executionPlanCandidate.candidateHash);
+assert.equal(executionPlanCandidateRead.fingerprint, executionPlanCandidate.fingerprint);
+assert.equal(executionPlanCandidateRead.immutablePlanPinned, false);
+assert.equal(executionPlanCandidateRead.wrapperApproved, false);
+assert.equal(executionPlanCandidateRead.executionAuthorized, false);
+assert.equal(executionPlanCandidateRead.reviewerIdentityVerified, false);
+assert.equal(executionPlanCandidateRead.executionReviewReady, false);
+assert.ok(executionPlanCandidateRead.blockers.some(item => item.code === 'AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED'));
+
+const candidateIntegrityDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+const candidatePayloadRow = candidateIntegrityDb.prepare("SELECT payload_json FROM events WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created'")
+  .get(executionGraphProposal.job_id);
+assert.ok(candidatePayloadRow);
+const candidatePayloadOriginal = candidatePayloadRow.payload_json;
+const candidatePayloadTampered = JSON.parse(candidatePayloadOriginal);
+candidatePayloadTampered.candidate.compiler.compilerPlanHash = '0'.repeat(64);
+candidateIntegrityDb.prepare("UPDATE events SET payload_json=? WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created'")
+  .run(JSON.stringify(candidatePayloadTampered), executionGraphProposal.job_id);
+candidateIntegrityDb.close();
+const tamperedPlanCandidateRead = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id });
+assert.equal(tamperedPlanCandidateRead.status, 'stale');
+assert.ok(tamperedPlanCandidateRead.blockers.some(item => item.code === 'EXECUTION_PLAN_CANDIDATE_SNAPSHOT_HASH_MISMATCH'));
+const candidateIntegrityRestoreDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+candidateIntegrityRestoreDb.prepare("UPDATE events SET payload_json=? WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created'")
+  .run(candidatePayloadOriginal, executionGraphProposal.job_id);
+candidateIntegrityRestoreDb.close();
+assert.equal((await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id })).status, 'fresh');
+
+const reviewedInputsTamperDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+const reviewedInputsOriginalPayload = reviewedInputsTamperDb.prepare("SELECT payload_json FROM events WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created'")
+  .get(executionGraphProposal.job_id).payload_json;
+const reviewedInputsTamperedPayload = JSON.parse(reviewedInputsOriginalPayload);
+reviewedInputsTamperedPayload.reviewed_action_intents.actions[0].actionIntent.description = 'tampered after review';
+reviewedInputsTamperDb.prepare("UPDATE events SET payload_json=? WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created'")
+  .run(JSON.stringify(reviewedInputsTamperedPayload), executionGraphProposal.job_id);
+reviewedInputsTamperDb.close();
+const reviewedInputsTamperedRead = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id });
+assert.equal(reviewedInputsTamperedRead.status, 'stale');
+assert.ok(reviewedInputsTamperedRead.blockers.some(item => [
+  'EXECUTION_PLAN_CANDIDATE_STALE', 'EXECUTION_PLAN_CANDIDATE_INPUT_STALE', 'AGG_ACTION_INTENT_DESCRIPTION_NOT_CANONICAL',
+  'AGG_ACTION_INTENT_TARGET_UNBOUND', 'AGG_ACTION_INTENT_SUCCESS_CRITERIA_MISMATCH'
+].includes(item.code)), JSON.stringify(reviewedInputsTamperedRead.blockers));
+const reviewedInputsRestoreDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+reviewedInputsRestoreDb.prepare("UPDATE events SET payload_json=? WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created'")
+  .run(reviewedInputsOriginalPayload, executionGraphProposal.job_id);
+reviewedInputsRestoreDb.close();
+assert.equal((await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id })).status, 'fresh');
+
+const candidateAfterCreateWorkflow = await tool('workflow_get', { job_id: executionGraphProposal.job_id });
+assert.equal(candidateAfterCreateWorkflow.job.state, 'IDLE');
+assert.equal(candidateAfterCreateWorkflow.runtime.phase, 'PROPOSED');
+assert.equal(candidateAfterCreateWorkflow.plan, null, 'candidate creation must not pin the immutable plan');
+assert.equal(candidateAfterCreateWorkflow.tasks.length, 0, 'candidate creation must not create task rows');
+assert.equal(candidateAfterCreateWorkflow.approvals.length, 0, 'candidate creation must not approve the review wrapper');
+
+const concurrentCandidateCreate = await Promise.all([
+  tool('adaptive_goal_execution_plan_candidate_create', { job_id: executionGraphProposal.job_id, reviewed_action_intents: reviewedExecutionGraphActionIntents }),
+  tool('adaptive_goal_execution_plan_candidate_create', { job_id: executionGraphProposal.job_id, reviewed_action_intents: reviewedExecutionGraphActionIntents })
+]);
+assert.ok(concurrentCandidateCreate.every(item => item.created === false && item.idempotent === true && item.status === 'fresh'));
+assert.equal(new Set(concurrentCandidateCreate.map(item => item.candidateHash)).size, 1);
+
+// Normal plan approval must remain blocked until a trusted identity provider
+// attests this reviewer for the exact candidate and immutable plan fingerprint.
+const unauthenticatedAggApprovalId = nextId++;
+const unauthenticatedAggApproval = await rawRpc({ jsonrpc: '2.0', id: unauthenticatedAggApprovalId, method: 'tools/call', params: {
+  name: 'workflow_approve', arguments: {
+    job_id: executionGraphProposal.job_id,
+    confirmation: 'Approve the exact AGG candidate. Caller-supplied identity is not authentication.'
+  }
+} });
+assert.equal(unauthenticatedAggApproval.result?.isError, true);
+assert.match(unauthenticatedAggApproval.result?.content?.[0]?.text || '', /AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED/);
+const unauthenticatedAggApprovalState = await tool('workflow_get', { job_id: executionGraphProposal.job_id });
+assert.equal(unauthenticatedAggApprovalState.job.state, 'IDLE');
+assert.equal(unauthenticatedAggApprovalState.plan, null);
+assert.equal(unauthenticatedAggApprovalState.tasks.length, 0);
+assert.equal(unauthenticatedAggApprovalState.approvals.length, 0);
+const stillBlockedActionIntentPreflight = await tool('workflow_preflight', { job_id: executionGraphProposal.job_id });
+assert.equal(stillBlockedActionIntentPreflight.ready, false);
+assert.equal(stillBlockedActionIntentPreflight.immutable_plan_pinned, false);
+assert.ok(stillBlockedActionIntentPreflight.blockers.some(item => item.code === 'AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED'));
+
+const executionGraphIdempotent = await tool('adaptive_goal_execution_graph_proposal_create', {
+  plan_proposal_job_id: executionGraphSourceProposal.job_id,
+  task_bindings: executionGraphSourceBindings,
+  title: 'Read-only Execution Graph proposal fixture'
+});
+assert.equal(executionGraphIdempotent.created, false);
+assert.equal(executionGraphIdempotent.idempotent, true);
+assert.equal(executionGraphIdempotent.job_id, executionGraphProposal.job_id);
+assert.equal(executionGraphIdempotent.dispatch_started, false);
+
+const executionGraphEvidenceDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+executionGraphEvidenceDb.prepare("UPDATE artifacts SET status='superseded' WHERE artifact_id='artifact-requirements'").run();
+executionGraphEvidenceDb.close();
+const executionGraphStale = await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionGraphProposal.job_id });
+assert.equal(executionGraphStale.found, true);
+assert.equal(executionGraphStale.status, 'stale');
+assert.ok(executionGraphStale.blockers.some(item => [
+  'SOURCE_EVIDENCE_NOT_ACTIVE','SOURCE_EVIDENCE_RESULT_LINEAGE_INVALID',
+  'KNOWLEDGE_GRAPH_NOT_VERIFIED','KNOWLEDGE_EVIDENCE_LINEAGE_INVALID','SOURCE_IDEA_GRAPH_ATTESTATION_STALE'
+].includes(item.code)), JSON.stringify(executionGraphStale.blockers));
+const executionPlanCandidateStale = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id });
+assert.equal(executionPlanCandidateStale.found, true);
+assert.equal(executionPlanCandidateStale.status, 'stale');
+assert.ok(executionPlanCandidateStale.blockers.some(item => item.code === 'EXECUTION_PLAN_CANDIDATE_INPUT_STALE'));
+const executionGraphEvidenceRestoreDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+executionGraphEvidenceRestoreDb.prepare("UPDATE artifacts SET status='active' WHERE artifact_id='artifact-requirements'").run();
+executionGraphEvidenceRestoreDb.close();
+
+const stateAfterExecutionGraph = await tool('workflow_list', { limit: 100 });
+assert.equal(stateAfterExecutionGraph.stats.jobs, executionGraphSourceStatsBefore.stats.jobs + 2,
+  'only the explicitly created source and Execution Graph review wrappers add jobs; candidate creation adds no workflow/job');
+assert.equal(stateAfterExecutionGraph.stats.tasks, executionGraphSourceStatsBefore.stats.tasks,
+  'Execution Plan Candidate create/get/concurrency must not create execution task rows');
+const stateBeforeBlockedGate = await tool('workflow_list', { limit: 100 });
+const malformedGateDraft = structuredClone(aggDraft);
+malformedGateDraft.gates.dispatchAllowed = true;
+const blockedGate = await rawRpc({ jsonrpc: '2.0', id: 'agg-compatibility-gate', method: 'tools/call', params: {
+  name: 'adaptive_goal_plan_compatibility_check', arguments: {
+    draft: malformedGateDraft,
+    workflow_id: 'standard-engineering',
+    task_bindings: [{ step_id: aggDraft.steps[0].id, task_id: 'standard-engineer' }]
+  }
+} });
+assert.equal(blockedGate.result?.isError, true, 'MCP schema must reject any draft that tries to enable dispatch');
+const aggStateAfter = await tool('workflow_list', { limit: 100 });
+assert.deepEqual(aggStateAfter.stats, stateBeforeBlockedGate.stats,
+  'rejected draft-gate input must not mutate durable workflow/job/task state');
+assert.deepEqual(aggStateAfter.workflows, stateBeforeBlockedGate.workflows,
+  'rejected draft-gate input must not create a workflow proposal');
+
+const stateBeforeRejectedAggInputs = await tool('workflow_list', { limit: 100 });
+const aggUnknownField = await rawRpc({ jsonrpc: '2.0', id: 'agg-unknown-field', method: 'tools/call', params: {
+  name: 'adaptive_goal_graph_search', arguments: { graph: { ...aggGraph, arbitraryField: true } }
+} });
+assert.equal(aggUnknownField.result?.isError, true, 'AGG must reject unknown nested graph fields at the MCP schema boundary');
+assert.match(aggUnknownField.result?.content?.[0]?.text || '', /graph\.arbitraryField is not allowed/);
+const aggCycle = await rawRpc({ jsonrpc: '2.0', id: 'agg-cycle', method: 'tools/call', params: {
+  name: 'adaptive_goal_graph_search', arguments: { graph: {
+    ...aggGraph,
+    edges: [
+      { from: 'start', to: 'idea', type: 'next_step' },
+      { from: 'idea', to: 'start', type: 'next_step' },
+      { from: 'idea', to: 'finish', type: 'next_step' }
+    ]
+  } }
+} });
+assert.equal(aggCycle.result?.isError, true, 'AGG runtime must reject transition cycles instead of returning a candidate');
+assert.match(aggCycle.result?.content?.[0]?.text || '', /transition cycle detected/);
+const aggStateAfterRejectedInputs = await tool('workflow_list', { limit: 100 });
+assert.deepEqual(aggStateAfterRejectedInputs.stats, stateBeforeRejectedAggInputs.stats,
+  'invalid AGG requests must also leave durable workflow state unchanged');
+
+const stateBeforeProposal = await tool('workflow_list', { limit: 100 });
+const aggFullProposalGraph = structuredClone(executionGraphSourceGraph);
+aggFullProposalGraph.nodes.find(node => node.id === 'execution-engineer').label = 'Distinct AGG proposal fixture implementation action';
+const aggFullProposalSearch = await tool('adaptive_goal_graph_search', {
+  graph: aggFullProposalGraph, options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' }
+});
+const aggFullProposalDraft = aggFullProposalSearch.planGraphDrafts[0];
+const aggFullProposalBindings = aggFullProposalDraft.steps.map((step, index) => ({
+  step_id: step.id, task_id: executionGraphSourceTaskIds[index], capability: executionGraphSourceCapabilities[index]
+}));
+const createdAggProposal = await tool('adaptive_goal_plan_proposal_create', {
+  graph: aggFullProposalGraph,
+  candidate_plan_id: aggFullProposalSearch.candidates[0].planId,
+  options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' },
+  workflow_id: 'standard-engineering',
+  task_bindings: aggFullProposalBindings.map(({ step_id, task_id }) => ({ step_id, task_id })),
+  workspace,
+  title: 'AGG Proposal Review E2E'
+});
+assert.equal(createdAggProposal.created, true);
+assert.equal(createdAggProposal.status, 'PROPOSED');
+assert.equal(createdAggProposal.compatibility.eligible, true);
+assert.equal(createdAggProposal.draftHash, aggFullProposalDraft.draftHash);
+assert.equal(createdAggProposal.review_snapshot.draft.draftHash, aggFullProposalDraft.draftHash);
+assert.equal(createdAggProposal.immutable_plan_pinned, false);
+assert.equal(createdAggProposal.execution_authorized, false);
+assert.equal(createdAggProposal.dispatch_started, false);
+assert.equal(createdAggProposal.review_snapshot.bindings.find(binding => binding.task_id === 'standard-engineer').task_id, 'standard-engineer');
+assert.equal(createdAggProposal.review_snapshot.bindings.length, 9);
+assert.match(createdAggProposal.review_snapshot.source_graph.startNodeId, /^execution-start$/);
+assert.match(createdAggProposal.review_snapshot.binding_hash, /^[a-f0-9]{64}$/);
+
+const proposedAggState = await tool('workflow_get', { job_id: createdAggProposal.job_id });
+assert.equal(proposedAggState.job.state, 'IDLE');
+assert.equal(proposedAggState.plan, null, 'proposal creation must not pin an immutable plan');
+assert.equal(proposedAggState.tasks.length, 0, 'proposal creation must not create child tasks');
+assert.equal(proposedAggState.approvals.length, 0, 'proposal creation must not auto-approve');
+assert.equal(proposedAggState.proposal.required_operations.length, 0);
+assert.equal(proposedAggState.proposal.workspace_write_scopes.length, 0);
+assert.ok(proposedAggState.proposal.success_contract.goal.includes(createdAggProposal.draftHash));
+assert.ok(proposedAggState.proposal.success_contract.goal.includes(createdAggProposal.bindingHash));
+
+const proposalPreflight = await tool('workflow_preflight', { job_id: createdAggProposal.job_id });
+assert.equal(proposalPreflight.ready, true);
+assert.equal(proposalPreflight.immutable_plan_pinned, false, 'read-only preflight must not pin the plan');
+assert.equal(proposalPreflight.execution_started, false);
+assert.deepEqual(proposalPreflight.blockers, []);
+
+const durableAggSnapshot = await tool('adaptive_goal_plan_proposal_get', { job_id: createdAggProposal.job_id });
+assert.equal(durableAggSnapshot.found, true);
+assert.equal(durableAggSnapshot.draftHash, createdAggProposal.draftHash);
+assert.equal(durableAggSnapshot.bindingHash, createdAggProposal.bindingHash);
+assert.deepEqual(durableAggSnapshot.draft, aggFullProposalDraft);
+assert.equal(durableAggSnapshot.immutablePlanPinned, false);
+assert.equal(durableAggSnapshot.dispatchStarted, false);
+assert.equal(durableAggSnapshot.compatibility.eligible, true);
+
+const duplicateAggProposal = await tool('adaptive_goal_plan_proposal_create', {
+  graph: aggFullProposalGraph,
+  candidate_plan_id: aggFullProposalSearch.candidates[0].planId,
+  options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' },
+  workflow_id: 'standard-engineering',
+  task_bindings: aggFullProposalBindings.map(({ step_id, task_id }) => ({ step_id, task_id })),
+  workspace,
+  title: 'AGG Proposal Review E2E'
+});
+assert.equal(duplicateAggProposal.created, false);
+assert.equal(duplicateAggProposal.idempotent, true);
+assert.equal(duplicateAggProposal.job_id, createdAggProposal.job_id);
+assert.equal(duplicateAggProposal.requires_explicit_approval, true);
+assert.equal(duplicateAggProposal.immutable_plan_pinned, false);
+assert.equal(duplicateAggProposal.execution_authorized, false);
+
+const explicitAggApproval = await tool('workflow_approve', {
+  job_id: createdAggProposal.job_id,
+  confirmation: 'Test-only approval to verify idempotent proposal readback; do not dispatch this test fixture.'
+});
+assert.equal(explicitAggApproval.approved, true);
+assert.equal(explicitAggApproval.phase, 'APPROVED');
+const duplicateApprovedAggProposal = await tool('adaptive_goal_plan_proposal_create', {
+  graph: aggFullProposalGraph,
+  candidate_plan_id: aggFullProposalSearch.candidates[0].planId,
+  options: { beamWidth: 16, maxDepth: 16, maxExpansions: 256 },
+  plan_projection_options: { dependencyMode: 'source_edges_only' },
+  workflow_id: 'standard-engineering',
+  task_bindings: aggFullProposalBindings.map(({ step_id, task_id }) => ({ step_id, task_id })),
+  workspace,
+  title: 'AGG Proposal Review E2E'
+});
+assert.equal(duplicateApprovedAggProposal.created, false);
+assert.equal(duplicateApprovedAggProposal.idempotent, true);
+assert.equal(duplicateApprovedAggProposal.approved, true);
+assert.equal(duplicateApprovedAggProposal.requires_explicit_approval, false);
+assert.equal(duplicateApprovedAggProposal.immutable_plan_pinned, true);
+assert.equal(duplicateApprovedAggProposal.execution_authorized, false,
+  'approval of a review-only Plan Graph wrapper must never authorize mapped AGG actions');
+assert.equal(duplicateApprovedAggProposal.dispatch_started, false,
+  'approval must still be distinct from dispatch after idempotent retry');
+
+const blockedAggProposal = await tool('adaptive_goal_plan_proposal_create', {
+  graph: aggTwoStepGraph,
+  candidate_plan_id: aggTwoStep.candidates[0].planId,
+  options: { beamWidth: 4 },
+  workflow_id: 'standard-engineering',
+  task_bindings: [
+    { step_id: aggTwoStep.planGraphDrafts[0].steps[0].id, task_id: 'standard-qa' },
+    { step_id: aggTwoStep.planGraphDrafts[0].steps[1].id, task_id: 'standard-engineer' }
+  ],
+  workspace
+});
+assert.equal(blockedAggProposal.created, false);
+assert.equal(blockedAggProposal.status, 'incompatible');
+assert.ok(blockedAggProposal.compatibility.blockers.some(item => item.code === 'DEPENDENCY_NOT_PRESERVED'));
+const stateAfterProposalAttempts = await tool('workflow_list', { limit: 100 });
+assert.equal(stateAfterProposalAttempts.stats.jobs, stateBeforeProposal.stats.jobs + 1,
+  'only a compatible proposal may create one job; idempotent repeat and incompatible mapping must not create additional jobs');
+
+const aggProposalDispatchInjection = await rawRpc({ jsonrpc: '2.0', id: 'agg-proposal-dispatch-injection', method: 'tools/call', params: {
+  name: 'adaptive_goal_plan_proposal_create', arguments: {
+    graph: executionGraphSourceGraph, candidate_plan_id: executionGraphSourceSearch.candidates[0].planId, workflow_id: 'standard-engineering',
+    task_bindings: executionGraphSourceBindings.map(({ step_id, task_id }) => ({ step_id, task_id })), dispatch: true
+  }
+} });
+assert.equal(aggProposalDispatchInjection.result?.isError, true,
+  'proposal creation must reject caller-supplied dispatch flags at the MCP schema boundary');
+
 const executeBatchSchema = exposedToolSchemas.result.tools.find(item => item.name === 'execute_batch');
 assert.ok(executeBatchSchema, 'the shipped MCP entrypoint must expose execute_batch through tools/list');
 assert.equal(executeBatchSchema.inputSchema.additionalProperties, false);
@@ -391,7 +2000,7 @@ async function testCase01ConsumptionAckSigkillRecovery(crashBoundary = 'after-ac
   const isolatedWorkspace = path.join(isolatedRoot, 'workspace');
   fs.mkdirSync(isolatedWorkspace, { recursive: true });
   const launch = crashAt => {
-    const childProcess = spawn(process.execPath, [path.join(root, 'server/index.js')], {
+    const childProcess = spawn(process.execPath, [runtimePath], {
       cwd: root,
       env: { ...process.env, NODE_ENV: 'test', CHAT_ON_STEROIDS_DATA_DIR: isolatedData,
         CHAT_ON_STEROIDS_WORKSPACE: isolatedWorkspace, CHAT_ON_STEROIDS_EXECUTION_TMP_DIR: path.join(isolatedData, 'runtime'),
@@ -548,7 +2157,11 @@ try {
   const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.result?.serverInfo?.name, 'runalith-agent-orchestrator');
   const listed = await rpc('tools/list');
-  assert.equal(listed.result.tools.length, 50);
+  assert.equal(listed.result.tools.length, 71, 'the default RC.8 runtime exposes the three Goal/Idea verifier tools plus trust configuration diagnostics while Phase 2/3/4 opt-in tools remain hidden');
+  assert(listed.result.tools.some(tool => tool.name === 'adaptive_goal_trust_configuration_status'), 'read-only trust configuration diagnostics must be exposed in the default runtime');
+  assert.equal(listed.result.tools.some(tool => tool.name === 'adaptive_goal_knowledge_capture_workflow_outcome'), false);
+  assert.equal(listed.result.tools.some(tool => tool.name === 'adaptive_goal_phase2_shadow_search'), false);
+  assert.equal(listed.result.tools.some(tool => tool.name === 'adaptive_goal_phase3_mcts_shadow_search'), false);
   for (const name of ['workflow_preflight', 'workflow_write_files']) assert(listed.result.tools.some(tool => tool.name === name), `missing exposed tool ${name}`);
   assert(listed.result.tools.some(tool => tool.name === 'workflow_liveness_diagnostics'), 'read-only job liveness diagnostics must be exposed through MCP');
   assert(listed.result.tools.some(tool => tool.name === 'workflow_recommend_resources'), 'proactive resource recommendation must be exposed in the packaged MCP contract');
@@ -593,6 +2206,45 @@ try {
   assert.equal(preflight.ready, true, `ordinary local proposal should pass read-only preflight: ${JSON.stringify(preflight.blockers)}`);
   assert.equal(preflight.immutable_plan_pinned, false, 'preflight must not create or pin an immutable plan');
   assert.equal(preflight.execution_started, false);
+  const proposedRecovery = await tool('workflow_recovery_verify', { job_id: preflightProposal.job_id });
+  assert.equal(proposedRecovery.status, 'PASS', `a valid proposal with no plan/tasks is not a recovery inconsistency: ${JSON.stringify(proposedRecovery.checks)}`);
+  assert.equal(proposedRecovery.checks.find(check => check.name === 'approved_plan_hash')?.applicable, false);
+  assert.equal(proposedRecovery.checks.find(check => check.name === 'child_count_matches_plan')?.applicable, false);
+  const approvedAwaitingSpawn = await tool('workflow_create', {
+    title: 'Approved but not dispatched recovery fixture',
+    task: 'Verify that an approved immutable plan with no spawned CTO/child task rows remains a valid pre-execution state.',
+    workflow: 'standard-engineering', workspace
+  });
+  await tool('workflow_approve', { job_id: approvedAwaitingSpawn.job_id, confirmation: 'Approve isolated recovery-verifier fixture only; do not dispatch.' });
+  const approvedRecovery = await tool('workflow_recovery_verify', { job_id: approvedAwaitingSpawn.job_id });
+  assert.equal(approvedRecovery.status, 'PASS', `an approved, not-yet-dispatched plan must not fail child-count verification: ${JSON.stringify(approvedRecovery.checks)}`);
+  assert.equal(approvedRecovery.checks.find(check => check.name === 'approved_plan_hash')?.pass, true);
+  assert.equal(approvedRecovery.checks.find(check => check.name === 'child_count_matches_plan')?.applicable, false);
+  assert.equal(approvedRecovery.task_count, 0);
+  const spawnedRecoveryGuard = await tool('workflow_create', {
+    title: 'Post-spawn incomplete child recovery guard',
+    task: 'Verify that recovery must fail closed when the CTO has been spawned but one immutable planned child row is missing.',
+    workflow: 'standard-engineering', workspace
+  });
+  await tool('workflow_approve', { job_id: spawnedRecoveryGuard.job_id, confirmation: 'Approve isolated post-spawn recovery negative-test fixture only.' });
+  await tool('workflow_dispatch', { job_id: spawnedRecoveryGuard.job_id });
+  const spawnedTasks = await tool('workflow_prepare_tasks', { job_id: spawnedRecoveryGuard.job_id });
+  assert.equal(spawnedTasks.count, 9);
+  const spawnedParent = spawnedTasks.parent_task_id;
+  assert.ok(spawnedParent);
+  const missingChildDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  try {
+    const childToRemove = missingChildDb.prepare('SELECT task_id FROM tasks WHERE job_id=? AND parent_task_id=? ORDER BY created_at,task_id LIMIT 1')
+      .get(spawnedRecoveryGuard.job_id, spawnedParent);
+    assert.ok(childToRemove, 'post-spawn fixture needs a planned child row to simulate durable child loss');
+    missingChildDb.prepare('DELETE FROM tasks WHERE task_id=?').run(childToRemove.task_id);
+  } finally { missingChildDb.close(); }
+  const postSpawnRecovery = await tool('workflow_recovery_verify', { job_id: spawnedRecoveryGuard.job_id });
+  assert.equal(postSpawnRecovery.status, 'NEEDS_ATTENTION', 'post-spawn task loss must not be masked by pre-execution phase exemptions');
+  const childCountAfterSpawn = postSpawnRecovery.checks.find(check => check.name === 'child_count_matches_plan');
+  assert.equal(childCountAfterSpawn?.applicable, true);
+  assert.equal(childCountAfterSpawn?.pass, false);
+  assert.equal(postSpawnRecovery.task_count, 8);
   const prematureWrite = await rawRpc({ jsonrpc: '2.0', id: 'write-before-approval', method: 'tools/call', params: {
     name: 'workflow_write_files', arguments: { job_id: preflightProposal.job_id, task_id: 'missing-task', patch_id: 'premature', writes: [{ path: 'README.md', base_sha256: 'ABSENT', content: 'must not be written' }] }
   } });
@@ -1262,11 +2914,8 @@ try {
   const failedHybridBatchEvidence = firstHybridAttempt.batch_executions[0];
   assert.equal(failedHybridBatchEvidence.completed, false);
   assert.equal(failedHybridBatchEvidence.items.length, 2);
-  assert.equal(failedHybridBatchEvidence.items.filter(item => item.status === 'COMPLETED' && item.exit_code === 0).length, 1,
-    'the injected server syntax fault must leave exactly one unaffected successful compiler sibling');
-  assert.equal(failedHybridBatchEvidence.items.filter(item => item.status !== 'COMPLETED').length, 1,
-    'the injected hybrid batch must expose exactly one failed item rather than terminalizing all siblings');
-  if (!failedHybridBatchEvidence.items.some(item => item.status === 'COMPLETED' && item.exit_code === 0)) {
+  if (failedHybridBatchEvidence.items.filter(item => item.status === 'COMPLETED' && item.exit_code === 0).length !== 1 ||
+      failedHybridBatchEvidence.items.filter(item => item.status !== 'COMPLETED').length !== 1) {
     const batchDiagnosticDb = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
     let durableItemDiagnostics;
     try {
@@ -1280,8 +2929,12 @@ try {
     } finally {
       batchDiagnosticDb.close();
     }
-    assert.fail(`expected unaffected compiler syntax-check sibling to complete after the server syntax fault; batch=${failedHybridBatchEvidence.batch_id}; returned_items=${JSON.stringify(failedHybridBatchEvidence.items)}; durable_items=${JSON.stringify(durableItemDiagnostics, null, 2)}`);
+    assert.fail(`expected exactly one unaffected compiler syntax-check sibling and one failed server syntax-check item; batch=${failedHybridBatchEvidence.batch_id}; returned_items=${JSON.stringify(failedHybridBatchEvidence.items)}; durable_items=${JSON.stringify(durableItemDiagnostics, null, 2)}`);
   }
+  assert.equal(failedHybridBatchEvidence.items.filter(item => item.status !== 'COMPLETED').length, 1,
+    'the injected hybrid batch must expose exactly one failed item rather than terminalizing all siblings');
+  assert.equal(failedHybridBatchEvidence.items.filter(item => item.status === 'COMPLETED' && item.exit_code === 0).length, 1,
+    'the injected server syntax fault must leave exactly one unaffected successful compiler sibling');
   assert.ok(failedHybridBatchEvidence.items.some(item => item.status === 'COMPLETED' && item.exit_code === 0));
 
   // Retry the exact existing durable batch via ExecutionManager's same-batch
@@ -1489,6 +3142,31 @@ try {
   const taskArtifact = case01Artifacts.artifacts.find(item => item.task_id === case01Next.task.task_id && item.type === 'requirements' && item.status === 'active');
   assert.ok(taskArtifact, 'typed requirements artifact must be durable');
   assert.deepEqual(taskArtifact.evidence, [case01TaskCompletion.result_id], 'typed artifact must reference its exact durable task result');
+  const durableArtifactEvidenceSearch = await tool('adaptive_goal_graph_search', {
+    graph: {
+      schemaVersion: 1, startNodeId: 'start', goalNodeId: 'goal',
+      nodes: [
+        { id: 'start', type: 'goal', label: 'Inspect completed workflow evidence' },
+        { id: 'inspect-evidence', type: 'task', label: 'Validate source artifact lineage', evidenceRefs: [`artifact://${taskArtifact.artifact_id}`] },
+        { id: 'goal', type: 'goal', label: 'Report evidence status' }
+      ],
+      edges: [{ from: 'start', to: 'inspect-evidence', type: 'next_step' }, { from: 'inspect-evidence', to: 'goal', type: 'next_step' }]
+    },
+    options: { beamWidth: 2, maxDepth: 4, maxExpansions: 12 }
+  });
+  const checkedArtifactRef = durableArtifactEvidenceSearch.artifactEvidence.find(item => item.reference === `artifact://${taskArtifact.artifact_id}`);
+  assert.equal(checkedArtifactRef?.kind, 'durable_artifact');
+  assert.equal(checkedArtifactRef?.classification, 'durable_artifact_lineage_invalid',
+    'a custom-workflow artifact without built-in producer/task/result/completion binding must not be promoted as verified evidence');
+  assert.equal(checkedArtifactRef?.lineageVerified, false);
+  assert.equal(checkedArtifactRef?.claimVerified, false, 'artifact/result lineage verifies origin and bytes, not arbitrary claim truth');
+  assert.equal(durableArtifactEvidenceSearch.candidates[0].verification.verified, false,
+    'candidate verification stays unverified even with durable producer lineage');
+  const customArtifactAssessment = durableArtifactEvidenceSearch.candidateEvidenceAssessments[0];
+  assert.equal(customArtifactAssessment?.durableArtifactLineageVerifiedCount, 0);
+  assert.equal(customArtifactAssessment?.invalidProvenanceCount, 1);
+  assert.equal(customArtifactAssessment?.claimCoverage, 0);
+  assert.equal(customArtifactAssessment?.independentAttestationCoverage, 0);
   const taskContent = JSON.parse(taskArtifact.content);
   assert.match(taskContent.workspace_snapshot_id, /^[a-f0-9-]{36}$/);
   assert.deepEqual(taskContent.workspace_artifacts, case01Hashes);
@@ -1575,6 +3253,97 @@ try {
   const ctoArtifact = (await tool('workflow_artifacts', { job_id: case01Run.job_id })).artifacts.find(item => item.type === 'cto-decision' && item.status === 'active');
   assert.ok(ctoArtifact);
   assert.deepEqual(ctoArtifact.evidence, [case01Terminal.synthesis_result_id], 'CTO artifact must reference its exact durable synthesis result');
+  // Exercise the persisted recovers_to resolver with a *real artifact created
+  // by this disposable MCP fixture*. The QA task succeeds at reporting a failed
+  // verification outcome; this does not mean the QA verdict itself failed.
+  const durableRecoveryFixture = await tool('workflow_create', {
+    title: 'AGG durable recovery-outcome evidence fixture',
+    task: 'Create a test-only durable QA artifact with an explicit verification_failed decision to validate outcome-aware recovery gating.',
+    workflow: 'standard-engineering', workspace
+  });
+  await tool('workflow_approve', { job_id: durableRecoveryFixture.job_id, confirmation: 'Approve isolated outcome-evidence test fixture only.' });
+  await tool('workflow_dispatch', { job_id: durableRecoveryFixture.job_id });
+  await tool('workflow_prepare_tasks', { job_id: durableRecoveryFixture.job_id });
+  for (const role of ['product-owner', 'researcher', 'architect', 'engineer', 'security']) {
+    const next = await tool('workflow_next_task', { job_id: durableRecoveryFixture.job_id });
+    assert.equal(next.stage, 'task', `recovery evidence fixture expected ${role}: ${JSON.stringify(next)}`);
+    assert.equal(next.task.role, role);
+    await tool('workflow_complete_task', {
+      task_id: next.task.task_id,
+      content: `Isolated recovery-evidence fixture prerequisite completed: ${role}.`,
+      artifact: artifactFor(role)
+    });
+  }
+  const recoveryQaNext = await tool('workflow_next_task', { job_id: durableRecoveryFixture.job_id });
+  assert.equal(recoveryQaNext.stage, 'task');
+  assert.equal(recoveryQaNext.task.role, 'qa');
+  const failedVerificationReport = artifactFor('qa');
+  failedVerificationReport.decision = 'reject';
+  failedVerificationReport.results = ['Test-only verifier probe observed verification_failed; this is a disposable fixture and not a claim about a live workflow.'];
+  await tool('workflow_complete_task', {
+    task_id: recoveryQaNext.task.task_id,
+    content: 'Recorded a synthetic verification_failed outcome in the isolated QA evidence fixture.',
+    artifact: failedVerificationReport
+  });
+  const durableRecoveryQaArtifact = (await tool('workflow_artifacts', { job_id: durableRecoveryFixture.job_id })).artifacts
+    .find(item => item.task_id === recoveryQaNext.task.task_id && item.type === 'qa-report' && item.status === 'active');
+  assert.ok(durableRecoveryQaArtifact);
+  const durableOutcomeRef = `artifact://${durableRecoveryQaArtifact.artifact_id}`;
+  const durableQaEvidenceSearch = await tool('adaptive_goal_graph_search', {
+    graph: {
+      schemaVersion: 1, startNodeId: 'start', goalNodeId: 'goal',
+      nodes: [
+        { id: 'start', type: 'goal' },
+        { id: 'inspect-qa-evidence', type: 'task', label: 'Check structured QA evidence', evidenceRefs: [durableOutcomeRef] },
+        { id: 'goal', type: 'goal' }
+      ],
+      edges: [{ from: 'start', to: 'inspect-qa-evidence', type: 'next_step' }, { from: 'inspect-qa-evidence', to: 'goal', type: 'next_step' }]
+    },
+    options: { beamWidth: 2, maxDepth: 4, maxExpansions: 12 }
+  });
+  const verifiedQaEvidence = durableQaEvidenceSearch.artifactEvidence.find(item => item.reference === durableOutcomeRef);
+  assert.equal(verifiedQaEvidence?.classification, 'durable_artifact_lineage_verified_claim_unverified', JSON.stringify(verifiedQaEvidence));
+  assert.equal(verifiedQaEvidence?.lineageVerified, true);
+  assert.equal(verifiedQaEvidence?.claimVerified, false);
+  assert.equal(durableQaEvidenceSearch.candidates[0].evidence.ledger.find(item => item.reference === durableOutcomeRef)?.classification,
+    'durable_artifact_unverified', 'the pure search ledger recognizes the artifact URI but never promotes it');
+  const durableQaAssessment = durableQaEvidenceSearch.candidateEvidenceAssessments[0];
+  assert.equal(durableQaAssessment?.durableArtifactLineageVerifiedCount, 1);
+  assert.equal(durableQaAssessment?.durableArtifactLineageCoverage, 1);
+  assert.equal(durableQaAssessment?.claimVerifiedReferenceCount, 0);
+  assert.equal(durableQaAssessment?.independentAttestationVerifiedReferenceCount, 0);
+  assert.equal(durableQaAssessment?.claimCoverage, 0);
+  assert.equal(durableQaAssessment?.independentAttestationCoverage, 0);
+  assert.equal(durableQaEvidenceSearch.candidates[0].verification.verified, false);
+  const persistedOutcomeEvidence = await tool('adaptive_goal_knowledge_node_save', {
+    goal_id: 'agg-recovery-verifier-review', stable_key: 'durable-verification-failed-outcome-fixture', node_type: 'evidence',
+    content: { label: 'Isolated QA artifact explicitly records verification_failed', observedOutcome: 'verification_failed', artifactId: durableRecoveryQaArtifact.artifact_id },
+    provenance: { source: 'tests/test-runalith-plugin.js', actor: 'isolated-mcp-e2e', reference: 'disposable SQLite fixture only' },
+    evidence_refs: [durableOutcomeRef]
+  });
+  assert.equal(persistedOutcomeEvidence.verified, false, 'storing a verified-lineage artifact reference does not elevate the Idea Graph node');
+  const durableRecoveryRoute = await tool('adaptive_goal_knowledge_edge_add', {
+    goal_id: 'agg-recovery-verifier-review', from_id: sharedExperiment.id, to_id: recoveryCapability.id,
+    edge_type: 'recovers_to', provenance: sharedKnowledgeProvenance,
+    condition: { when: 'verification_failed', predicate: 'verification_failed_with_evidence' },
+    outcome: { state: 'review-recovery-route', effects: ['inspect-failure-evidence', 'stop-if-evidence-missing'], evidenceRefs: [durableOutcomeRef] },
+    evidence_refs: [durableOutcomeRef]
+  });
+  const verifiedRecoveryRecommendation = await tool('adaptive_goal_knowledge_recovery_resolve', {
+    goal_id: 'agg-recovery-verifier-review', source_node_id: sharedExperiment.id,
+    observed_outcome: 'verification_failed', evidence_refs: [durableOutcomeRef]
+  });
+  assert.equal(verifiedRecoveryRecommendation.status, 'recovery_options_found', JSON.stringify(verifiedRecoveryRecommendation, null, 2));
+  assert.ok(verifiedRecoveryRecommendation.options.some(option => option.edgeId === durableRecoveryRoute.edgeId && option.evidenceLineageVerified));
+  assert.equal(verifiedRecoveryRecommendation.options[0].independentAttestationVerified, false);
+  assert.equal(verifiedRecoveryRecommendation.gates.executionAuthorized, false);
+  assert.equal(verifiedRecoveryRecommendation.gates.dispatchAllowed, false);
+  const wrongOutcomeRecovery = await tool('adaptive_goal_knowledge_recovery_resolve', {
+    goal_id: 'agg-recovery-verifier-review', source_node_id: sharedExperiment.id,
+    observed_outcome: 'failed', evidence_refs: [durableOutcomeRef]
+  });
+  assert.equal(wrongOutcomeRecovery.status, 'recovery_blocked');
+  assert.ok(wrongOutcomeRecovery.rejectedOptions.every(option => option.blockers.some(blocker => blocker.code === 'RECOVERY_OUTCOME_MISMATCH')));
   const ctoContent = JSON.parse(ctoArtifact.content);
   assert.equal(ctoContent.workspace_snapshot_id, taskContent.workspace_snapshot_id);
   assert.deepEqual(ctoContent.workspace_artifacts, taskContent.workspace_artifacts);
@@ -1962,7 +3731,7 @@ try {
     reservationDb.prepare('INSERT INTO case01_snapshot_reservations(snapshot_id, owner_pid, created_at) VALUES(?, ?, ?)')
       .run(taskContent.workspace_snapshot_id, deadPid, new Date(Date.now() - 120_000).toISOString());
   } finally { reservationDb.close(); }
-  const restarted = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+  const restarted = spawnSync(process.execPath, [runtimePath], {
     cwd: root, env, encoding: 'utf8', timeout: 15_000,
     input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'snapshot-recovery-test', version: '1' } } })}\n`
   });
@@ -2083,7 +3852,7 @@ try {
   // Open a separate real MCP server process against the same isolated SQLite
   // database. Startup/recovery must preserve the incomplete durable state and
   // the independent consumer must still refuse to call it recovered.
-  const restartedRecovery = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+  const restartedRecovery = spawnSync(process.execPath, [runtimePath], {
     cwd: root, env, encoding: 'utf8', timeout: 15_000,
     input: [
       JSON.stringify({ jsonrpc: '2.0', id: 701, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'synthesis-crash-recovery-test', version: '1' } } }),
@@ -2167,7 +3936,7 @@ try {
       const recovery = await tool('workflow_recovery_verify', { job_id: created.job_id });
       assert.equal(recovery.status, 'NEEDS_ATTENTION', `${label} tampering must fail closed`);
       assert.equal(recovery.checks.find(check => check.name === expectedCheck)?.pass, false, `${label} must fail ${expectedCheck}`);
-      const restarted = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+      const restarted = spawnSync(process.execPath, [runtimePath], {
         cwd: root, env, encoding: 'utf8', timeout: 15_000,
         input: [
           JSON.stringify({ jsonrpc: '2.0', id: 801, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'generic-lineage-recovery-test', version: '1' } } }),
@@ -2224,7 +3993,7 @@ try {
     const duplicateArtifactRecovery = await tool('workflow_recovery_verify', { job_id: created.job_id });
     assert.equal(duplicateArtifactRecovery.status, 'NEEDS_ATTENTION', 'duplicate CTO artifact-created semantic event must fail closed');
     assert.equal(duplicateArtifactRecovery.checks.find(check => check.name === 'completed_cto_binds_result_artifact_attempt_and_completion_event')?.pass, false);
-    const restarted = spawnSync(process.execPath, [path.join(root, 'server/index.js')], {
+    const restarted = spawnSync(process.execPath, [runtimePath], {
       cwd: root, env, encoding: 'utf8', timeout: 15_000,
       input: [
         JSON.stringify({ jsonrpc: '2.0', id: 811, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'generic-duplicate-event-test', version: '1' } } }),
@@ -2360,7 +4129,7 @@ try {
   const qaBatchItem = productionBatchItems.find(item => item.role === 'qa');
   assert.ok(qaBatchItem, 'the batch result must return the actual packaged behavioral-QA item');
   for (const marker of [
-    'PRODUCTION QA MCP INITIALIZE/50-TOOL DISCOVERY PASS',
+    'PRODUCTION QA MCP INITIALIZE/67-TOOL DISCOVERY PASS',
     'PRODUCTION QA BEHAVIORAL ARTIFACT VALIDATION PASS',
     'PRODUCTION QA APPROVAL/DISPATCH/IMMUTABLE-PLAN NEXT-TASK PASS'
   ]) assert.ok(qaBatchItem.stdout_preview.includes(marker), 'packaged behavioral QA output missing marker: ' + marker);
@@ -2419,7 +4188,7 @@ try {
     assert.equal(qaArtifact.decision, 'accept', `only exact-plan packaged behavioral QA may be accepted; artifact=${JSON.stringify(qaArtifact)}`);
     assert.ok(qaArtifact.results.includes('execution_scope=packaged-behavioral-e2e'));
     for (const marker of [
-      'PRODUCTION QA MCP INITIALIZE/50-TOOL DISCOVERY PASS',
+      'PRODUCTION QA MCP INITIALIZE/67-TOOL DISCOVERY PASS',
       'PRODUCTION QA BEHAVIORAL ARTIFACT VALIDATION PASS',
       'PRODUCTION QA APPROVAL/DISPATCH/IMMUTABLE-PLAN NEXT-TASK PASS'
     ]) assert.ok(qaArtifact.results.includes(`pass_marker=${marker}`), `durable QA artifact missing marker: ${marker}`);
@@ -2888,7 +4657,334 @@ try {
   assert.equal(mixedRework.synthesis_allowed, false);
   assert.deepEqual(mixedRework.targetRoles, ['engineer', 'security', 'qa', 'writer', 'reviewer']);
 
-  console.log('Runalith local MCP E2E: PASS (stdio MCP, approval, versioned custom-role CRUD/clone/validation, custom-workflow CRUD/clone/version pinning, DAG contract/cycle validation, immutable plan preview/approval, separate execution approval, custom workflow DAG execution and typed artifacts, 9-task built-in DAG, evidence-provenance rejection/restoration, deterministic local execution, production checks, reviewer rejection guard and provenance-preserving reviewer revision, mixed-finding rework routing, failure terminalization, synthesis, terminalization; no cloud/API key)');
+  // Dispatch and task preparation must independently fail closed while no
+  // authenticated reviewer attestation exists.
+  const blockedAggDispatchId = nextId++;
+  const blockedAggDispatch = await rawRpc({ jsonrpc: '2.0', id: blockedAggDispatchId, method: 'tools/call', params: {
+    name: 'workflow_dispatch', arguments: { job_id: executionGraphProposal.job_id }
+  } });
+  assert.equal(blockedAggDispatch.result?.isError, true);
+  assert.match(blockedAggDispatch.result?.content?.[0]?.text || '', /AGG_EXECUTION_AUTHORIZATION_NOT_VERIFIED|approval is not current|AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED/);
+  const blockedAggPrepareId = nextId++;
+  const blockedAggPrepare = await rawRpc({ jsonrpc: '2.0', id: blockedAggPrepareId, method: 'tools/call', params: {
+    name: 'workflow_prepare_tasks', arguments: { job_id: executionGraphProposal.job_id }
+  } });
+  assert.equal(blockedAggPrepare.result?.isError, true);
+  const blockedAggSandboxWithoutAttestation = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'adaptive_goal_sandbox_action_execute', arguments: { job_id: executionGraphProposal.job_id, task_id: 'not-yet-created-engineer-task' }
+  } });
+  assert.equal(blockedAggSandboxWithoutAttestation.result?.isError, true,
+    'the sandbox execution API must reject before task lookup/side effects while reviewer attestation and approval are absent');
+  assert.match(blockedAggSandboxWithoutAttestation.result?.content?.[0]?.text || '', /AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED|approval is not current|approved|attestation/i);
+  const blockedAggDb = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
+  assert.equal(blockedAggDb.prepare('SELECT COUNT(*) AS count FROM workflow_plans WHERE job_id=?').get(executionGraphProposal.job_id).count, 0);
+  assert.equal(blockedAggDb.prepare('SELECT COUNT(*) AS count FROM approvals WHERE job_id=?').get(executionGraphProposal.job_id).count, 0);
+  assert.equal(blockedAggDb.prepare('SELECT COUNT(*) AS count FROM tasks WHERE job_id=?').get(executionGraphProposal.job_id).count, 0);
+  assert.equal(blockedAggDb.prepare('SELECT state FROM jobs WHERE job_id=?').get(executionGraphProposal.job_id).state, 'IDLE');
+  blockedAggDb.close();
+
+  const currentAggCandidate = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id });
+  assert.equal(currentAggCandidate.status, 'fresh', JSON.stringify(currentAggCandidate, null, 2));
+  // Adversarial issuer: a validly-shaped proof signed by an untrusted private
+  // key must not satisfy the configured root even though reviewerId matches.
+  const rogueAggSigner = crypto.generateKeyPairSync('ed25519');
+  const rogueAggAttestation = signedAggReviewerAttestation(executionPlanCandidate.candidate, executionGraphProposal.job_id, rogueAggSigner.privateKey);
+  persistAggReviewerAttestation(executionGraphProposal.job_id, executionPlanCandidate.candidate, rogueAggAttestation);
+  const rogueAggPreflight = await tool('workflow_preflight', { job_id: executionGraphProposal.job_id });
+  assert.equal(rogueAggPreflight.ready, false);
+  assert.ok(rogueAggPreflight.blockers.some(item => item.code === 'AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED'));
+  const rogueAggSandboxExecute = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'adaptive_goal_sandbox_action_execute', arguments: { job_id: executionGraphProposal.job_id, task_id: 'not-yet-created-engineer-task' }
+  } });
+  assert.equal(rogueAggSandboxExecute.result?.isError, true,
+    'an attestation signed by a validly-shaped but untrusted key must not unlock sandbox execution');
+  assert.match(rogueAggSandboxExecute.result?.content?.[0]?.text || '', /AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED|approval is not current|approved|attestation/i);
+  const rogueAggSandboxReadbackDb = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
+  assert.equal(rogueAggSandboxReadbackDb.prepare("SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type='adaptive_goal.sandbox_action_claimed'").get(executionGraphProposal.job_id).count, 0,
+    'invalid reviewer identity must be rejected before the durable one-shot execution claim');
+  rogueAggSandboxReadbackDb.close();
+  const removeRogueAggProofDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  removeRogueAggProofDb.prepare('DELETE FROM events WHERE job_id=? AND type=?')
+    .run(executionGraphProposal.job_id, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
+  removeRogueAggProofDb.close();
+
+  // Test-only identity provider contract: this disposable harness controls the
+  // Ed25519 private key. Production has no configured provider and stays blocked.
+  const trustedAggAttestation = signedAggReviewerAttestation(executionPlanCandidate.candidate, executionGraphProposal.job_id);
+  persistAggReviewerAttestation(executionGraphProposal.job_id, executionPlanCandidate.candidate, trustedAggAttestation);
+  const verifiedAggCandidate = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionGraphProposal.job_id });
+  assert.equal(verifiedAggCandidate.status, 'fresh');
+  assert.equal(verifiedAggCandidate.reviewerIdentityVerified, true, JSON.stringify(verifiedAggCandidate.blockers));
+  assert.equal(verifiedAggCandidate.executionReviewReady, true);
+  assert.equal(verifiedAggCandidate.reviewerAttestation.providerId, aggReviewerTestProviderId);
+  assert.equal(verifiedAggCandidate.reviewerAttestation.reviewerSubject, reviewedExecutionGraphActionIntents.review.reviewerId);
+  assert.equal(verifiedAggCandidate.reviewerAttestation.authorizationScope, ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE);
+
+  const trustedAggPreflight = await tool('workflow_preflight', { job_id: executionGraphProposal.job_id });
+  assert.equal(trustedAggPreflight.ready, true, JSON.stringify(trustedAggPreflight, null, 2));
+  assert.equal(trustedAggPreflight.candidate_plan_hash, executionPlanCandidate.candidate.executionPlan.plan_hash);
+  assert.equal(trustedAggPreflight.immutable_plan_pinned, false);
+  const trustedApprovalArgs = {
+    job_id: executionGraphProposal.job_id,
+    confirmation: 'Approve candidate-only AGG review after the configured test identity provider attested the exact candidate/semantic/plan fingerprint; do not grant execution authorization.'
+  };
+
+  // Force a late failure while the approval transaction is pinning its plan.
+  // The decision row, state transition, event and plan insert must all roll back.
+  const aggApprovalFailureDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  aggApprovalFailureDb.exec(`CREATE TRIGGER inject_agg_plan_pin_failure
+    BEFORE INSERT ON workflow_plans WHEN NEW.job_id='${executionGraphProposal.job_id}'
+    BEGIN SELECT RAISE(ABORT, 'injected AGG approval plan pin failure'); END;`);
+  aggApprovalFailureDb.close();
+  const failedTrustedAggApproval = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'workflow_approve', arguments: trustedApprovalArgs
+  } });
+  assert.equal(failedTrustedAggApproval.result?.isError, true);
+  assert.match(failedTrustedAggApproval.result?.content?.[0]?.text || '', /injected AGG approval plan pin failure/);
+  const aggApprovalRollbackDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  aggApprovalRollbackDb.exec('DROP TRIGGER inject_agg_plan_pin_failure');
+  assert.equal(aggApprovalRollbackDb.prepare('SELECT state FROM jobs WHERE job_id=?').get(executionGraphProposal.job_id).state, 'IDLE');
+  assert.equal(aggApprovalRollbackDb.prepare('SELECT COUNT(*) AS count FROM approvals WHERE job_id=?').get(executionGraphProposal.job_id).count, 0);
+  assert.equal(aggApprovalRollbackDb.prepare('SELECT COUNT(*) AS count FROM workflow_plans WHERE job_id=?').get(executionGraphProposal.job_id).count, 0);
+  assert.equal(aggApprovalRollbackDb.prepare("SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type='approval.approved'").get(executionGraphProposal.job_id).count, 0);
+  aggApprovalRollbackDb.close();
+
+  // Concurrent approval requests share the same SQLite serialization boundary;
+  // one exact immutable plan and one durable approval must result.
+  const concurrentTrustedApprovals = await Promise.all([
+    tool('workflow_approve', trustedApprovalArgs),
+    tool('workflow_approve', trustedApprovalArgs)
+  ]);
+  assert.ok(concurrentTrustedApprovals.every(result => result.approved === true));
+  assert.ok(concurrentTrustedApprovals.every(result => result.plan?.plan_hash === executionPlanCandidate.candidate.executionPlan.plan_hash));
+  const approvedActionIntentWrapperRead = await tool('workflow_get', { job_id: executionGraphProposal.job_id });
+  assert.equal(approvedActionIntentWrapperRead.job.state, 'APPROVED');
+  assert.equal(approvedActionIntentWrapperRead.plan.plan_hash, executionPlanCandidate.candidate.executionPlan.plan_hash);
+  assert.equal(approvedActionIntentWrapperRead.tasks.length, 0, 'approval must not create or dispatch host tasks');
+  assert.equal(approvedActionIntentWrapperRead.approvals.length, 1, 'concurrent approval attempts must not duplicate the approval ledger');
+  const approvedActionIntentPreflight = await tool('workflow_preflight', { job_id: executionGraphProposal.job_id });
+  assert.equal(approvedActionIntentPreflight.ready, true);
+  assert.equal(approvedActionIntentPreflight.candidate_plan_hash, executionPlanCandidate.candidate.executionPlan.plan_hash);
+  assert.equal(approvedActionIntentPreflight.immutable_plan_pinned, true);
+
+  // Keep plan approval, dispatch, and host-task preparation as distinct gates.
+  const actionIntentDispatch = await tool('workflow_dispatch', { job_id: executionGraphProposal.job_id });
+  assert.equal(actionIntentDispatch.dispatched, true);
+  assert.equal(actionIntentDispatch.phase, 'SPAWN_CTO');
+  const actionIntentPrepared = await tool('workflow_prepare_tasks', { job_id: executionGraphProposal.job_id });
+  assert.equal(actionIntentPrepared.prepared, true);
+  assert.equal(actionIntentPrepared.count, 9);
+  assert.equal(actionIntentPrepared.plan_hash, executionPlanCandidate.candidate.executionPlan.plan_hash);
+  // Execute only the three dependency-ready local prerequisites in this
+  // disposable workflow, then run the actual candidate-bound engineer action
+  // through the hard-coded isolated sandbox executor.
+  for (const role of ['product-owner', 'researcher', 'architect']) {
+    const prerequisiteTask = await tool('workflow_next_task', { job_id: executionGraphProposal.job_id });
+    assert.equal(prerequisiteTask.stage, 'task', `AGG sandbox expects prerequisite ${role}: ${JSON.stringify(prerequisiteTask)}`);
+    assert.equal(prerequisiteTask.task.role, role);
+    await tool('workflow_complete_task', {
+      task_id: prerequisiteTask.task.task_id,
+      content: `Completed isolated sandbox-executor prerequisite: ${role}.`,
+      artifact: artifactFor(role)
+    });
+  }
+  const sandboxEngineerTask = await tool('workflow_next_task', { job_id: executionGraphProposal.job_id });
+  assert.equal(sandboxEngineerTask.stage, 'task');
+  assert.equal(sandboxEngineerTask.task.role, 'engineer');
+  const preparedIntentDb = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
+  const preparedIntentTask = preparedIntentDb.prepare("SELECT task_id,description,metadata_json FROM tasks WHERE job_id=? AND task_id=?").get(executionGraphProposal.job_id, sandboxEngineerTask.task.task_id);
+  assert.ok(preparedIntentTask, 'mapped engineer task is materialized only after trusted review, plan approval and dispatch');
+  const preparedIntentMetadata = JSON.parse(preparedIntentTask.metadata_json);
+  assert.equal(preparedIntentMetadata.action_intent.operation, 'implement');
+  assert.equal(preparedIntentMetadata.action_intent.task_id, 'standard-engineer');
+  assert.equal(preparedIntentMetadata.action_intent.semantic_verification.policy_version, 1);
+  assert.equal(preparedIntentMetadata.deterministic, false, 'the bounded test action is dispatched through an explicit test-only executor, not fabricated as a generic command');
+  assert.equal(preparedIntentMetadata.executable, undefined);
+  assert.equal(preparedIntentMetadata.args, undefined);
+  assert.match(preparedIntentTask.description, /Immutable typed AGG action intent/);
+  assert.match(preparedIntentTask.description, /bounded test fixture/);
+  assert.match(preparedIntentTask.description, /read-only MCP proposal API/);
+  assert.match(preparedIntentTask.description, /untrusted artifact JSON/);
+  assert.match(preparedIntentTask.description, /artifact_created_event_id/);
+  assert.equal(preparedIntentDb.prepare('SELECT state,status FROM jobs WHERE job_id=?').get(executionGraphProposal.job_id).state, 'EXECUTING');
+  assert.equal(preparedIntentDb.prepare("SELECT COUNT(*) AS count FROM approvals WHERE job_id=? AND decision='approved'").get(executionGraphProposal.job_id).count, 1);
+  preparedIntentDb.close();
+
+  // A stale prerequisite is rejected by the actual execution gate. Restore its
+  // status byte-for-byte and retry the same not-yet-claimed task safely.
+  const sandboxEvidenceDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  const originalRequirements = sandboxEvidenceDb.prepare("SELECT status FROM artifacts WHERE artifact_id='artifact-requirements'").get();
+  assert.equal(originalRequirements.status, 'active');
+  sandboxEvidenceDb.prepare("UPDATE artifacts SET status='superseded' WHERE artifact_id='artifact-requirements'").run();
+  sandboxEvidenceDb.close();
+  const staleSandboxAttempt = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'adaptive_goal_sandbox_action_execute', arguments: { job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id }
+  } });
+  assert.equal(staleSandboxAttempt.result?.isError, true);
+  assert.match(staleSandboxAttempt.result?.content?.[0]?.text || '', /stale|invalid|not active|source evidence/i);
+  const restoreSandboxEvidenceDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  restoreSandboxEvidenceDb.prepare("UPDATE artifacts SET status='active' WHERE artifact_id='artifact-requirements'").run();
+  restoreSandboxEvidenceDb.close();
+
+  const sandboxPreCrash = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'adaptive_goal_sandbox_action_execute', arguments: { job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id }
+  } });
+  assert.equal(sandboxPreCrash.result?.isError, true, 'test-only failpoint must interrupt after durable task/result/artifact completion but before the sandbox completion event');
+  assert.match(sandboxPreCrash.result?.content?.[0]?.text || '', /AGG_SANDBOX_TEST_FAILPOINT/);
+  // Reopen the same disposable SQLite database in a genuinely new MCP process.
+  // Recovery must reconstruct the committed result/artifact/receipt lineage from
+  // disk and persist the missing completion event without invoking the action.
+  const oldServer = child;
+  const oldServerExit = new Promise(resolve => oldServer.once('exit', (code, signal) => resolve({ code, signal })));
+  oldServer.kill('SIGKILL');
+  const oldServerStatus = await oldServerExit;
+  assert.equal(oldServerStatus.signal, 'SIGKILL', 'the pre-completion crash test must terminate the original MCP process');
+  child = startMcpServer();
+  const restartedInitialize = await rpc('initialize', {
+    protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'agg-sandbox-recovery-restart-test', version: '1' }
+  });
+  assert.equal(restartedInitialize.error, undefined, `restarted MCP must reopen the same durable SQLite state: ${JSON.stringify(restartedInitialize.error)}`);
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
+  console.log('AGG_SANDBOX_PROCESS_RESTART_RECOVERY: original MCP process SIGKILLed after durable result/artifact commit; same disposable SQLite DB reopened in a new process');
+  const sandboxExecution = await tool('adaptive_goal_sandbox_action_execute', {
+    job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id
+  });
+  assert.equal(sandboxExecution.executed, true, JSON.stringify(sandboxExecution, null, 2));
+  assert.equal(sandboxExecution.actionExecutedNow, false, 'crash-window recovery must not execute the completed action again');
+  assert.equal(sandboxExecution.idempotent, true);
+  assert.equal(sandboxExecution.recovered, true);
+  assert.equal(sandboxExecution.status, 'recovered_completed_receipt_verified');
+  assert.equal(sandboxExecution.action_id, 'implement-fixture-validator-v1');
+  assert.equal(sandboxExecution.tests_passed, 3);
+  assert.deepEqual(sandboxExecution.gates, {
+    reviewerIdentityVerified: true, approvalCurrent: true, immutablePlanMatched: true,
+    prerequisitesVerified: true, sandboxActionExecuted: true, productionAuthorityGranted: false, dispatchBypassed: false
+  });
+  const sandboxReceiptPath = path.join(dataDir, 'agg-sandbox', sandboxExecution.sandbox_directory_name, 'receipt.json');
+  const sandboxReceiptBytes = fs.readFileSync(sandboxReceiptPath);
+  assert.equal(crypto.createHash('sha256').update(sandboxReceiptBytes).digest('hex'), sandboxExecution.receipt_sha256);
+
+  // Mutated receipt bytes invalidate a retry even though the workflow remains
+  // approved and the result rows still exist. Restore the private fixture file,
+  // then prove replay only reads the exact receipt instead of executing again.
+  fs.writeFileSync(sandboxReceiptPath, `${sandboxReceiptBytes.toString('utf8')} `, { mode: 0o600 });
+  const tamperedReceiptReplay = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'adaptive_goal_sandbox_action_execute', arguments: { job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id }
+  } });
+  assert.equal(tamperedReceiptReplay.result?.isError, true);
+  assert.match(tamperedReceiptReplay.result?.content?.[0]?.text || '', /AGG_SANDBOX_RECEIPT_HASH_MISMATCH/);
+  fs.writeFileSync(sandboxReceiptPath, sandboxReceiptBytes, { mode: 0o600 });
+  const sandboxReplay = await tool('adaptive_goal_sandbox_action_execute', {
+    job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id
+  });
+  assert.equal(sandboxReplay.idempotent, true);
+  assert.equal(sandboxReplay.actionExecutedNow, false);
+  assert.equal(sandboxReplay.replayPrevented, true);
+  assert.equal(sandboxReplay.receipt_sha256, sandboxExecution.receipt_sha256);
+
+  // A completed event and a successful result row are not enough if the result
+  // payload itself was rewritten after commit. Keep the row identity/outcome
+  // intact and require replay to cross-check result bytes against the exact
+  // receipt and implementation artifact lineage.
+  const sandboxResultTamperDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  const originalSandboxResult = sandboxResultTamperDb.prepare('SELECT content FROM results WHERE result_id=?').get(sandboxExecution.result_id);
+  assert.ok(originalSandboxResult);
+  const tamperedSandboxResultContent = JSON.parse(originalSandboxResult.content);
+  tamperedSandboxResultContent.sandbox_receipt_sha256 = '0'.repeat(64);
+  sandboxResultTamperDb.prepare('UPDATE results SET content=? WHERE result_id=?')
+    .run(JSON.stringify(tamperedSandboxResultContent), sandboxExecution.result_id);
+  sandboxResultTamperDb.close();
+  const tamperedResultReplay = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'adaptive_goal_sandbox_action_execute', arguments: { job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id }
+  } });
+  assert.equal(tamperedResultReplay.result?.isError, true,
+    'a successful result row with tampered content must not validate by its stable result ID/outcome alone');
+  assert.match(tamperedResultReplay.result?.content?.[0]?.text || '', /AGG_SANDBOX_COMPLETION_LINEAGE_MISMATCH/);
+  const restoreSandboxResultDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  restoreSandboxResultDb.prepare('UPDATE results SET content=? WHERE result_id=?')
+    .run(originalSandboxResult.content, sandboxExecution.result_id);
+  restoreSandboxResultDb.close();
+  const sandboxReplayAfterResultRestore = await tool('adaptive_goal_sandbox_action_execute', {
+    job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id
+  });
+  assert.equal(sandboxReplayAfterResultRestore.idempotent, true);
+  assert.equal(sandboxReplayAfterResultRestore.actionExecutedNow, false,
+    'restoring exact committed result bytes must allow only read-only replay, never another fixture execution');
+
+  // Matching artifact-row and completion-event digest claims are not enough:
+  // replay must hash the exact persisted artifact content bytes before it
+  // reports a prior success as verified. Restore the disposable row after the
+  // injected tamper and prove the same action remains idempotent.
+  const sandboxArtifactTamperDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  const originalSandboxArtifactBytes = sandboxArtifactTamperDb.prepare(
+    'SELECT content,content_hash,uri,metadata_json FROM artifacts WHERE artifact_id=?'
+  ).get(sandboxExecution.artifact_id);
+  assert.ok(originalSandboxArtifactBytes);
+  sandboxArtifactTamperDb.prepare('UPDATE artifacts SET content=? WHERE artifact_id=?')
+    .run(`${originalSandboxArtifactBytes.content} `, sandboxExecution.artifact_id);
+  sandboxArtifactTamperDb.close();
+  const tamperedArtifactReplay = await rawRpc({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: {
+    name: 'adaptive_goal_sandbox_action_execute', arguments: { job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id }
+  } });
+  assert.equal(tamperedArtifactReplay.result?.isError, true,
+    'artifact bytes changed behind an unchanged content_hash must invalidate replay');
+  assert.match(tamperedArtifactReplay.result?.content?.[0]?.text || '', /AGG_SANDBOX_COMPLETION_LINEAGE_MISMATCH/);
+  const restoreSandboxArtifactDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  restoreSandboxArtifactDb.prepare('UPDATE artifacts SET content=?,content_hash=?,uri=?,metadata_json=? WHERE artifact_id=?')
+    .run(originalSandboxArtifactBytes.content, originalSandboxArtifactBytes.content_hash, originalSandboxArtifactBytes.uri,
+      originalSandboxArtifactBytes.metadata_json, sandboxExecution.artifact_id);
+  restoreSandboxArtifactDb.close();
+  const sandboxReplayAfterArtifactRestore = await tool('adaptive_goal_sandbox_action_execute', {
+    job_id: executionGraphProposal.job_id, task_id: sandboxEngineerTask.task.task_id
+  });
+  assert.equal(sandboxReplayAfterArtifactRestore.idempotent, true);
+  assert.equal(sandboxReplayAfterArtifactRestore.actionExecutedNow, false,
+    'restoring exact committed bytes must permit read-only idempotent replay without rerunning the action');
+
+  const sandboxOutputDb = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
+  const sandboxImplementation = sandboxOutputDb.prepare("SELECT artifact_id,content_hash,content FROM artifacts WHERE artifact_id=? AND status='active'").get(sandboxExecution.artifact_id);
+  const sandboxResult = sandboxOutputDb.prepare('SELECT result_id,outcome,content FROM results WHERE result_id=?').get(sandboxExecution.result_id);
+  assert.ok(sandboxImplementation);
+  const sandboxImplementationContent = JSON.parse(sandboxImplementation.content);
+  assert.equal(sandboxImplementationContent.execution.receipt_sha256, sandboxExecution.receipt_sha256);
+  assert.equal(sandboxImplementationContent.execution.node_permission_model_enabled, true);
+  assert.equal(sandboxImplementationContent.execution.filesystem_access_confined_to_sandbox, true);
+  assert.equal(sandboxImplementationContent.execution.child_process_allowed, false);
+  assert.equal(sandboxImplementationContent.execution.addons_allowed, false);
+  assert.equal(sandboxImplementationContent.execution.worker_threads_allowed, false);
+  assert.equal(sandboxImplementationContent.execution.network_permission_enforced, false,
+    'the evidence artifact must not claim network isolation that Node permission model does not provide');
+  assert.equal(sandboxImplementationContent.execution.os_cpu_memory_quota_enforced, false,
+    'the evidence artifact must not claim OS CPU/memory quotas that are not implemented');
+  assert.equal(sandboxResult.outcome, 'success');
+  assert.equal(sandboxOutputDb.prepare("SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type='adaptive_goal.sandbox_action_completed'").get(executionGraphProposal.job_id).count, 1);
+  assert.equal(sandboxOutputDb.prepare("SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type='adaptive_goal.sandbox_action_claimed'").get(executionGraphProposal.job_id).count, 1);
+  assert.equal(sandboxOutputDb.prepare("SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type='adaptive_goal.sandbox_action_failed'").get(executionGraphProposal.job_id).count, 0);
+  sandboxOutputDb.close();
+  console.log(`AGG_SANDBOX_EXECUTION_EVIDENCE ${JSON.stringify({
+    job_id: sandboxExecution.job_id,
+    task_id: sandboxExecution.task_id,
+    attempt_id: sandboxExecution.attempt_id,
+    action_id: sandboxExecution.action_id,
+    candidate_hash: sandboxExecution.candidate_hash,
+    immutable_plan_hash: sandboxExecution.immutable_plan_hash,
+    intent_hash: sandboxExecution.intent_hash,
+    result_id: sandboxExecution.result_id,
+    artifact_id: sandboxExecution.artifact_id,
+    receipt_sha256: sandboxExecution.receipt_sha256,
+    tests_passed: sandboxExecution.tests_passed,
+    elapsed_ms: sandboxExecution.elapsed_ms,
+    prerequisite_artifact_ids: sandboxExecution.prerequisite_artifact_ids,
+    stale_prerequisite_rejected: staleSandboxAttempt.result?.isError === true,
+    tampered_receipt_rejected: tamperedReceiptReplay.result?.isError === true,
+    crash_window_recovered_without_execution: sandboxExecution.recovered === true && sandboxExecution.actionExecutedNow === false,
+    replay_idempotent_without_execution: sandboxReplay.idempotent === true && sandboxReplay.actionExecutedNow === false,
+    gates: sandboxExecution.gates,
+    trust: 'disposable test-only Ed25519 trust root; not production reviewer authority'
+  })}`);
+  console.log('AGG action executor: independent review attestation + immutable approved plan + prerequisite lineage + isolated no-network action + typed implementation artifact + receipt hash + replay/tamper protection PASS (test-only identity trust root)');
+
+  console.log('Runalith local MCP E2E: PASS (stdio MCP, approval, versioned custom-role CRUD/clone/validation, custom-workflow CRUD/clone/version pinning, DAG contract/cycle validation, immutable plan preview/approval, separate execution approval, custom workflow DAG execution and typed artifacts, 9-task built-in DAG, evidence-provenance rejection/restoration, deterministic local execution, test-only AGG sandbox action execution, production checks, reviewer rejection guard and provenance-preserving reviewer revision, mixed-finding rework routing, failure terminalization, synthesis, terminalization; no cloud/API key)');
 } finally {
   child.stdin.end();
   await new Promise(resolve => {

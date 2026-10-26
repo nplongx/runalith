@@ -1,0 +1,3 @@
+bin,count,mean_predicted_probability,observed_positive_rate
+0,20,0.013853817223325788,0.0
+9,20,0.9902588032808666,1.0

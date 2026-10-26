@@ -8,6 +8,10 @@ This index is the starting point for users, operators, and contributors. Visit t
 - [Root README](../README.md) — project purpose, capabilities, security boundaries, commands, and navigation.
 - [Testing pre-release notes for 1.0.9-rc.5](release-notes-1.0.9-rc.5.md) — Runalith package identity, compatibility and testing boundaries.
 - [Local RC.5 installation verification (2026-10-20)](installation-verification-1.0.9-rc.5-20261020.md) — evidence for a separate workspace-built candidate and installed file-content comparison; not the published release asset or release approval.
+- [RC.7 rollout readiness and rollback runbook](runalith-rollout-rc7.md) — versioned runtime identity, non-mutating preflight, installed-generation rollback snapshots, simulated switch/recovery, and explicit host-managed activation gates.
+- [RC.7 rollout-readiness evidence (2026-10-26)](rollout-readiness-1.0.9-rc.7-20261026.md) — candidate/rollback hashes, current host gate, live workflow counters, and exact missing evidence contracts for all nine Plan Graph steps.
+- [RC.8 rollout readiness and rollback runbook](runalith-rollout-rc8.md) — signed Goal/Idea snapshot verification, Plan/Execution Graph authorization gates, package parity, and non-mutating host preflight.
+- [RC.8 rollout-readiness evidence (2026-10-26)](rollout-readiness-1.0.9-rc.8-20261026.md) — historical and latest hardened candidate identities, JSON trust onboarding/rotation tests, isolated entrypoint acceptance, current read-only live blockers, and next safe step.
 
 ## Using the runtime
 
@@ -23,6 +27,7 @@ This index is the starting point for users, operators, and contributors. Visit t
 ## Understanding the implementation
 
 - [Architecture](architecture.md) — runtime components, durable state, execution, and recovery boundaries.
+- [Adaptive Goal Graph](adaptive-goal-graph.md) — Goal/Idea snapshot attestation, administrator-managed verifier/reviewer trust roots and rotation, evidence lineage, Plan/Execution Graph gating, bounded search, and review-only learning/shadow paths.
 - [Architecture illustrations](diagrams/README.md) — GitHub-rendered static PNGs that supplement the written explanation.
 - [Release policy](RELEASE_POLICY.md) — minimum checks for experimental GitHub pre-releases versus formal frozen/production releases.
 - [Known issues and release blockers](KNOWN_ISSUES.md) — current limits and outstanding gates; this is not a general feature roadmap.

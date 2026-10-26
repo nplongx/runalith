@@ -6,6 +6,12 @@ const root = path.resolve(process.argv[2] || path.resolve(path.dirname(fileURLTo
 const stage = path.resolve(process.argv[3]);
 if (!process.argv[3]) throw new Error('staging directory argument is required');
 if (fs.realpathSync(root) !== root) throw new Error('plugin source root must not be a symlink alias');
+const sourcePackage = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const runtimeEntryPoint = sourcePackage.runtimeEntryPoint;
+if (typeof runtimeEntryPoint !== 'string' || !runtimeEntryPoint || path.isAbsolute(runtimeEntryPoint) ||
+    runtimeEntryPoint.split(/[\\/]/).some(part => !part || part === '.' || part === '..')) {
+  throw new Error('package.json must declare a safe relative runtimeEntryPoint');
+}
 
 function assertRegularSource(relative) {
   let cursor = root;
@@ -23,11 +29,53 @@ function assertRegularSource(relative) {
 }
 
 const queue = [
+  // The manifest-selected versioned entry point is the actual released runtime.
+  runtimeEntryPoint,
+  // Preserve the historical entry point as a byte-pinned provenance input;
+  // it is not selected by the new release manifest.
   'server/index.js',
   'src/runtime/job-store.js',
   // The read-only liveness tool is imported through runtimePrefix rather than
   // a static relative path, so package it explicitly with the runtime closure.
   'src/runtime/job-liveness.js',
+  // The read-only AGG shadow-planning tool is loaded via runtimePrefix.
+  'src/runtime/adaptive-goal-graph.js',
+  // Phase 2 learned ranking and its non-persisted Plan Graph projection are
+  // reached through runtimePrefix imports, so pin both roots explicitly.
+  'src/runtime/adaptive-goal-phase2-search.js',
+  'src/runtime/adaptive-goal-phase2-plan-shadow.js',
+  // Phase 3 bounded MCTS is loaded through runtimePrefix and remains opt-in.
+  'src/runtime/adaptive-goal-phase3-mcts.js',
+  // Content-addressed local source byte verification for AGG provenance (never claim verification).
+  'src/runtime/adaptive-goal-source-evidence.js',
+  // Strict durable producer/result/attempt/completion validation for AGG evidence.
+  'src/runtime/adaptive-goal-evidence-lineage.js',
+  // Persistent shared Goal/Idea knowledge graph store, loaded through runtimePrefix.
+  'src/runtime/adaptive-goal-knowledge-store.js',
+  // Independently signed, snapshot-bound Goal/Idea provenance verifier; must
+  // ship with the runtime because the server loads it through runtimePrefix.
+  'src/runtime/adaptive-goal-knowledge-verifier.js',
+  // Durable, provenance-bound telemetry for Phase 1/2/3 AGG search invocations.
+  'src/runtime/adaptive-goal-planner-telemetry.js',
+  // Phase 4 terminal workflow outcome capture, loaded through runtimePrefix.
+  'src/runtime/adaptive-goal-knowledge-capture.js',
+  // Test-only, allowlisted AGG sandbox action executor; it refuses non-test mode and arbitrary commands.
+  'src/runtime/adaptive-goal-sandbox-executor.js',
+  // The read-only AGG-to-Plan-Graph projection is loaded via runtimePrefix.
+  'src/runtime/adaptive-goal-plan-adapter.js',
+  // The read-only compatibility checker compiles template previews in memory.
+  'src/runtime/adaptive-goal-compatibility.js',
+  // Read-only mapping checks against role/task/artifact contracts.
+  'src/runtime/adaptive-goal-execution-readiness.js',
+  // Review-only Execution Graph proposal materialization and hash checks.
+  'src/runtime/adaptive-goal-execution-graph-proposal.js',
+  // Adapt verified Execution Graph proposals to the existing compiler/validator plan as a sidecar candidate only.
+  'src/runtime/adaptive-goal-execution-plan-candidate.js',
+  // Versioned review-only action-intent to typed artifact-binding contract; never an alternate executor.
+  'src/runtime/adaptive-goal-reviewed-task-inputs.js',
+  // Deterministic semantic policy for typed AGG action intents and provider-signed reviewer identity gates.
+  'src/runtime/adaptive-goal-action-intent-policy.js',
+  'src/runtime/adaptive-goal-reviewer-identity.js',
   'src/runtime/execution-manager.js',
   // The packaged Phase-5 recovery regression loads this module via a fixture
   // forwarder; include it in the staged test runtime closure explicitly.

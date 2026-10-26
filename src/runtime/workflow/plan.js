@@ -1,6 +1,6 @@
 import { parseStrictJson } from '../strict-json.js';
 import path from 'node:path';
-import { getAgentContract } from './agent-contracts.js';
+import { getAgentContract, validateCompiledActionIntent } from './agent-contracts.js';
 import { validateSuccessContract } from './success-contract.js';
 import { composePolicySuccessContract, validateValidationProfileSnapshot, materializeValidationProfileTasks } from './policy-contract.js';
 import { validateRoleProfileOverlay } from './role-profiles.js';
@@ -225,6 +225,13 @@ export function validateExecutionPlan(plan) {
       if (task.execution.executor !== 'ExecutionManager') throw new Error('deterministic task must use ExecutionManager: ' + task.id);
       if (!task.execution.executable || !Array.isArray(task.execution.args)) throw new Error('structured execution contract required: ' + task.id);
       if (!task.execution.cwd || !Number.isInteger(task.execution.timeout_ms) || task.execution.timeout_ms <= 0) throw new Error('invalid deterministic execution metadata: ' + task.id);
+    }
+    if (Object.hasOwn(task.execution || {}, 'action_intent')) {
+      if (plan.custom_workflow || task === plan.synthesis || task.execution?.deterministic === true) {
+        throw new Error(`typed AGG action intent is not supported for custom, synthesis, or deterministic task ${task.id}`);
+      }
+      try { validateCompiledActionIntent(task.role, task.execution.action_intent, task.id); }
+      catch (error) { throw new Error(`execution plan action-intent contract is invalid for ${task.id}: ${String(error?.message || error)}`); }
     }
     if (Object.hasOwn(task.execution || {}, 'role_profile_overlay')) {
       if (plan.custom_workflow || !['standard-engineering', 'hybrid-engineering'].includes(plan.workflow_id) || task === plan.synthesis || task.execution?.deterministic) {

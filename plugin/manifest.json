@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "runalith-agent-orchestrator",
   "display_name": "Runalith",
-  "version": "1.0.9-rc.5",
+  "version": "1.0.9-rc.11",
   "description": "Local-first durable agent workflow orchestration with immutable plans, versioned policies, typed evidence, and approval-gated execution.",
   "long_description": "Runalith is a local-first MCP workflow runtime. It persists workflow state in SQLite, compiles explicitly approved proposals into immutable plans, schedules dependency-aware specialist tasks, executes approved deterministic commands locally, validates typed artifacts and provenance, and records recovery and audit events. The MCPB is a standard package container for compatible clients; Runalith does not provide a hosted model service or remote execution fleet.",
   "author": {
@@ -10,13 +10,17 @@
   },
   "server": {
     "type": "node",
-    "entry_point": "server/index.js",
+    "entry_point": "server/index-v1.0.9-rc.11.js",
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/server/index.js"
+        "${__dirname}/server/index-v1.0.9-rc.11.js"
       ],
-      "env": {}
+      "env": {
+        "AGG_PHASE2_SHADOW_TOOL_ENABLED": "1",
+        "AGG_PHASE3_MCTS_TOOL_ENABLED": "1",
+        "AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED": "1"
+      }
     }
   },
   "tools": [
@@ -31,6 +35,102 @@
     {
       "name": "orchestrator_health",
       "description": "Check local plugin and SQLite state; does not probe remote services."
+    },
+    {
+      "name": "adaptive_goal_graph_search",
+      "description": "Run bounded, read-only Adaptive Goal Graph nominal-success beam search and project complete candidates into review-only Plan Graph drafts. Returns deterministic expansion/pruning/lineage audit, explicit relation semantics, unverified evidence ledger, and unknown metrics as null. Candidate execution gates remain disabled."
+    },
+    {
+      "name": "adaptive_goal_phase2_shadow_search",
+      "description": "Opt-in source-only Phase 2 learned-discriminator search; set AGG_PHASE2_SHADOW_TOOL_ENABLED=1 to expose it in tools/list. Uses a caller-supplied self-hash-validated model and returns non-persisted review-only Plan Graph shadow drafts. Model hash is not trusted provenance; metrics are not independently recomputed without examples. Never persists, approves, dispatches, or executes."
+    },
+    {
+      "name": "adaptive_goal_phase3_mcts_shadow_search",
+      "description": "Opt-in source-only Phase 3 bounded UCT/MCTS over Idea Graph nominal transitions, guided by a caller-supplied Phase 2 discriminator. Set AGG_PHASE3_MCTS_TOOL_ENABLED=1 only for authorized shadow testing. Results remain non-persisted, unverified, non-exhaustive and non-executable; model self-hash is not trusted provenance."
+    },
+    {
+      "name": "adaptive_goal_recovery_resolve",
+      "description": "Read-only, outcome-aware recovery recommendation for explicit recovers_to conditions. Requires the observed outcome and declared available prerequisite/evidence nodes; the result is not independently evidence-verified and never authorizes execution."
+    },
+    {
+      "name": "adaptive_goal_knowledge_node_save",
+      "description": "Append or revise a shared Idea Graph node with stable cross-goal identity, immutable revisions, canonical content/evidence hash, required provenance and expected-revision compare-and-swap. Saved knowledge remains unverified."
+    },
+    {
+      "name": "adaptive_goal_knowledge_capture_workflow_outcome",
+      "description": "Opt-in source-only local testing tool. Capture bounded metadata from a terminal local workflow as an unverified Idea Graph experiment with an optional caller-authored lesson; no result bodies, verification, authorization, or dispatch."
+    },
+    {
+      "name": "adaptive_goal_knowledge_edge_add",
+      "description": "Append a typed, provenance-bound Idea Graph relation. recovers_to requires explicit condition and expected-outcome contracts, and does not grant execution authority."
+    },
+    {
+      "name": "adaptive_goal_knowledge_search",
+      "description": "Search the shared append-only Idea Graph across goals and inspect reused concept memberships. Unverified knowledge is discoverable for review but unusable for planning without an independent verifier."
+    },
+    {
+      "name": "adaptive_goal_knowledge_snapshot_get",
+      "description": "Read a canonical persisted Goal/Idea Graph snapshot, all current and historical revisions, membership and edge provenance, and current evidence-integrity results. A trusted external signature is required before the snapshot is planning-usable."
+    },
+    {
+      "name": "adaptive_goal_trust_configuration_status",
+      "description": "Read-only for workflow, graph and approval state; records an observed valid trust configuration version/fingerprint in a separate append-only local ledger to prevent downgrade. Reports config version/fingerprint, public-root fingerprints, validity/revocation and administrator change metadata without exposing PEMs. Flags shared provider IDs or roots across source-verifier and reviewer domains. Configure through the host-supported administrator environment mechanism, never through MCP arguments."
+    },
+    {
+      "name": "adaptive_goal_knowledge_snapshot_attest",
+      "description": "Verify and persist an external Ed25519 Goal/Idea Graph attestation over the exact snapshot and current durable evidence manifest; caller-supplied hashes cannot self-promote source claims or independence."
+    },
+    {
+      "name": "adaptive_goal_knowledge_graph_search",
+      "description": "Search a current verifier-attested persisted Goal/Idea Graph and project review-only Plan Graph drafts, requiring exact snapshot identity and revalidated evidence lineage."
+    },
+    {
+      "name": "adaptive_goal_knowledge_node_get",
+      "description": "Read the current or exact immutable Idea Graph node revision, including cross-goal memberships, evidence refs, content hash, provenance hash, and unverified status."
+    },
+    {
+      "name": "adaptive_goal_knowledge_node_history",
+      "description": "Read append-only revision history for a shared Idea Graph node; historical content/evidence refs/hashes are preserved and remain unverified."
+    },
+    {
+      "name": "adaptive_goal_knowledge_recovery_resolve",
+      "description": "Read-only outcome-aware recovery check for a persisted Idea Graph recovers_to edge. Requires a matching observed outcome and active durable artifact evidence whose hash, producer, result and completion lineage verifies and whose structured content declares the same outcome. Recovery routes remain review-only and cannot be executed or dispatched."
+    },
+    {
+      "name": "adaptive_goal_plan_compatibility_check",
+      "description": "Read-only compatibility assessment for an unverified AGG Plan Graph draft against a compiled supported workflow template using explicit step-to-task bindings. Reports dependency/template blockers only; never creates a workflow proposal, persists a plan, approves, authorizes, dispatches, or executes."
+    },
+    {
+      "name": "adaptive_goal_plan_proposal_create",
+      "description": "Create a review-only workflow proposal from a freshly revalidated AGG candidate using explicit step-to-task bindings. Recomputes the candidate and compatibility in memory, pins draft/mapping hashes into the success contract and stores the exact draft snapshot in the proposal event. Creates a PROPOSED workflow only; it does not pre-approve, pin an immutable execution plan, dispatch, or execute. Run workflow_preflight and inspect the proposal before separately approving."
+    },
+    {
+      "name": "adaptive_goal_plan_proposal_get",
+      "description": "Read back and revalidate the exact AGG proposal snapshot (source graph, candidate-derived Plan Graph draft, draft/mapping hashes, and structural template compatibility). Read-only; it does not alter workflow state, approve, dispatch, or execute."
+    },
+    {
+      "name": "adaptive_goal_execution_readiness_check",
+      "description": "Read-only assessment of explicit AGG action-to-task mappings against immutable role capability/input/output artifact contracts, compiled dependency ancestry, and durable artifact/evidence lineage. It distinguishes contract readiness from source-evidence readiness and never creates an Execution Graph or executable contract, grants permissions, approves, dispatches, or executes."
+    },
+    {
+      "name": "adaptive_goal_execution_graph_proposal_create",
+      "description": "Create a persisted, review-only Execution Graph proposal from a stored Plan Graph proposal after revalidating its candidate, exact draft/bindings, role/capability contracts, DAG ancestry, active durable artifact/event lineage, producer completion, schema versions and hashes. Requires readiness to pass; otherwise returns stable blockers without writing a job. A successful result creates only a PROPOSED standard-engineering review wrapper, never executable contracts, task rows, approval, dispatch or execution."
+    },
+    {
+      "name": "adaptive_goal_execution_graph_proposal_get",
+      "description": "Read back and revalidate a stored Execution Graph proposal against its source Plan Graph proposal and current durable artifact evidence. Reports stale hashes, changed workflow contracts or invalidated evidence as stable blockers. Read-only; never pins plans, approves, dispatches or executes."
+    },
+    {
+      "name": "adaptive_goal_execution_plan_candidate_create",
+      "description": "Validate and persist a review-only execution-plan candidate through the existing compiler and validator. A versioned semantic policy enforces role/capability, canonical operation, exactly bound target, output artifact type, complete role completion criteria, canonical description, and proof/hash. Caller-supplied reviewerId is never authenticated identity: approval, dispatch and task preparation require a valid, unexpired, replay-free provider-signed Ed25519 attestation under the configured trust root, bound to the exact candidate, semantic fingerprint, role-contract version and immutable-plan hash. Without that provider integration the identity blocker remains fail-closed. Candidate creation only stores one bounded event; it never approves, pins plans, creates tasks, dispatches, authorizes execution, or synthesizes commands/arguments."
+    },
+    {
+      "name": "adaptive_goal_execution_plan_candidate_get",
+      "description": "Rebuild and revalidate the persisted execution-plan candidate and its original reviewed-action-intent input from the current Execution Graph proposal, source evidence, typed artifact bindings, role/artifact contracts, dependency ancestry, compiler output, validator and normal preflight hash. Reports tampering/staleness as stable blockers; does not refresh snapshots, pin plans, approve, create tasks or dispatch."
+    },
+    {
+      "name": "adaptive_goal_sandbox_action_execute",
+      "description": "Experimental test-only executor for one hard-coded, no-network AGG fixture action. Requires provider-signed reviewer identity, exact current candidate/intent and immutable approved plan, dispatch, completed prerequisites, and durable evidence lineage. Refuses production mode, stale/tampered inputs, unsupported actions and replay; does not accept caller-supplied commands or paths, and never grants production execution authority."
     },
     {
       "name": "workflow_catalog",

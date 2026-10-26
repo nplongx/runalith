@@ -1,4 +1,16 @@
 import assert from 'node:assert/strict';
+// Execute the isolated AGG cases through this plan-pinned deterministic validation task.
+import './test-adaptive-goal-graph.js';
+import './test-adaptive-goal-compatibility.js';
+import './test-adaptive-goal-execution-readiness.js';
+import './test-adaptive-goal-execution-graph-proposal.js';
+import './test-adaptive-goal-execution-plan-candidate.js';
+import './test-adaptive-goal-reviewer-identity.js';
+import './test-adaptive-goal-knowledge-store.js';
+import './test-adaptive-goal-source-evidence.js';
+import './test-adaptive-goal-benchmark.mjs';
+import './test-adaptive-goal-phase1-benchmark.mjs';
+import './test-adaptive-goal-sandbox-executor.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { StandardEngineeringWorkflow, StandardEngineeringTaskId, isStandardEngineeringWorkflow } from '../src/runtime/workflow/definitions/standard-engineering.js';
@@ -99,9 +111,9 @@ assert.deepEqual(coreProfileTasks.find(item => item.id === 'standard-docs-genera
 assert.deepEqual(coreProfileTasks.find(item => item.id === 'standard-docs-check').execution.args,
   ['/tmp/scripts/check-docs.mjs']);
 
-const profileScope = [{ role: 'engineer', paths: [{ path: 'server/index.js', kind: 'file' }] }];
+const profileScope = [{ role: 'engineer', paths: [{ path: 'tests/test-standard-engineering-workflow.js', kind: 'file' }] }];
 const coreProfilePlan = compileWorkflowPlan({ job_id: 'standard-core-profile-test', title: 'Software delivery: core profile' }, {
-  workspace: '/tmp',
+  workspace: process.cwd(),
   requiredOperations: ['workspace.write'],
   workspaceWriteScopes: profileScope,
   validationProfileSelector: { profile_id: 'core-release-validation', profile_version: 1 }
@@ -112,8 +124,15 @@ assert.equal(coreProfilePlan.children.length, 17);
 assert.equal(coreProfilePlan.children.some(item => item.id === 'standard-plugin-e2e'), false);
 assert.deepEqual(coreProfilePlan.batch_execution_policy.validation_task_ids,
   coreProfileTasks.map(item => item.id));
-assert.equal(coreProfilePlan.batch_execution_policy.validation_task_ids.some(id => expectedValidationIds.includes(id)), false,
-  'the immutable core-release-validation@1 profile must not inherit default task-list changes');
+const laterDefaultOnlyIds = [
+  'standard-batch-test-process-boundary',
+  'standard-batch-test-package-no-overwrite',
+  'standard-batch-test-package-reproducibility',
+  'standard-batch-test-verified-result-atomicity',
+  'standard-batch-test-standard-engineering-planner'
+];
+assert.equal(coreProfilePlan.batch_execution_policy.validation_task_ids.some(id => laterDefaultOnlyIds.includes(id)), false,
+  'the immutable core-release-validation@1 profile must not inherit later default-only task-list changes');
 
 
 const workspaceSmokeProfile = resolveValidationProfileSnapshot({ profile_id: 'mcpb-workspace-smoke', profile_version: 1 });
@@ -160,7 +179,7 @@ assert.equal(e2eTasks.length, 1);
 assert.deepEqual(e2eTasks[0].execution.args, ['/tmp/tests/test-runalith-plugin.js']);
 assert.equal(coreProfile.task_contracts.some(item => item.task_id === e2eTasks[0].id), false);
 const e2ePlan = compileWorkflowPlan({ job_id: 'standard-outer-e2e-profile-test', title: 'Software delivery: outer E2E profile' }, {
-  workspace: '/tmp',
+  workspace: process.cwd(),
   requiredOperations: ['workspace.write'],
   workspaceWriteScopes: profileScope,
   validationProfileSelector: { profile_id: 'plugin-e2e', profile_version: 1 }

@@ -29,14 +29,14 @@ The packer creates a uniquely named `.mcpb` under `dist/`, validates the archive
 
 ## 3. Connect over stdio
 
-For clients that launch an MCP stdio server directly, configure the server with the absolute path to `server/index.js`. Example configuration (adapt the outer shape to your client):
+For clients that launch an MCP stdio server directly, configure the server with the absolute path to the **versioned runtime entry point selected by the checked-out package metadata**. For the current RC.8 source this is `server/index-v1.0.9-rc.8.js`; `server/index.js` remains a historical, hash-pinned compatibility input. Example configuration (adapt the outer shape to your client):
 
 ```json
 {
   "mcpServers": {
     "runalith": {
       "command": "node",
-      "args": ["/absolute/path/to/runalith/server/index.js"],
+      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.8.js"],
       "env": {
         "RUNALITH_DATA_DIR": "/absolute/path/to/private/runalith-data",
         "RUNALITH_WORKSPACE": "/absolute/path/to/workspace"
@@ -87,3 +87,7 @@ Open the URL printed by the server (default: `http://127.0.0.1:8318`). The dashb
 - [Release policy](RELEASE_POLICY.md) explains the difference between testing pre-releases and production approval.
 
 Building or installing a candidate is not release approval. Follow the release policy and [known issues](KNOWN_ISSUES.md) before relying on an artifact outside controlled testing.
+
+### Local Chat On Steroids plugin upgrade
+
+Do not replace the live generation directory or kill its child process manually. Use the [RC.8 rollout readiness and rollback runbook](runalith-rollout-rc7.md): build and pin the exact MCPB, capture a tested rollback content snapshot, run the read-only host/database preflight, exercise the isolated switch/rollback simulation, and install only via the host's plugin UI after the running jobs/tasks/leases have drained. The repository deliberately has no live install/restart command.

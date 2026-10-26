@@ -7,15 +7,20 @@ export function projectPluginPackageMetadata(source) {
       typeof source.description !== 'string') {
     throw new TypeError('source package metadata must declare name, version and description');
   }
+  const runtimeEntryPoint = source.runtimeEntryPoint;
+  if (typeof runtimeEntryPoint !== 'string' || !runtimeEntryPoint || runtimeEntryPoint.startsWith('/') ||
+      runtimeEntryPoint.split(/[\\/]/).some(part => !part || part === '.' || part === '..')) {
+    throw new TypeError('source package metadata must declare a safe relative runtimeEntryPoint');
+  }
   return {
     name: source.name,
     version: source.version,
     description: source.description,
-    main: 'server/index.js',
+    main: runtimeEntryPoint,
     type: 'module',
     engines: { node: '>=22.13.0' },
     scripts: {
-      start: 'node server/index.js',
+      start: `node ${runtimeEntryPoint}`,
       test: 'node tests/test-runalith-plugin.js',
     },
   };

@@ -87,7 +87,7 @@ const qaTranscriptOnlyCompletion = store.completeTaskByRuntime(job.job_id, {
   sessionKey: qa.openclaw_session_key,
   content: [
     goodEvidence(qaCommand),
-    'PRODUCTION QA MCP INITIALIZE/50-TOOL DISCOVERY PASS',
+    'PRODUCTION QA MCP INITIALIZE/51-TOOL DISCOVERY PASS',
     'PRODUCTION QA BEHAVIORAL ARTIFACT VALIDATION PASS',
     'PRODUCTION QA APPROVAL/DISPATCH/IMMUTABLE-PLAN NEXT-TASK PASS'
   ].join('\n'),
@@ -102,6 +102,12 @@ store.markAgentSessionStale(architectSession.session_id, { reason: 'test stale-b
 const taskCountBefore = store.db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE job_id = ?').get(job.job_id).n;
 const sessionCountBefore = store.db.prepare('SELECT COUNT(*) AS n FROM agent_sessions WHERE job_id = ?').get(job.job_id).n;
 
+let directRecoveryExecutionCalls = 0;
+const originalExecuteAuthorizedTask = executionManager.executeAuthorizedTask.bind(executionManager);
+executionManager.executeAuthorizedTask = async (...args) => {
+  directRecoveryExecutionCalls++;
+  return originalExecuteAuthorizedTask(...args);
+};
 const recovery = new RecoveryManager(store, {
   trajectoryTimeoutMs: 100,
   executionManager,
@@ -116,18 +122,26 @@ const recovery = new RecoveryManager(store, {
 await recovery.reconcile({ jobId: job.job_id });
 
 const recoveredArchitect = store.getTask(architect.task_id);
-assert.equal(recoveredArchitect.status, 'completed');
-assert.equal(store.getSessionByTask(architect.task_id).session_id, architectSession.session_id);
+assert.equal(recoveredArchitect.status, 'failed',
+  'a terminal task without durable execution evidence must not bypass the immutable batch-required route');
+assert.equal(store.getSessionByTask(architect.task_id).session_id, architectSession.session_id,
+  'recovery must retain the original runtime session rather than creating a replacement');
 assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM tasks WHERE job_id = ?').get(job.job_id).n, taskCountBefore);
 assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM agent_sessions WHERE job_id = ?').get(job.job_id).n, sessionCountBefore);
-assert.equal(store.db.prepare('SELECT outcome FROM results WHERE task_id = ? ORDER BY created_at DESC,rowid DESC LIMIT 1').get(architect.task_id).outcome, 'success');
-assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM attempts WHERE task_id = ?').get(architect.task_id).n, 2,
-  'recovery must retain the failed native attempt and record the distinct local ExecutionManager attempt instead of promoting transcript text');
+assert.equal(store.db.prepare('SELECT outcome FROM results WHERE task_id = ? ORDER BY created_at DESC,rowid DESC LIMIT 1').get(architect.task_id).outcome, 'failure');
+assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM attempts WHERE task_id = ?').get(architect.task_id).n, 1,
+  'blocked recovery must not create a direct ExecutionManager attempt outside a durable batch claim');
 assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM attempts WHERE task_id = ? AND status = ?').get(architect.task_id, 'failed').n, 1);
-assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM attempts WHERE task_id = ? AND status = ?').get(architect.task_id, 'completed').n, 1);
-assert.equal(store.getTask(architect.task_id).execution_status, 'completed');
-assert.equal(store.getTask(architect.task_id).execution_exit_code, 0);
-assert.ok(store.getTask(architect.task_id).execution_session_id);
+assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM attempts WHERE task_id = ? AND status = ?').get(architect.task_id, 'completed').n, 0);
+assert.equal(store.getTask(architect.task_id).execution_status, null);
+assert.equal(store.getTask(architect.task_id).execution_exit_code, null);
+assert.equal(store.getTask(architect.task_id).execution_session_id, null);
+assert.equal(directRecoveryExecutionCalls, 0,
+  'recovery must not invoke direct execution for batch-required deterministic tasks');
+const blockedRecoveryEvent = store.db.prepare("SELECT payload_json FROM events WHERE job_id=? AND type='execution.evidence_recovery_blocked' AND json_extract(payload_json,'$.taskId')=?")
+  .get(job.job_id, architect.task_id);
+assert.ok(blockedRecoveryEvent, 'blocked direct recovery must leave a durable audit event');
+assert.match(JSON.parse(blockedRecoveryEvent.payload_json).reason, /batch claim/i);
 
 assert.equal(hasVerifiedSuccessfulRuntimeEvidence(
   { description: 'Run immediately: node --check /home/long/work/chatgpt-adapter/server.js.', metadata_json: JSON.stringify({ executor: 'ExecutionManager', command: architectCommand }) },

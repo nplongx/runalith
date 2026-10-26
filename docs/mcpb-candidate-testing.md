@@ -1,0 +1,34 @@
+# Fast MCPB candidate smoke test
+
+Use the candidate smoke test when you want to check an existing `.mcpb` without installing it into Chat On Steroids or restarting the running plugin:
+
+```sh
+npm run test:mcpb-candidate -- artifacts/runalith-1.0.9-rc.5-candidate-agg-phase1-lineage-ts-order-20261022T024540Z.mcpb
+```
+
+Pass any canonical local path to a Runalith MCPB candidate. The command does not rebuild or overwrite the candidate.
+
+The runner checks ZIP entry paths and symlink entries, extracts the bundle into a private temporary directory, verifies the Runalith manifest and launch entry point, then starts the **packaged** `server/index.js` with a minimal environment. It points the data directory, SQLite database, workspace and execution temp directory into that temporary directory; it does not inherit API keys or reviewer trust settings from the current shell. It sends MCP `initialize`, `tools/list`, and a read-only `orchestrator_health` request, checks runtime version and the manifest's exact tool names/count, validates tool input-schema shapes, and verifies the reported database path is temporary. The child process and temporary directory are removed on exit.
+
+Typical successful output includes `MCPB_FAST_TEST=PASS`, the file's SHA-256, `manifest_tools`, `runtime_tools`, the isolated database path and elapsed time. A failed check exits non-zero and prints the failing assertion/diagnostic.
+
+## What this check does not mean
+
+This is a fast package/runtime smoke test only. It does not install the extension, call workflow approval or dispatch, perform the AGG fixture action, or replace the full extracted-package E2E, security regressions or reproducibility checks. The subprocess has isolated environment and state, but it is **not** an OS/container sandbox; only run candidates from a source you trust because the packaged entry point is executed as the current user.
+
+The upstream MCPB CLI validates manifests and can pack, inspect or verify bundles, but its documented commands do not themselves launch the packaged MCP server and probe its live `tools/list` response. This repository script covers that runtime smoke-test gap.
+
+## Verify source-to-bundle byte alignment
+
+The candidate build invokes `scripts/verify-mcpb-source-alignment.mjs` before publishing the archive. It checks every ZIP entry against the exact regular source file in the selected repository snapshot; `manifest.json` maps to `plugin/manifest.json`, and the packaged `package.json` is checked against the documented dependency-closure projection. Missing files, symlinks, unsafe/duplicate ZIP paths, and byte drift fail closed. The report binds the archive SHA-256 and a deterministic digest over the exact packaged source entries plus critical build and acceptance inputs (including the Phase 1 scorer, frozen scenario specifications, protocol plan and freeze). The protocol runner consumes this result and blocks operational corpus/scoring readiness when the configured candidate is not source-aligned or the proposal does not bind the calculated source digest.
+
+Re-run the verifier on an existing candidate and write a **new** provenance report (the report path must not already exist):
+
+```sh
+npm run verify:mcpb-source-alignment -- \
+  --bundle artifacts/agg-phase1-finalization-YYYYMMDDTHHMMSSZ/runalith-1.0.9-rc.5-agg-phase1-candidate.mcpb \
+  --source-root "$PWD" \
+  --output artifacts/agg-phase1-finalization-YYYYMMDDTHHMMSSZ/source-binary-provenance.json
+```
+
+The source-snapshot digest establishes byte alignment for the files actually shipped in the bundle; it is not a Git commit signature, reviewer approval, release authorization, production isolation attestation, or Phase 1 acceptance result. Run `npm run test:package-reproducibility` separately to verify independent rebuilds produce byte-identical archives.

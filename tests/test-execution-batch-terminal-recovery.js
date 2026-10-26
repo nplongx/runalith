@@ -10,6 +10,8 @@ const dbPath = path.join(dataDir, 'workflow.db');
 const tmuxStub = path.join(root, 'tmux-control-stub');
 const tmuxLog = path.join(root, 'tmux-control.log');
 const shouldNeverRun = path.join(root, 'command-must-not-run');
+const malformedPidMode = path.join(root, 'malformed-pid-mode');
+const malformedPidCommandMustNotRun = path.join(root, 'malformed-pid-command-must-not-run');
 fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 Object.assign(process.env, {
   WORKFLOW_DB: dbPath, WORKFLOW_DATA_DIR: dataDir, WORKFLOW_WORKSPACE: root,
@@ -18,7 +20,7 @@ Object.assign(process.env, {
 fs.writeFileSync(tmuxStub, `#!/bin/sh
 case "$1" in
   new-session) printf 'new-session\\n' >> ${JSON.stringify(tmuxLog)}; exit 0 ;;
-  display-message) printf '12345\\n'; exit 0 ;;
+  display-message) if [ -f ${JSON.stringify(malformedPidMode)} ]; then printf 'not-a-pid\\n'; else printf '12345\\n'; fi; exit 0 ;;
   kill-session) printf 'kill-session\\n' >> ${JSON.stringify(tmuxLog)}; exit 0 ;;
   has-session) printf 'session remains active\\n' >&2; exit 0 ;;
   *) exit 31 ;;
@@ -183,12 +185,14 @@ try {
   });
   const manager = new ExecutionManager(store, { tmuxBin: tmuxStub, timeoutMs: 1000, executionTmpDir: runtimeDir });
   const originalSetExecutionPid = store.setExecutionPid.bind(store);
-  store.setExecutionPid = () => { throw new Error('injected post-spawn PID persistence failure'); };
+  let injectedPidPersistenceCalls = 0;
+  store.setExecutionPid = () => { injectedPidPersistenceCalls++; throw new Error('injected post-spawn PID persistence failure'); };
   try {
     await assert.rejects(() => manager.executeBatch(ambiguousBatch.batch_id), /outcome is not verified|injected post-spawn PID persistence failure/);
   } finally {
     store.setExecutionPid = originalSetExecutionPid;
   }
+  assert.equal(injectedPidPersistenceCalls, 1, 'the valid pane PID must be read and the durable PID write fault must be exercised exactly once');
   const ambiguousItem = store.listExecutionBatchItems(ambiguousBatch.batch_id)[0];
   const ambiguousBatchState = store.getExecutionBatch(ambiguousBatch.batch_id);
   assert.equal(ambiguousItem.status, 'RUNNING', 'an accepted but unresolved task must not be terminalized as a failed batch item');
@@ -202,6 +206,37 @@ try {
   await assert.rejects(() => manager.executeBatch(ambiguousBatch.batch_id), /already has active item attempts/);
   assert.equal(fs.readFileSync(tmuxLog, 'utf8').trim().split(/\r?\n/).filter(line => line === 'new-session').length, 1,
     'a second batch caller must not spawn a duplicate while the first session is unresolved');
+
+  // Missing/malformed pane PID output is also an ambiguous post-spawn control
+  // result. It must not be silently ignored followed by a timeout-shaped task
+  // result: the prepared attempt stays RUNNING, the batch remains WAITING, and
+  // the command must not run a second time on retry.
+  const pidFailureJob = store.createJob({ conversationKey: `batch-terminal-recovery-bad-pid-${process.pid}`, title: 'Malformed pane PID recovery' });
+  store.approve(pidFailureJob.job_id, 'isolated malformed pane PID fixture', 'test-fixture');
+  const pidFailureParent = store.dispatch(pidFailureJob.job_id, { role: 'architect', description: 'malformed pane PID parent' });
+  const pidFailureCommand = `${nodeExecutable} -e "require('node:fs').writeFileSync(${JSON.stringify(malformedPidCommandMustNotRun)}, 'executed')"`;
+  const pidFailureTask = store.createChildTask(pidFailureJob.job_id, {
+    parentTaskId: pidFailureParent.task_id, role: 'architect', description: 'tmux returns malformed pane PID after accepted spawn',
+    metadata: { deterministic: true, command: pidFailureCommand }
+  });
+  const pidFailureBatch = store.createExecutionBatch(pidFailureJob.job_id, {
+    parentTaskId: pidFailureParent.task_id, role: 'architect', items: [{ taskId: pidFailureTask.task_id, command: pidFailureCommand }]
+  });
+  const newSessionCountBeforeMalformedPid = fs.readFileSync(tmuxLog, 'utf8').trim().split(/\r?\n/).filter(line => line === 'new-session').length;
+  fs.writeFileSync(malformedPidMode, 'enabled\\n', { flag: 'wx', mode: 0o600 });
+  const malformedPidManager = new ExecutionManager(store, { tmuxBin: tmuxStub, timeoutMs: 1000, executionTmpDir: runtimeDir });
+  await assert.rejects(() => malformedPidManager.executeBatch(pidFailureBatch.batch_id), /outcome is not verified|canonical positive PID/);
+  const pidFailureItem = store.listExecutionBatchItems(pidFailureBatch.batch_id)[0];
+  assert.equal(pidFailureItem.status, 'RUNNING');
+  assert.equal(store.getExecutionBatch(pidFailureBatch.batch_id).status, 'WAITING');
+  assert.equal(store.getTask(pidFailureTask.task_id).execution_status, 'running');
+  assert.equal(store.getTask(pidFailureTask.task_id).execution_pid, null);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE job_id=? AND type='execution.spawn_reconciliation_required' AND json_extract(payload_json,'$.taskId')=?")
+    .get(pidFailureJob.job_id, pidFailureTask.task_id).n, 1);
+  assert.equal(fs.existsSync(malformedPidCommandMustNotRun), false);
+  await assert.rejects(() => malformedPidManager.executeBatch(pidFailureBatch.batch_id), /already has active item attempts/);
+  assert.equal(fs.readFileSync(tmuxLog, 'utf8').trim().split(/\r?\n/).filter(line => line === 'new-session').length,
+    newSessionCountBeforeMalformedPid + 1, 'a malformed PID must not permit a second spawn on retry');
   console.log('BATCH POST-SPAWN AMBIGUITY QUARANTINE / TERMINAL TASK CRASH RECOVERY / NO REPLAY PASS');
 } finally {
   try { store.db.close(); } catch {}

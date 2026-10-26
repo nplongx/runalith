@@ -72,6 +72,26 @@ function readRegularSource(relative) {
   if (fs.realpathSync(cursor) !== cursor) throw new Error(`source path is not canonical: ${relative}`);
   return readStableRegularFile(cursor, `source ${relative}`);
 }
+function readRepositoryRevisionMetadata() {
+  const gitPath = path.join(root, '.git');
+  const gitStat = fs.lstatSync(gitPath, { throwIfNoEntry: false });
+  if (!gitStat) {
+    // Standalone extracted evidence packs intentionally omit repository history.
+    // Do not fabricate a commit ID or treat absent metadata as a clean checkout;
+    // retain an explicit unavailable state while still binding every source and
+    // archive entry byte-for-byte. Normal repository runs keep the exact legacy
+    // git_head / working_tree_dirty semantics below.
+    return {
+      git_head: null,
+      working_tree_dirty: null,
+      git_metadata_status: 'unavailable_no_git_metadata'
+    };
+  }
+  if (gitStat.isSymbolicLink()) throw new Error('repository .git metadata path must not be a symlink');
+  const gitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+  const workingTreeDirty = execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim().length > 0;
+  return { git_head: gitHead, working_tree_dirty: workingTreeDirty, git_metadata_status: 'available' };
+}
 const bundleRelative = path.relative(root, bundlePath).split(path.sep).join('/');
 const archive = readRegularSource(bundleRelative);
 validateZipEntryTypes(archive);
@@ -135,9 +155,8 @@ const inventory = {
   status: 'candidate-unapproved-review-evidence-only',
   bundle: { path: path.relative(root, bundlePath), size_bytes: archive.length, sha256: sha256(archive) },
   source_tree: {
-    git_head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     packaged_source_inventory_sha256: sourceInventoryDigest,
-    working_tree_dirty: execFileSync('git', ['status', '--porcelain'], { cwd: root, encoding: 'utf8' }).trim().length > 0,
+    ...readRepositoryRevisionMetadata(),
   },
   manifest: { name: manifest.name, version: manifest.version, server_entry_point: manifest.server?.entry_point, declared_tool_count: manifest.tools?.length },
   entries,

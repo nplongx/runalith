@@ -20,15 +20,23 @@ assert.match(packagerSource, /WORKFLOW_DATA_DIR="\$SMOKE_DATA_DIR"/, 'packager M
 assert.match(packagerSource, /SMOKE_ROOT="\$\(mktemp -d/, 'MCP smoke SQLite state must live outside a potentially shared checkout parent');
 assert.doesNotMatch(packagerSource, /SMOKE_DATA_DIR="\$EXTRACTED\/\.smoke-data"/, 'MCP smoke state must not be placed beneath the extracted bundle path');
 assert.match(packagerSource, /unzip -q \"\$BUNDLE\" -d \"\$EXTRACTED\"/, 'packager must extract the completed archive before running MCP smoke/E2E');
-assert.match(packagerSource, /node \"\$EXTRACTED\/server\/index\.js\"/, 'MCP handshake must use the archive-extracted server bytes');
+assert.match(packagerSource, /node "\$EXTRACTED\/\$ENTRY_POINT"/, 'MCP handshake must use the manifest-selected archive-extracted server bytes');
 assert.match(packagerSource, /node \"\$EXTRACTED\/tests\/test-runalith-plugin\.js\"/, 'full local MCP E2E must use archive-extracted test/runtime bytes');
 assert.doesNotMatch(packagerSource, /node \"\$PAYLOAD\/(?:server\/index\.js|tests\/test-runalith-plugin\.js)\"/, 'packager must not substitute the pre-archive staging tree for packaged E2E');
 assert.match(packagerSource, /test-extracted-package-tool-schemas\.mjs/, 'packager must validate schemas from the exact candidate archive');
 assert.match(packagerSource, /plugin-package-metadata\.mjs/, 'packager must project full-app metadata into the local-only runtime dependency closure');
+assert.match(packagerSource, /node "\$ROOT\/scripts\/verify-mcpb-source-alignment\.mjs" --bundle "\$BUNDLE" --source-root "\$ROOT"/,
+  'packager must verify exact source-to-archive bytes before publishing a candidate');
+assert.match(packagerSource, /find manifest\.json README\.md LICENSE package\.json server src protocol tests scripts -type f -print/,
+  'the deterministic ZIP file list must include the read-only reconciliation CLI copied into the payload');
 const serverSource = fs.readFileSync(path.join(root, 'server/index.js'), 'utf8');
 assert.match(serverSource, /getSpecialistRoleGuidance\(contract\.role\)/, 'built-in specialist prompt builder must wire the role-specific guidance helper');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-reproducibility-'));
 const outputs = [path.join(temp, 'first.mcpb'), path.join(temp, 'second.mcpb')];
+const npmUserConfig = path.join(temp, 'npm-user.npmrc');
+const npmGlobalConfig = path.join(temp, 'npm-global.npmrc');
+fs.writeFileSync(npmUserConfig, '', { flag: 'wx', mode: 0o600 });
+fs.writeFileSync(npmGlobalConfig, '', { flag: 'wx', mode: 0o600 });
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
 // Fingerprint the actual package inputs (the explicit payload roots plus the
@@ -42,9 +50,17 @@ function packageInputSnapshot(label) {
   const explicit = [
     'README.md', 'LICENSE', 'plugin/manifest.json',
     'tests/test-runalith-plugin.js',
+    'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+    'tests/test-adaptive-goal-evidence-lineage.js',
+    'tests/test-adaptive-goal-knowledge-verifier.mjs',
+    'tests/test-adaptive-goal-trust-configuration.mjs',
+    'tests/test-adaptive-goal-trust-entrypoint.mjs',
+    'tests/test-adaptive-goal-reviewer-identity.js',
+    'tests/test-reconcile-active-workflows.mjs',
     'tests/test-temp-dir.js',
     'tests/test-execution-lease-fencing.js',
     'tests/test-execution-control-process-boundary.js',
+    'tests/test-adaptive-goal-evidence-lineage.js',
     'tests/test-execution-batch.js',
     'tests/test-execution-batch-concurrency.js',
     'tests/test-execution-batch-terminal-recovery.js',
@@ -56,6 +72,7 @@ function packageInputSnapshot(label) {
     'tests/test-mcp-shutdown-backpressure-deadline-20261017.js',
     'tests/test-mcp-eof-shutdown-framing-20261017.js',
     'tests/test-production-behavioral-qa.js',
+    'scripts/reconcile-active-workflows.mjs',
     'scripts/package-runalith-mcpb.sh',
     'scripts/collect-plugin-runtime.mjs',
     'scripts/plugin-package-metadata.mjs',
@@ -65,6 +82,19 @@ function packageInputSnapshot(label) {
   // bytes into the build-input fingerprint separately from packaged entries.
   const validationSources = [
     'tests/test-extracted-package-tool-schemas.mjs',
+    'scripts/verify-mcpb-source-alignment.mjs',
+    'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs',
+    'benchmarks/plugin-workflow-benchmark/phase1-protocol-runner.mjs',
+    'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v1.json',
+    'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
+    'docs/plugin-workflow-benchmark-plan.md',
+    'docs/plugin-workflow-benchmark-phase1-freeze.md',
+    'scripts/replay-agg-phase1-finalization.mjs',
+    'scripts/verify-agg-phase1-evidence-pack.mjs',
+    'scripts/verify-agg-phase1-phase2-package-boundary.mjs',
+    'benchmarks/plugin-workflow-benchmark/phase2-inventory-diagnostics.mjs',
+    'tests/test-agg-phase1-evidence-pack-verifier.mjs',
+    'tests/test-agg-phase1-phase2-package-boundary.mjs',
   ];
   for (const relative of validationSources) {
     const sourcePath = path.join(root, relative);
@@ -147,7 +177,19 @@ function archiveEntries(file) {
 
 function buildEnvironmentSnapshot() {
   const command = (name, args) => {
-    const result = spawnSync(name, args, { cwd: root, encoding: 'utf8', timeout: 15_000 });
+    // npm in the runner may inherit the same /dev/null path for user and global
+    // config, which npm rejects before it can report the dependency tree. Use
+    // distinct empty files for every npm probe without changing build inputs.
+    const env = name === 'npm'
+      ? {
+          ...process.env,
+          NPM_CONFIG_USERCONFIG: npmUserConfig,
+          npm_config_userconfig: npmUserConfig,
+          NPM_CONFIG_GLOBALCONFIG: npmGlobalConfig,
+          npm_config_globalconfig: npmGlobalConfig,
+        }
+      : process.env;
+    const result = spawnSync(name, args, { cwd: root, encoding: 'utf8', timeout: 15_000, env });
     assert.equal(result.status, 0, `build environment probe must succeed: ${name} ${args.join(' ')}\n${result.stderr}`);
     return `${result.stdout || ''}${result.stderr || ''}`.trim();
   };
@@ -190,6 +232,47 @@ try {
     'archive validator must reject special-file mode bits before interpreting entry data');
   specialArchiveBytes.writeUInt32LE(originalAttributes, centralEntryOffset + 38);
 
+  const ambiguousZipDir = path.join(temp, 'zip-ambiguity-fixtures');
+  fs.mkdirSync(ambiguousZipDir);
+  fs.writeFileSync(path.join(ambiguousZipDir, 'first.txt'), 'first payload\n');
+  fs.writeFileSync(path.join(ambiguousZipDir, 'other.txt'), 'other payload\n');
+  const ambiguousZipPath = path.join(ambiguousZipDir, 'two-entry.zip');
+  const ambiguousZipBuild = spawnSync('zip', ['-X', '-q', ambiguousZipPath, 'first.txt', 'other.txt'], {
+    cwd: ambiguousZipDir, encoding: 'utf8'
+  });
+  assert.equal(ambiguousZipBuild.status, 0, `ZIP ambiguity fixture should build: ${ambiguousZipBuild.stderr}`);
+  const ambiguousZipBytes = fs.readFileSync(ambiguousZipPath);
+  const eocdAt = ambiguousZipBytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  assert.ok(eocdAt >= 0, 'ambiguity fixture must contain ZIP EOCD');
+  let centralCursor = ambiguousZipBytes.readUInt32LE(eocdAt + 16);
+  const centralCount = ambiguousZipBytes.readUInt16LE(eocdAt + 10);
+  const centralRows = [];
+  for (let index = 0; index < centralCount; index += 1) {
+    assert.equal(ambiguousZipBytes.readUInt32LE(centralCursor), 0x02014b50);
+    const nameLength = ambiguousZipBytes.readUInt16LE(centralCursor + 28);
+    const extraLength = ambiguousZipBytes.readUInt16LE(centralCursor + 30);
+    const commentLength = ambiguousZipBytes.readUInt16LE(centralCursor + 32);
+    centralRows.push({
+      cursor: centralCursor,
+      name: ambiguousZipBytes.subarray(centralCursor + 46, centralCursor + 46 + nameLength).toString('utf8'),
+      nameLength,
+      localOffset: ambiguousZipBytes.readUInt32LE(centralCursor + 42)
+    });
+    centralCursor += 46 + nameLength + extraLength + commentLength;
+  }
+  const firstRow = centralRows.find(row => row.name === 'first.txt');
+  const otherRow = centralRows.find(row => row.name === 'other.txt');
+  assert.ok(firstRow && otherRow && firstRow.nameLength === otherRow.nameLength, 'fixture entries must allow same-length central/local name mutation');
+  const mismatchedLocalName = Buffer.from(ambiguousZipBytes);
+  Buffer.from(firstRow.name, 'utf8').copy(mismatchedLocalName, otherRow.localOffset + 30);
+  assert.throws(() => validateZipEntryTypes(mismatchedLocalName), /local\/central filenames disagree/,
+    'a local-header name disagreement must fail even if central-directory listing appears normal');
+  const duplicateName = Buffer.from(ambiguousZipBytes);
+  Buffer.from(firstRow.name, 'utf8').copy(duplicateName, otherRow.localOffset + 30);
+  Buffer.from(firstRow.name, 'utf8').copy(duplicateName, otherRow.cursor + 46);
+  assert.throws(() => validateZipEntryTypes(duplicateName), /duplicate entry name/,
+    'duplicate paths must fail from the raw ZIP structure before relying on unzip output');
+
   const sourceBefore = packageInputSnapshot('before');
   const environmentBefore = buildEnvironmentSnapshot();
   for (const [index, output] of outputs.entries()) {
@@ -197,7 +280,11 @@ try {
       ? ['-c', 'umask 022; exec bash "$1"', 'package-reproducibility', script]
       : ['-c', 'umask 077; exec bash "$1"', 'package-reproducibility', script];
     const result = spawnSync('bash', buildArgs, {
-      cwd: root, encoding: 'utf8', timeout: 120_000,
+      // The package smoke test runs the full isolated MCP E2E, which can
+      // synchronously wait for a six-item deterministic validation batch
+      // whose individual runtime ceiling is 300s. Keep a bounded margin over
+      // that contract rather than falsely failing a correct slow build at 120s.
+      cwd: root, encoding: 'utf8', timeout: 360_000,
       env: { ...process.env, PLUGIN_BUNDLE_OUT: output },
     });
     assert.equal(result.status, 0, `candidate build must pass before reproducibility comparison:\n${result.stdout}\n${result.stderr}`);
@@ -242,13 +329,24 @@ try {
     'tests/test-execution-batch-terminal-recovery.js',
     'tests/test-execution-success-contract.js',
     'tests/test-phase5-recovery.js',
-    'tests/test-agent-tool-guidance.js'
+    'tests/test-agent-tool-guidance.js',
+    'tests/test-adaptive-goal-knowledge-verifier.mjs',
+    'tests/test-adaptive-goal-trust-configuration.mjs',
+    'tests/test-adaptive-goal-trust-entrypoint.mjs',
+    'tests/test-adaptive-goal-reviewer-identity.js',
+    'tests/test-reconcile-active-workflows.mjs'
   ]) {
     assert.ok(firstArchive.extracted.has(requiredTest), `exact package closure must contain ${requiredTest}`);
     assert.ok(secondArchive.extracted.has(requiredTest), `second reproducible archive must contain ${requiredTest}`);
   }
+  assert.ok(firstArchive.extracted.has('scripts/reconcile-active-workflows.mjs'),
+    'the read-only reconciliation CLI must be present in the archive, not merely in the staging directory');
+  assert.ok(secondArchive.extracted.has('scripts/reconcile-active-workflows.mjs'),
+    'the second reproducible archive must include the exact read-only reconciliation CLI bytes');
   assert.ok(firstArchive.extracted.has('src/runtime/strict-json.js'), 'strict JSON consumer hardening must ship its parser dependency in the MCP bundle');
   assert.ok(firstArchive.extracted.has('src/runtime/job-liveness.js'), 'runtimePrefix-loaded job liveness diagnostics must ship in the extracted MCP bundle');
+  assert.ok(firstArchive.extracted.has('src/runtime/adaptive-goal-reviewed-task-inputs.js'), 'the versioned reviewed action-intent/task-input contract must ship in the extracted runtime closure');
+  assert.ok(secondArchive.extracted.has('src/runtime/adaptive-goal-reviewed-task-inputs.js'), 'the second reproducible archive must include the exact reviewed action-intent/task-input contract bytes');
   assert.ok(firstArchive.extracted.has('src/runtime/workflow/specialist-role-guidance.js'), 'the runtimePrefix-loaded specialist prompt helper must ship in the extracted MCP bundle');
   for (const dependency of ['src/runtime/workflow/workspace-write-contract.js', 'src/runtime/workflow/recovery-compatibility.js', 'src/runtime/workflow/tool-errors.js']) {
     assert.ok(firstArchive.extracted.has(dependency), `runtimePrefix-loaded workspace-write/recovery dependency must ship: ${dependency}`);
@@ -260,6 +358,10 @@ try {
   const fixtureRoot = path.join(temp, 'side-effect-import-fixture');
   const fixtureStage = path.join(temp, 'side-effect-import-stage');
   fs.mkdirSync(fixtureRoot, { recursive: true });
+  fs.writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({
+    name: 'collector-side-effect-fixture', version: '1.0.0', description: 'test-only source collector fixture',
+    runtimeEntryPoint: 'server/index.js'
+  }), { flag: 'wx' });
   for (const directory of ['server', 'src', 'protocol']) {
     fs.cpSync(path.join(root, directory), path.join(fixtureRoot, directory), { recursive: true, dereference: false });
   }

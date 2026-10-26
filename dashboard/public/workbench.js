@@ -3,10 +3,10 @@
   const $ = id => document.getElementById(id);
   const nav = [...document.querySelectorAll('.nav-item[data-view]')];
   const groups = [...document.querySelectorAll('[data-sidebar-group]')];
-  const contextLabels = {home:'HOME',explorer:'EXPLORER',search:'SEARCH',sourceControl:'SOURCE CONTROL',runalith:'RUNALITH',observability:'OBSERVABILITY',problems:'HEALTH & DIAGNOSTICS'};
-  const viewLabels = {overview:'Overview',workflows:'Workflows',roles:'Roles & Skills',policies:'Policies',batches:'Batch execution',events:'Event stream',artifacts:'Artifacts',files:'Explorer'};
+  const contextLabels = {home:'MONITOR',explorer:'WORKSPACE FILES',search:'SEARCH',sourceControl:'SOURCE CONTROL',runalith:'WORKFLOWS',observability:'EVIDENCE & HISTORY',problems:'HEALTH & DIAGNOSTICS'};
+  const viewLabels = {overview:'Overview',agg:'AGG Graph',workflows:'Workflows',roles:'Roles & Skills',policies:'Policies',batches:'Batch execution',events:'Event stream',artifacts:'Artifacts',files:'Workspace files'};
   const utilityLabels = {search:'Global Search',problems:'Problems',diagnostics:'Diagnostics'};
-  const viewContainer = {overview:'home',files:'explorer',workflows:'runalith',roles:'runalith',policies:'runalith',artifacts:'runalith',batches:'observability',events:'observability'};
+  const viewContainer = {overview:'home',agg:'home',files:'explorer',workflows:'runalith',roles:'runalith',policies:'runalith',artifacts:'runalith',batches:'observability',events:'observability'};
   const activities = [
     ['home','⌂','Home','Open Overview'],
     ['explorer','▤','Explorer','Workspace tree and open editors'],
@@ -91,7 +91,11 @@
     else if(key.startsWith('file:'))openEditor(key.slice(5));
   }
   function renderShell(){
-    groups.forEach(group=>{group.hidden=group.dataset.sidebarGroup!==state.container;});
+    groups.forEach(group=>{
+      const name=group.dataset.sidebarGroup;
+      const alwaysVisible=['home','runalith','observability'].includes(name);
+      group.hidden=!alwaysVisible&&name!==state.container;
+    });
     const sideTitle=$('wb-sidebar-title');if(sideTitle)sideTitle.textContent=contextLabels[state.container]||'WORKSPACE';
     document.querySelectorAll('.wb-activity button[data-container]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.container===state.container)));
     const utilityView=$('wb-utility-view');
@@ -576,7 +580,7 @@
     button.addEventListener('click',action);return button;
   }
   const commands=[
-    ['Open Overview',()=>activateView('overview')],['Open Explorer',()=>activateView('files')],
+    ['Open Overview',()=>activateView('overview')],['Open AGG Graph',()=>activateView('agg')],['Open Explorer',()=>activateView('files')],
     ['Open Global Search',()=>openUtility('search')],['Open Source Control',()=>activateSourceControl()],
     ['Open Workflows',()=>activateView('workflows')],['Open Roles & Skills',()=>activateView('roles')],
     ['Open Policies',()=>activateView('policies')],['Open Artifacts',()=>activateView('artifacts')],
@@ -613,8 +617,9 @@
     const refresh=$('file-refresh');if(refresh)refresh.addEventListener('click',()=>{state.treeLoaded=false;loadTreeRoot();});
     const mode=$('wb-diff-mode');if(mode)mode.addEventListener('change',()=>{state.diffMode=mode.value;if(state.selectedGit)showDiff(state.selectedGit,null,state.diffMode);});
     renderShell();renderOpenEditors();renderBottom();refreshGitStatus();
-    const query=new URLSearchParams(window.location.search).get('q')||'',initial=new URLSearchParams(window.location.search).get('wb')||'';
-    if(initial==='search')openUtility('search',query);else if(initial==='problems')openUtility('problems');
+    const params=new URLSearchParams(window.location.search),query=params.get('q')||'',initial=params.get('wb')||'',initialView=params.get('view')||'';
+    if(nav.some(button=>button.dataset.view===initialView))activateView(initialView);
+    else if(initial==='search')openUtility('search',query);else if(initial==='problems')openUtility('problems');
     else if(initial==='diagnostics')openUtility('diagnostics');else if(initial==='sourceControl')activateSourceControl();
     else if(initial==='explorer')activateView('files');
     const pre=$('file-preview-content');

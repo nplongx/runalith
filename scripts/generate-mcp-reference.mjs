@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,18 @@ function schemaConstraints(schema = {}) {
   return parts.join('; ') || '—';
 }
 
+function getRuntimeEntryPoint() {
+  const packageMetadata = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  const entryPoint = packageMetadata.runtimeEntryPoint;
+  if (typeof entryPoint !== 'string' || !entryPoint || path.isAbsolute(entryPoint) ||
+      entryPoint.split(/[\\/]/).some(part => !part || part === '.' || part === '..')) {
+    throw new Error('package.json must declare a safe relative runtimeEntryPoint');
+  }
+  const resolved = path.resolve(repoRoot, entryPoint);
+  if (!resolved.startsWith(`${repoRoot}${path.sep}`)) throw new Error('runtime entry point escapes repository root');
+  return { entryPoint, resolved };
+}
+
 function renderReference(mcp) {
   const tools = mcp?.result?.tools;
   const version = mcp?.initialize?.result?.serverInfo?.version ?? 'unknown';
@@ -58,7 +71,7 @@ function renderReference(mcp) {
     '',
     'This page is generated from the shipped stdio MCP server by the documentation generator. It describes registered tool names and input schemas returned by `tools/list`; it does not claim that every tool is safe in every workflow state. Follow the linked guides for lifecycle preconditions, permissions, evidence rules, and limitations.',
     '',
-    '- Source: `server/index.js` and its runtime schema definitions.',
+    '- Source: `' + escMarkdown(getRuntimeEntryPoint().entryPoint) + '` and its runtime schema definitions.',
     '- Server identity reported by the checked-out source: `' + escMarkdown(mcp.initialize.result.serverInfo.name) + '`.',
     '- Source package version reported at generation time: `' + escMarkdown(version) + '`. This is source-runtime metadata, not proof of which bundle is installed in a client.',
     `- Registered tools: **${tools.length}**.`,
@@ -125,7 +138,7 @@ function renderReference(mcp) {
 
 async function readToolList() {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), 'orchestrator-docs-mcp-'));
-  const entrypoint = path.join(repoRoot, 'server', 'index.js');
+  const { resolved: entrypoint } = getRuntimeEntryPoint();
   const payload = [
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'docs-reference-generator', version: '1.0.0' } } },
     { jsonrpc: '2.0', method: 'notifications/initialized' },
@@ -154,6 +167,15 @@ async function readToolList() {
           WORKFLOW_WORKSPACE: isolatedWorkspace,
           CHAT_ON_STEROIDS_EXECUTION_TMP_DIR: isolatedExecutionTmp,
           EXECUTION_TMP_DIR: isolatedExecutionTmp,
+          // The reference documents declared source contracts, including the
+          // explicitly opt-in Phase 2/3 shadow and Phase 4 capture tools. These
+          // flags apply only to this disposable docs subprocess.
+          AGG_PHASE2_SHADOW_TOOL_ENABLED: '1',
+          AGG_PHASE3_MCTS_TOOL_ENABLED: '1',
+          // Phase 4 capture is also opt-in; enable only in this disposable docs
+          // process so its source schema can be documented without changing
+          // the default 67-tool runtime surface.
+          AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED: '1',
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });

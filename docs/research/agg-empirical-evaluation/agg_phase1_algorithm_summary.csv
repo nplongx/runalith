@@ -1,0 +1,6 @@
+method,runs,correct_outcomes,accuracy_pct,mean_runtime_ms,p95_runtime_ms,mean_expansions,mean_tot_preprocessing_edge_visits,correct_goal_paths_on_solvable_pct,correct_no_solution_pct,mean_quality_score,quality_max,mean_evidence_coverage_pct
+AGG Beam width 1,140,56,40.0,0.81353,1.3258,7.3071,0,53.33,0.0,5.8286,11.3929,60.36
+AGG Beam width 2,140,105,75.0,1.06599,2.19073,10.8714,0,100.0,0.0,8.6071,11.3929,84.64
+AGG Beam width 4,140,140,100.0,1.19399,2.00059,12.4643,0,100.0,100.0,11.3929,11.3929,84.64
+Tree-search baseline,140,140,100.0,0.10105,0.19321,10.9286,48.1429,100.0,100.0,11.3929,11.3929,75.0
+Linear baseline,140,105,75.0,0.05741,0.10185,16.3214,0,100.0,0.0,8.6071,11.3929,100.0

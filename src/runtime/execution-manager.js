@@ -151,6 +151,25 @@ export async function readCanonicalExecutionExitMarkerFile(exitPath, label = 'ex
     await handle?.close().catch(() => {});
   }
 }
+
+function parseCanonicalExecutionPid(stdout, taskId) {
+  // A successful tmux client exit is not itself proof that its pane-PID query
+  // returned a usable identity. Previously, empty/non-numeric output was
+  // silently ignored and execution continued without durably binding the PID;
+  // under a degraded control client that could turn an accepted but
+  // unreconciled spawn into an ordinary timeout result. Treat malformed PID
+  // output as a post-spawn control failure so the caller quarantines the exact
+  // open attempt instead of proceeding on ambiguous control-plane state.
+  const token = typeof stdout === 'string' ? stdout.trim() : '';
+  if (!/^[1-9]\d*$/.test(token)) {
+    throw new Error(`tmux pane PID lookup did not return a canonical positive PID for task ${taskId}`);
+  }
+  const pid = Number(token);
+  if (!Number.isSafeInteger(pid) || pid < 1) {
+    throw new Error(`tmux pane PID lookup returned a non-safe PID for task ${taskId}`);
+  }
+  return pid;
+}
 function structuredCommand(executable, args = []) {
   return [executable, ...args].map(shellQuote).join(' ');
 }
@@ -1752,7 +1771,7 @@ export class ExecutionManager {
       const controlEnv = baseExecutionEnvironment({ homeDir: this.executionHomeDir, tmpDir: this.executionTmpDir });
       throwIfAborted(signal);
       const pid = await runPinnedExecutionControlCommand(currentBoundary.tmux, ['display-message', '-p', '-t', `${tmuxName}:0`, '#{pane_pid}'], { timeoutMs: 5000, signal, env: controlEnv });
-      if (/^\d+$/.test(pid.stdout.trim())) this.store.setExecutionPid(taskId, Number(pid.stdout.trim()), { executionSessionId, attempt: nextAttempt });
+      this.store.setExecutionPid(taskId, parseCanonicalExecutionPid(pid.stdout, taskId), { executionSessionId, attempt: nextAttempt });
       const started = Date.now();
       let exitCode = null;
       while (Date.now() - started < timeoutMs) {
@@ -1892,7 +1911,7 @@ export class ExecutionManager {
       const controlEnv = baseExecutionEnvironment({ homeDir: this.executionHomeDir, tmpDir: this.executionTmpDir });
       throwIfAborted(signal);
       const pid = await runPinnedExecutionControlCommand(currentBoundary.tmux, ['display-message', '-p', '-t', `${tmuxName}:0`, '#{pane_pid}'], { timeoutMs: 5000, signal, env: controlEnv });
-      if (/^\d+$/.test(pid.stdout.trim())) this.store.setExecutionPid(taskId, Number(pid.stdout.trim()), { executionSessionId, attempt: nextAttempt });
+      this.store.setExecutionPid(taskId, parseCanonicalExecutionPid(pid.stdout, taskId), { executionSessionId, attempt: nextAttempt });
       const started = Date.now();
       let exitCode = null;
       while (Date.now() - started < timeoutMs) {

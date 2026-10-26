@@ -1,0 +1,2 @@
+dataset,split,n,positive,negative,accuracy_pct,balanced_accuracy_pct,precision_pct,recall_pct,f1_pct,log_loss,brier_score,wilson95_lower_pct,wilson95_upper_pct,false_positive,false_negative,evidence_status
+agg-phase2-synthetic-technical-v2,holdout,40,20,20,100,100,100,100,100,0.011874870340900035,0.00015326378817946508,91.23783988027135,100,0,0,VERIFIED_REPLAY_INTEGRITY_ONLY_SYNTHETIC_LABELS_UNATTESTED

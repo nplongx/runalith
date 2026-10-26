@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "runalith-agg-phase1-verified-planning-catalog-v2",
+  "description": "28 deterministic synthetic engineering-planning tasks across seven families. Variants include valid routes, competing alternatives, additional provenance stages, unreachable mandatory prerequisites, varying greedy dead-end attractiveness, and a stale-provenance shortcut that is structurally conflicting and oracle-forbidden. The independent oracle verifies graph contract/path claims only; this is not a representative operational corpus or live incident evidence.",
+  "baseSeed": 20261021,
+  "iterations": 5,
+  "repeatSeeds": [101, 202, 303, 404, 505],
+  "families": [
+    {"id":"artifact-prerequisites","title":"Requirements and architecture prerequisites","evidenceTypes":["requirements","architecture"],"stageIds":["inspect-requirements","inspect-architecture"],"deadEndProfile":"high-confidence"},
+    {"id":"implementation-qa","title":"Implementation and QA cross-check","evidenceTypes":["implementation","qa-report"],"stageIds":["inspect-implementation","inspect-qa"],"deadEndProfile":"low-confidence"},
+    {"id":"security-qa-gate","title":"Security and QA acceptance prerequisites","evidenceTypes":["security-review","qa-report"],"stageIds":["inspect-security-review","inspect-qa"],"deadEndProfile":"high-risk"},
+    {"id":"research-architecture","title":"Research-backed architecture plan","evidenceTypes":["research","architecture"],"stageIds":["inspect-research","inspect-architecture"],"deadEndProfile":"low-confidence"},
+    {"id":"documentation-review","title":"Documentation and review prerequisites","evidenceTypes":["documentation","review"],"stageIds":["inspect-documentation","inspect-review"],"deadEndProfile":"moderate-confidence"},
+    {"id":"triple-prerequisite","title":"Three-source prerequisite integration","evidenceTypes":["requirements","architecture","qa-report"],"stageIds":["inspect-requirements","inspect-architecture","inspect-qa"],"deadEndProfile":"high-confidence"},
+    {"id":"stale-provenance","title":"Stale source snapshot versus current provenance","evidenceTypes":["source-snapshot","source-integrity"],"stageIds":["inspect-source-snapshot","inspect-source-integrity"],"deadEndProfile":"low-confidence","includesStaleProvenanceShortcut":true}
+  ],
+  "variantsPerFamily": 4,
+  "variants": [
+    {"id":1,"kind":"single_nominal_route","expectedOutcome":"solution","intent":"One nominal source route with all typed prerequisites reachable."},
+    {"id":2,"kind":"competing_nominal_routes","expectedOutcome":"solution","intent":"Two complete alternative source routes produce the same required evidence types."},
+    {"id":3,"kind":"additional_provenance_stage","expectedOutcome":"solution","intent":"Add a source-provenance stage and evidence reference that must appear on the path."},
+    {"id":4,"kind":"unreachable_required_prerequisite","expectedOutcome":"no_solution","intent":"Require an otherwise valid prerequisite with no nominal incoming route; the independent oracle must prove the goal unsatisfiable."}
+  ],
+  "oracleContract": {
+    "requiredPathSuffix": ["validate-prerequisites", "draft-plan", "review-gate", "sandbox-run", "goal"],
+    "forbiddenNodeIds": ["a-greedy-dead-end", "z-unverified-shortcut", "m-prerequisite-shortcut", "stale-provenance-shortcut"],
+    "mustCoverEveryRequiredEvidenceReference": true,
+    "mustSatisfyAllRequiresAllEdgesBeforeEnteringTarget": true,
+    "mustAvoidContradictoryOrAlternativeNodesInOneCandidate": true,
+    "nominalSuccessMustNotTraverseRecoversTo": true
+  },
+  "searchBudget": {
+    "maxDepth": 10,
+    "maxExpansions": 80,
+    "expansionUnit": "successor-edge examinations",
+    "aggBeamWidths": [1, 2, 4]
+  }
+}

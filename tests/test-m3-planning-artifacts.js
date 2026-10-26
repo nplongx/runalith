@@ -15,6 +15,7 @@ CREATE TABLE jobs (job_id TEXT PRIMARY KEY, conversation_key TEXT NOT NULL, titl
 CREATE TABLE tasks (task_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, role TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE artifacts (artifact_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, task_id TEXT, kind TEXT NOT NULL, uri TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1, producer_role TEXT, content TEXT NOT NULL DEFAULT '', evidence_json TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL DEFAULT 'active', supersedes TEXT, content_hash TEXT);
 CREATE TABLE events (event_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, type TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE workflow_plans (job_id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, workflow_version INTEGER NOT NULL, plan_json TEXT NOT NULL, plan_hash TEXT NOT NULL, compiled_at TEXT, approved_at TEXT);
 `);
 const store = new WorkflowStore(db);
 const ts = new Date().toISOString();

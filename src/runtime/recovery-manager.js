@@ -9,6 +9,7 @@ import { isSupportedWorkflow } from './workflow/definitions/index.js';
 import { ProductionRoles } from './workflow/catalog/production.js';
 import { parseStrictJson } from './strict-json.js';
 import { isVerifiedSuccessfulLocalExecution } from './execution-manager.js';
+import { resolveTaskBatchRoute } from './workflow/plan.js';
 
 const execFileAsync = promisify(execFile);
 const OPENCLAW_BIN = process.env.OPENCLAW_BIN || 'openclaw';
@@ -386,9 +387,9 @@ export class RecoveryManager {
     }
     // Native OpenClaw exec can terminalize a deterministic child before the
     // adapter's tool turn persists ExecutionManager evidence. The child is
-    // already terminal, so normal running-task recovery cannot see it. Re-enter
-    // the SAME durable task through ExecutionManager when actual execution
-    // evidence is still absent. Never create a replacement task/session.
+    // already terminal, so normal running-task recovery cannot see it. Recovery
+    // must respect the immutable plan's batch route: never replay a deterministic
+    // task directly when its plan requires a durable batch claim.
     if (this.executionManager) {
       const trace = jobId ? this.store.getJobTrace(jobId) : null;
       const terminalDeterministicTasks = (trace?.tasks || this.store.db.prepare("SELECT t.* FROM tasks t JOIN jobs j ON j.job_id=t.job_id WHERE t.status='failed' AND t.role IN ('architect','qa') AND j.state='EXECUTING'").all())
@@ -421,7 +422,44 @@ export class RecoveryManager {
           // loop is specifically for terminal rows missing ExecutionManager
           // fields, so a regex over old result content must never turn that
           // absence into a successful recovery skip.
-          const command = expectedCommandFromTask(task) || String(parseStrictJson(task.metadata_json || '{}').command || '').trim();
+          let plan;
+          let metadata;
+          let plannedTask;
+          let batchRoute;
+          try {
+            plan = this.store.getExecutionPlan(task.job_id);
+            metadata = parseStrictJson(task.metadata_json || '{}');
+            plannedTask = plan?.children?.find(item => item.id === metadata.workflow_plan_task_id);
+            if (!plan || !plannedTask || String(plannedTask.role).toLowerCase() !== String(task.role).toLowerCase()) {
+              throw new Error('exact task binding to the immutable execution plan is missing or mismatched');
+            }
+            batchRoute = resolveTaskBatchRoute(plan, plannedTask);
+          } catch (error) {
+            this.store.recordEvent(task.job_id, 'execution.evidence_recovery_blocked', {
+              taskId: task.task_id,
+              role: task.role,
+              reason: `immutable execution route could not be verified; automatic direct replay refused: ${error.message}`
+            }, `${task.task_id}|execution-recovery-route-unavailable`);
+            continue;
+          }
+          if (batchRoute.required) {
+            const durableBatchItem = this.store.db.prepare(`SELECT b.batch_id,b.status,i.status AS item_status
+              FROM execution_batch_items i JOIN execution_batches b ON b.batch_id=i.batch_id
+              WHERE i.task_id=? ORDER BY b.created_at DESC,b.rowid DESC LIMIT 1`).get(task.task_id);
+            this.store.recordEvent(task.job_id, 'execution.evidence_recovery_blocked', {
+              taskId: task.task_id,
+              role: task.role,
+              reason: durableBatchItem
+                ? 'batch-required deterministic task must be reconciled through its existing durable batch; direct task replay refused'
+                : 'batch-required deterministic task has no durable batch claim; automatic direct replay refused',
+              policyRoute: batchRoute.route,
+              policyVersion: batchRoute.policy_version,
+              legacyPolicy: batchRoute.legacy === true,
+              ...(durableBatchItem ? { batchId: durableBatchItem.batch_id, batchStatus: durableBatchItem.status, batchItemStatus: durableBatchItem.item_status } : {})
+            }, `${task.task_id}|batch-required-recovery-blocked`);
+            continue;
+          }
+          const command = expectedCommandFromTask(task) || String(metadata.command || '').trim();
           if (!command) continue;
           // Supported deterministic workflows are bound to an immutable
           // structured command and approved workspace. Re-enter through the

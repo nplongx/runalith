@@ -10,9 +10,12 @@ import { fileURLToPath } from 'node:url';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-stdio-backpressure-'));
 const dataDir = path.join(root, 'data');
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtimeManifestPath = ['plugin/manifest.json', 'manifest.json'].map(file => path.join(repo, file)).find(file => fs.existsSync(file));
+if (!runtimeManifestPath) throw new Error('runtime manifest is missing');
+const runtimePath = path.join(repo, JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8')).server.entry_point);
 fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 
-const child = spawn(process.execPath, ['server/index.js'], {
+const child = spawn(process.execPath, [runtimePath], {
   cwd: repo,
   env: {
     ...process.env,
@@ -82,7 +85,7 @@ try {
   // promises without awaiting stdout drain even though valid responses pause
   // stdin correctly.
   const malformedDataDir = path.join(root, 'malformed-data');
-  malformedChild = spawn(process.execPath, ['server/index.js'], {
+  malformedChild = spawn(process.execPath, [runtimePath], {
     cwd: repo,
     env: {
       ...process.env,
@@ -161,7 +164,7 @@ try {
     JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'method-that-does-not-exist', params: {} }),
     '{malformed-json'
   ].join('\n') + '\n';
-  const smoke = spawnSync(process.execPath, ['server/index.js'], {
+  const smoke = spawnSync(process.execPath, [runtimePath], {
     cwd: repo,
     input: requests,
     encoding: 'utf8',

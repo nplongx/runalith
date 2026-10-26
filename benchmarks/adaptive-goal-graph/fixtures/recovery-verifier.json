@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "fixtureId": "recovery-verifier-investigation-v2",
+  "supersedesFixtureId": "recovery-verifier-investigation-v1",
+  "provenanceRevision": 2,
+  "provenanceRevisionReason": "The prior whole-file pins identify the archived pre-AGG source snapshot, not the current integrated working source. Preserve those pins as historical metadata, pin the current bytes explicitly, and separately pin the recovery-verifier implementation block so an unrelated source extension cannot be mistaken for a change to the recovery contract.",
+  "description": "Synthetic offline investigation based on checked-in recovery-verifier source and regression assertions. Describes possible investigation routes, not a claim about a live incident or its cause.",
+  "provenance": [
+    {
+      "path": "server/index.js",
+      "sha256": "1c4b2570ea7210da4016cb75e654b631de12a2e09877ac0fa8dd61f395d7c277",
+      "previouslyPinnedSha256": "3c8e905d0eadcdf2d2afa3588839ea97cd2dfa5c19f2f5909358ded03b670602",
+      "historicalSnapshotPath": "artifacts/agg-phase1-latest-build-validation-v13-20261022T161330+0700/pack-staging/source/server-index.js",
+      "semanticScope": {
+        "startMarker": "case 'workflow_recovery_verify': {",
+        "endMarker": "\n    case '",
+        "sha256": "941835e624cae58b7935723144a49dddc13532deb30e444ec5835c4df9df62e9",
+        "reviewNote": "This exact function block was byte-compared with the historical packaged server snapshot and is unchanged; AGG integration altered the surrounding server file, not this recovery-verifier block."
+      },
+      "claim": "workflow_recovery_verify checks persisted workflow invariants; the verifier includes pre-execution phase gates and workspace write receipt/event consistency checks."
+    },
+    {
+      "path": "tests/test-runalith-plugin.js",
+      "sha256": "134298db304d2b2d118b9777d7a0ac2b6198c2ca8bf2655d99319fbb67907492",
+      "previouslyPinnedSha256": "c5e5a2dc0f47d0403132cad16f8dc110b752c1b4a4f47a3e5a2db8e4d1b82ea0",
+      "historicalSnapshotPath": "artifacts/agg-phase1-latest-build-validation-v13-20261022T161330+0700/pack-staging/tests/test-runalith-plugin.js",
+      "changeAssessment": "The historical pin matches the preserved packaged regression-test file. The current E2E file includes additional AGG search, proposal, reviewer, readiness, sandbox-recovery and evidence-lineage tests; the existing workflow_recovery_verify regression assertions remain in place.",
+      "claim": "Regression tests exercise recovery PASS, tampered result bytes, malformed/duplicate acknowledgement lineage, and restoration to PASS."
+    }
+  ],
+  "groundTruth": {
+    "requiredEvidence": ["verifier-implementation", "regression-expectations"],
+    "validGoalPaths": [
+      ["start", "inspect-verifier", "inspect-regression", "infeasible-combined-check", "cross-check-invariants", "report-investigation"],
+      ["start", "inspect-verifier", "recovery-probe", "recovery-outcome-confirmed", "inspect-regression", "infeasible-combined-check", "cross-check-invariants", "report-investigation"]
+    ],
+    "recoveryOutcomeGate": {
+      "edge": {"from": "recovery-probe", "to": "recovery-outcome-confirmed", "type": "recovers_to"},
+      "requiredOutcome": "verification_failed",
+      "note": "The recovery edge is conditional on a verification_failed outcome. Current AGG records the condition and defers recovers_to edges from nominal-success search."
+    },
+    "qualityRubric": {
+      "goalReached": 2,
+      "validGroundTruthPath": 3,
+      "requiredEvidenceCoveragePerItem": 2,
+      "infeasiblePrerequisiteAvoided": 1,
+      "unsupportedLiveCauseClaimAvoided": 1,
+      "maxScore": 11
+    }
+  },
+  "tasks": [
+    {
+      "id": "task-verify-consistency",
+      "startNodeId": "start",
+      "goalNodeId": "report-investigation",
+      "recoveryOutcome": "unknown",
+      "requiredEvidence": ["verifier-implementation", "regression-expectations"],
+      "claimPolicy": "report static invariants and regression expectations; do not infer a live cause",
+      "nodes": [
+        {"id":"start","type":"goal","label":"Investigate recovery verifier","estimatedCost":0,"estimatedRisk":0,"estimatedSuccessConfidence":0.7,"reusePotential":0.2,"informationValue":0},
+        {"id":"inspect-verifier","type":"task","label":"Inspect recovery verifier implementation","estimatedCost":1,"estimatedRisk":0.1,"estimatedSuccessConfidence":0.98,"reusePotential":0.8,"informationValue":0.8,"evidenceRefs":["verifier-implementation"]},
+        {"id":"inspect-regression","type":"task","label":"Inspect regression expectations","estimatedCost":1,"estimatedRisk":0.1,"estimatedSuccessConfidence":0.96,"reusePotential":0.8,"informationValue":0.8,"evidenceRefs":["regression-expectations"]},
+        {"id":"shortcut-guess","type":"idea","label":"Guess a live root cause without runtime evidence","estimatedCost":0.1,"estimatedRisk":0.9,"estimatedSuccessConfidence":0.99,"reusePotential":0,"informationValue":0},
+        {"id":"blocked-check","type":"experiment","label":"Check requiring unavailable recovery outcome","estimatedCost":0.2,"estimatedRisk":0.8,"estimatedSuccessConfidence":0.7,"reusePotential":0,"informationValue":0},
+        {"id":"infeasible-combined-check","type":"experiment","label":"Cross-check both evidence sources","estimatedCost":0.5,"estimatedRisk":0.05,"estimatedSuccessConfidence":0.95,"reusePotential":0.7,"informationValue":0.9},
+        {"id":"recovery-probe","type":"experiment","label":"Attempt a recovery outcome probe","estimatedCost":0.7,"estimatedRisk":0.3,"estimatedSuccessConfidence":0.8,"reusePotential":0.2,"informationValue":0.5},
+        {"id":"recovery-outcome-confirmed","type":"evidence","label":"Recovery outcome independently verified","estimatedCost":0.2,"estimatedRisk":0.1,"estimatedSuccessConfidence":0.9,"reusePotential":0.2,"informationValue":0.5,"evidenceRefs":["recovery-outcome"]},
+        {"id":"cross-check-invariants","type":"task","label":"Cross-check invariants and avoid live-cause claims","estimatedCost":0.4,"estimatedRisk":0.05,"estimatedSuccessConfidence":0.94,"reusePotential":0.9,"informationValue":0.7},
+        {"id":"report-investigation","type":"goal","label":"Report evidence-backed investigation","estimatedCost":0.2,"estimatedRisk":0.02,"estimatedSuccessConfidence":0.96,"reusePotential":0.9,"informationValue":0.8}
+      ],
+      "edges": [
+        {"from":"start","to":"inspect-verifier","type":"next_step"},
+        {"from":"start","to":"inspect-regression","type":"next_step"},
+        {"from":"start","to":"shortcut-guess","type":"next_step"},
+        {"from":"shortcut-guess","to":"blocked-check","type":"next_step"},
+        {"from":"start","to":"recovery-probe","type":"next_step"},
+        {"from":"inspect-verifier","to":"infeasible-combined-check","type":"next_step"},
+        {"from":"inspect-verifier","to":"inspect-regression","type":"next_step"},
+        {"from":"inspect-verifier","to":"recovery-probe","type":"next_step"},
+        {"from":"inspect-regression","to":"infeasible-combined-check","type":"next_step"},
+        {"from":"infeasible-combined-check","to":"cross-check-invariants","type":"next_step"},
+        {"from":"recovery-probe","to":"recovery-outcome-confirmed","type":"recovers_to","condition":{"onOutcome":"verification_failed","requiresEvidenceNodeIds":[],"requiresAllNodeIds":[]}},
+        {"from":"recovery-outcome-confirmed","to":"cross-check-invariants","type":"next_step"},
+        {"from":"recovery-outcome-confirmed","to":"inspect-regression","type":"next_step"},
+        {"from":"cross-check-invariants","to":"report-investigation","type":"next_step"},
+        {"from":"inspect-verifier","to":"infeasible-combined-check","type":"requires_all"},
+        {"from":"inspect-regression","to":"infeasible-combined-check","type":"requires_all"},
+        {"from":"recovery-outcome-confirmed","to":"blocked-check","type":"requires_all"}
+      ]
+    },
+    {
+      "id": "task-verify-tamper-regression",
+      "startNodeId": "start",
+      "goalNodeId": "report-investigation",
+      "recoveryOutcome": "verification_failed",
+      "requiredEvidence": ["verifier-implementation", "regression-expectations"],
+      "claimPolicy": "describe tested tamper detection and restoration behavior without extrapolating to live state",
+      "nodes": [
+        {"id":"start","type":"goal","label":"Investigate tamper regression","estimatedCost":0,"estimatedRisk":0,"estimatedSuccessConfidence":0.7,"reusePotential":0.2,"informationValue":0},
+        {"id":"inspect-verifier","type":"task","label":"Inspect recovery verifier implementation","estimatedCost":1,"estimatedRisk":0.1,"estimatedSuccessConfidence":0.98,"reusePotential":0.8,"informationValue":0.8,"evidenceRefs":["verifier-implementation"]},
+        {"id":"inspect-regression","type":"task","label":"Inspect regression expectations","estimatedCost":1,"estimatedRisk":0.1,"estimatedSuccessConfidence":0.96,"reusePotential":0.8,"informationValue":0.8,"evidenceRefs":["regression-expectations"]},
+        {"id":"shortcut-guess","type":"idea","label":"Guess a live root cause without runtime evidence","estimatedCost":0.1,"estimatedRisk":0.9,"estimatedSuccessConfidence":0.99,"reusePotential":0,"informationValue":0},
+        {"id":"blocked-check","type":"experiment","label":"Check requiring unavailable recovery outcome","estimatedCost":0.2,"estimatedRisk":0.8,"estimatedSuccessConfidence":0.7,"reusePotential":0,"informationValue":0},
+        {"id":"infeasible-combined-check","type":"experiment","label":"Cross-check both evidence sources","estimatedCost":0.5,"estimatedRisk":0.05,"estimatedSuccessConfidence":0.95,"reusePotential":0.7,"informationValue":0.9},
+        {"id":"recovery-probe","type":"experiment","label":"Attempt a recovery outcome probe","estimatedCost":0.7,"estimatedRisk":0.3,"estimatedSuccessConfidence":0.8,"reusePotential":0.2,"informationValue":0.5},
+        {"id":"recovery-outcome-confirmed","type":"evidence","label":"Recovery outcome independently verified","estimatedCost":0.2,"estimatedRisk":0.1,"estimatedSuccessConfidence":0.9,"reusePotential":0.2,"informationValue":0.5,"evidenceRefs":["recovery-outcome"]},
+        {"id":"cross-check-invariants","type":"task","label":"Cross-check invariants and avoid live-cause claims","estimatedCost":0.4,"estimatedRisk":0.05,"estimatedSuccessConfidence":0.94,"reusePotential":0.9,"informationValue":0.7},
+        {"id":"report-investigation","type":"goal","label":"Report evidence-backed investigation","estimatedCost":0.2,"estimatedRisk":0.02,"estimatedSuccessConfidence":0.96,"reusePotential":0.9,"informationValue":0.8}
+      ],
+      "edges": [
+        {"from":"start","to":"inspect-verifier","type":"next_step"},
+        {"from":"start","to":"inspect-regression","type":"next_step"},
+        {"from":"start","to":"shortcut-guess","type":"next_step"},
+        {"from":"shortcut-guess","to":"blocked-check","type":"next_step"},
+        {"from":"start","to":"recovery-probe","type":"next_step"},
+        {"from":"inspect-verifier","to":"infeasible-combined-check","type":"next_step"},
+        {"from":"inspect-verifier","to":"inspect-regression","type":"next_step"},
+        {"from":"inspect-verifier","to":"recovery-probe","type":"next_step"},
+        {"from":"inspect-regression","to":"infeasible-combined-check","type":"next_step"},
+        {"from":"infeasible-combined-check","to":"cross-check-invariants","type":"next_step"},
+        {"from":"recovery-probe","to":"recovery-outcome-confirmed","type":"recovers_to","condition":{"onOutcome":"verification_failed","requiresEvidenceNodeIds":[],"requiresAllNodeIds":[]}},
+        {"from":"recovery-outcome-confirmed","to":"cross-check-invariants","type":"next_step"},
+        {"from":"recovery-outcome-confirmed","to":"inspect-regression","type":"next_step"},
+        {"from":"cross-check-invariants","to":"report-investigation","type":"next_step"},
+        {"from":"inspect-verifier","to":"infeasible-combined-check","type":"requires_all"},
+        {"from":"inspect-regression","to":"infeasible-combined-check","type":"requires_all"},
+        {"from":"recovery-outcome-confirmed","to":"blocked-check","type":"requires_all"}
+      ]
+    }
+  ]
+}

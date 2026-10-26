@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isSafePortableArchivePath } from './phase2-zip-entry-type-safety.mjs';
+import { classifyPhase2CandidateFailure, diagnosePhase2EntryCount, FROZEN_PHASE2_ARCHIVE_ENTRY_COUNT } from './phase2-inventory-diagnostics.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 for (const unsafe of ['C:/outside.txt', 'c:outside.txt', 'D:/a/../outside.txt', '../outside.txt', '/absolute.txt']) {
@@ -35,36 +36,79 @@ for (const destination of [output, symlinkParent, traversalOutput, symlinkOutput
 const run = (bundleArg, outputArg) => spawnSync(process.execPath, [script, bundleArg, outputArg], { cwd: root, encoding: 'utf8' });
 let outputCreatedByThisTest = false;
 let symlinkParentCreatedByThisTest = false;
+const candidateFailures = [];
 
 try {
   let bundle = null;
   let good = null;
-  for (const candidate of bundleCandidates) {
+  for (const [candidateIndex, candidate] of bundleCandidates.entries()) {
     const attempt = run(candidate, path.relative(root, output));
     if (attempt.status === 0) {
-      bundle = candidate;
-      good = attempt;
-      outputCreatedByThisTest = true;
-      break;
+      // Probe every historical candidate independently. Keep the first exact
+      // source-lineage match as the inventory candidate, but do not stop before
+      // recording the distinct failure causes of older immutable archives.
+      if (!bundle) {
+        bundle = candidate;
+        good = attempt;
+      }
+      fs.rmSync(output, { force: true });
+      outputCreatedByThisTest = false;
+      continue;
     }
+    const stderr = String(attempt.stderr || '');
+    const diagnostic = classifyPhase2CandidateFailure(stderr);
+    candidateFailures.push({
+      candidate,
+      classification: diagnostic.classification,
+      firstMismatchedEntry: diagnostic.firstMismatchedEntry,
+      exitCode: attempt.status,
+      signal: attempt.signal || null,
+      error: attempt.error ? String(attempt.error.message || attempt.error).slice(0, 500) : null,
+      stdout: String(attempt.stdout || '').slice(0, 1200),
+      stderr: String(attempt.stderr || '').slice(0, 1600)
+    });
   }
-  assert.ok(bundle && good, `no candidate has exact current-source lineage; tried ${bundleCandidates.length} candidates`);
+  assert.ok(bundle && good,
+    `no candidate has exact current-source lineage; this is a bundle/source-byte lineage blocker, not the frozen inventory-count assertion. ` +
+    `Tried ${bundleCandidates.length} candidate(s); preserve the 71-path contract and inspect each candidate diagnostic before retrying. ` +
+    `Per-candidate diagnostics=${JSON.stringify(candidateFailures)}`);
+  // Re-run the selected exact-lineage candidate to materialize the inventory
+  // used by the unchanged frozen 71-path assertion below.
+  good = run(bundle, path.relative(root, output));
+  outputCreatedByThisTest = good.status === 0;
   assert.equal(good.status, 0, `valid candidate should produce inventory: ${good.stderr}`);
   const inventory = JSON.parse(fs.readFileSync(output, 'utf8'));
   assert.equal(inventory.status, 'candidate-unapproved-review-evidence-only');
-  assert.equal(inventory.entries.length, 37, 'the packaged runtime closure must include the strict JSON parser, pinned behavioral QA harness, current runtime metadata closure, and all three shutdown regressions');
+  // `PHASE2_CANDIDATE_BUNDLE` may be an absolute path inside this repository.
+  // `path.join(root, absolute)` incorrectly prepends `root` on POSIX, causing
+  // the inventory assertion to fail before lineage/count diagnostics run.
+  const candidateBundlePath = path.resolve(root, bundle);
+  assert.equal(inventory.bundle.path, path.relative(root, candidateBundlePath).split(path.sep).join('/'),
+    'inventory identity must be repository-relative and stable whether the input bundle argument is relative or absolute');
+  const archiveEntries = execFileSync('unzip', ['-Z1', candidateBundlePath], { encoding: 'utf8' }).trim().split(/\r?\n/).filter(Boolean).sort();
+  assert.deepEqual(inventory.entries.map(entry => entry.path).sort(), archiveEntries, 'inventory must bind every exact archive entry, not just a matching count');
+  assert.ok(inventory.entries.every(entry => /^[a-f0-9]{64}$/.test(entry.sha256) && /^[a-f0-9]{64}$/.test(entry.source_sha256)),
+    'each exact archive path must carry independently shaped archive and source digests before the frozen count contract is evaluated');
+  const countDiagnosis = diagnosePhase2EntryCount(inventory.entries.length);
+  console.log(JSON.stringify({
+    inventoryDiagnosis: 'candidate_path_and_archive_payload_equality_verified_before_frozen_count_assertion',
+    selectedCandidate: bundle,
+    selectedCandidateEntryCount: inventory.entries.length,
+    ...countDiagnosis,
+    candidateFailures
+  }));
   assert.ok(inventory.entries.some(entry => entry.path === 'src/runtime/strict-json.js'), 'candidate inventory must bind exact bytes for the shipped strict JSON parser');
-  assert.equal(inventory.bundle.sha256, (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(path.join(root, bundle))).digest('hex'));
+  assert.equal(inventory.bundle.sha256, (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(candidateBundlePath)).digest('hex'));
   const packageEntry = inventory.entries.find(entry => entry.path === 'package.json');
   assert.equal(packageEntry?.source_derivation, 'runtime-metadata-projection-v1',
     'package.json must be explicitly inventoried as a generated local-runtime metadata projection');
   assert.equal(packageEntry?.source_input_sha256,
     (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(path.join(root, 'package.json'))).digest('hex'),
     'runtime metadata projection must bind the full repository package.json input');
-  const packagedMetadataResult = spawnSync('unzip', ['-p', path.join(root, bundle), 'package.json'], { encoding: 'utf8' });
+  const packagedMetadataResult = spawnSync('unzip', ['-p', candidateBundlePath, 'package.json'], { encoding: 'utf8' });
   assert.equal(packagedMetadataResult.status, 0, 'candidate must contain readable package metadata');
   const packagedMetadata = JSON.parse(packagedMetadataResult.stdout);
-  assert.equal(packagedMetadata.main, 'server/index.js');
+  assert.equal(packagedMetadata.main, JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).runtimeEntryPoint);
   assert.equal(packagedMetadata.engines?.node, '>=22.13.0');
   assert.equal(Object.hasOwn(packagedMetadata, 'dependencies'), false,
     'local-only runtime metadata must not declare the excluded LangGraph dependency');
@@ -141,6 +185,37 @@ try {
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
+  // A disposable archive with a matching manifest but altered payload must be
+  // distinguished from old archives whose manifest/source lineage is stale.
+  const payloadMismatchBundle = path.join(outDir, `.phase2-payload-mismatch-${process.pid}.mcpb`);
+  const payloadMismatchInventory = path.join(outDir, `.phase2-payload-mismatch-${process.pid}.json`);
+  const payloadMismatchStage = fs.mkdtempSync(path.join(os.tmpdir(), `phase2-payload-mismatch-${process.pid}-`));
+  try {
+    if (fs.existsSync(payloadMismatchBundle) || fs.existsSync(payloadMismatchInventory)) {
+      throw new Error('refusing to overwrite an existing payload-mismatch diagnostic fixture');
+    }
+    fs.mkdirSync(path.join(payloadMismatchStage, 'payload'));
+    const extracted = spawnSync('unzip', ['-q', bundle, '-d', path.join(payloadMismatchStage, 'payload')], { cwd: root, encoding: 'utf8' });
+    assert.equal(extracted.status, 0, `payload diagnostic fixture extraction failed: ${extracted.stderr}`);
+    fs.writeFileSync(path.join(payloadMismatchStage, 'payload/README.md'), 'test-only archive payload mismatch\n');
+    const zipped = spawnSync('bash', ['-lc', `find . -type f -print | LC_ALL=C sort | zip -X -q ${JSON.stringify(payloadMismatchBundle)} -@`], {
+      cwd: path.join(payloadMismatchStage, 'payload'), encoding: 'utf8'
+    });
+    assert.equal(zipped.status, 0, `payload diagnostic archive creation failed: ${zipped.stderr}`);
+    const failure = run(path.relative(root, payloadMismatchBundle), path.relative(root, payloadMismatchInventory));
+    assert.notEqual(failure.status, 0, 'archive payload bytes changed without source edits must fail exact lineage');
+    const diagnostic = classifyPhase2CandidateFailure(String(failure.stderr || ''));
+    assert.equal(diagnostic.classification, 'archive_payload_source_mismatch');
+    assert.equal(diagnostic.firstMismatchedEntry, 'README.md', 'matching manifest and first changed payload entry must produce a distinct diagnosis');
+  } finally {
+    fs.rmSync(payloadMismatchBundle, { force: true });
+    fs.rmSync(payloadMismatchInventory, { force: true });
+    fs.rmSync(payloadMismatchStage, { recursive: true, force: true });
+  }
+  // Run all independent path, symlink, overwrite and archive-byte regressions
+  // before applying the frozen count gate. A count mismatch must not hide them.
+  assert.equal(inventory.entries.length, FROZEN_PHASE2_ARCHIVE_ENTRY_COUNT,
+    'the frozen Phase 2 contract requires exactly 71 archive paths; source-aligned candidates with another count remain blocked and must not be trimmed to fit');
   console.log('PASS: inventory builder binds exact source bytes and refuses source symlinks, overwrite, traversal and symlinked output parents');
 } finally {
   if (outputCreatedByThisTest) fs.rmSync(output, { force: true });

@@ -1,0 +1,6 @@
+case_id,baseline_success,phase2_success,baseline_expansions,phase2_expansions,baseline_runtime_ms,phase2_runtime_ms
+synthetic-case-1,1,1,4,4,3.323895,1.677326
+synthetic-case-2,1,1,4,4,0.953329,0.602111
+synthetic-case-3,1,1,4,4,1.161526,0.479823
+synthetic-case-4,1,1,4,4,0.445619,0.293323
+synthetic-case-5,1,1,4,4,0.478931,0.398371

@@ -1,0 +1,529 @@
+{
+  "schemaVersion": 6,
+  "fixtureId": "recovery-verifier-investigation-v6",
+  "supersedesFixtureId": "recovery-verifier-investigation-v5",
+  "provenanceRevision": 6,
+  "provenanceRevisionReason": "Preserves v2-v5 pins and scenarios. Binds benchmark results to the declared ground-truth path oracle and per-task evidence contract, rejects malformed/out-of-scope evidence labels, and hardens the durable evidence resolver against silently dropped malformed references. No scoring weights, scenario count, acceptance threshold, or hard-fail policy is changed.",
+  "description": "Synthetic offline investigation based on checked-in recovery-verifier source and regression assertions. Describes possible investigation routes, not a claim about a live incident or its cause.",
+  "provenance": [
+    {
+      "path": "server/index.js",
+      "sha256": "fe7a6accee6c4b7486d7661d4959b7020957c64b2909905d595e757b58b0cc15",
+      "previouslyPinnedSha256": "3c5968104925aa1d9dae0bcc55915e15a4a00f7a5a674fc9f12d9c405b6bc9be",
+      "changeAssessment": "Bounds and validates each step evidence-reference array; malformed references can no longer be silently dropped before readiness and lineage checks.",
+      "claim": "AGG durable evidence resolution rejects duplicate, malformed, overlong, and oversized reference sets before attempting source or artifact lineage resolution.",
+      "semanticScope": {
+        "startMarker": "case 'workflow_recovery_verify': {",
+        "endMarker": "\n    case '",
+        "sha256": "941835e624cae58b7935723144a49dddc13532deb30e444ec5835c4df9df62e9",
+        "reviewNote": "The exact recovery-verifier function block remains separately pinned; surrounding server source now includes stricter AGG completion-ledger conflict handling."
+      }
+    },
+    {
+      "path": "tests/test-runalith-plugin.js",
+      "sha256": "cd9198154e7b318ead1dbf34f9155bd2df7e1e4a5c08596c8fb3da160fcbb601",
+      "previouslyPinnedSha256": "ba80edb037c9c98837ad09611408ac72334587d3ea869b61be70905ec9c3aa41",
+      "changeAssessment": "Adds real MCP duplicate-reference rejection and disposable-SQLite artifact-byte tampering/recovery assertions while retaining receipt tamper and crash-window no-reexecution coverage.",
+      "claim": "Integrated MCP and sandbox regressions exercise duplicate input, artifact tampering, exact restoration, idempotency, and recovery without repeating the action."
+    },
+    {
+      "path": "tests/test-adaptive-goal-source-evidence.js",
+      "sha256": "e68c7ab66aa00ba7a6688b8c5be3b99e483ff9c6ddff1d82e3053325bc49058d",
+      "changeAssessment": "Adds deterministic opened-descriptor-to-path symlink replacement race test and verifies non-promotion after identity changes.",
+      "claim": "Source resolver race regression requires source_changed_during_read and restores original bytes.",
+      "previouslyPinnedSha256": "f86d77d76c9a16cf924743f1b4e1d67c56d67e127e5d8740cdd6b60ca000060e"
+    },
+    {
+      "path": "tests/test-adaptive-goal-candidate-assessment-contract.mjs",
+      "sha256": "8b18b0d86f55b57ad6baf7a94d7ac867e56ee970971298ea4ed865b986eb7837",
+      "changeAssessment": "Adds recomputed assessment-hash attack attempting to claim truth, independent attestation, and runtime bundle binding.",
+      "claim": "Assessment hash is validated as integrity only; schema contract rejects forged claim/authority promotion.",
+      "previouslyPinnedSha256": "8b18b0d86f55b57ad6baf7a94d7ac867e56ee970971298ea4ed865b986eb7837"
+    },
+    {
+      "path": "benchmarks/adaptive-goal-graph/run-benchmark.mjs",
+      "sha256": "d702212056143fce6c6cfd49f7869d0659392c27218b2cc892f3323a6bef4d4d",
+      "claim": "Offline benchmark fixture structure is validated before scoring, and graph-valid selected paths earn ground-truth points only when exactly declared by the fixture oracle.",
+      "changeAssessment": "Adds structural checks for task identity, edge endpoints, task-specific evidence requirements, out-of-scope evidence references, fixed scoring rubric, and declared ground-truth path linkage."
+    },
+    {
+      "path": "src/runtime/adaptive-goal-source-evidence.js",
+      "sha256": "c106a18f4518c8e819b96af41f9202d630884b76b69e177e463e23319b36e11d",
+      "claim": "Evidence-reference collection is bounded and rejects malformed fields; local source-byte integrity remains explicitly distinct from claim truth and independence.",
+      "changeAssessment": "Extracts reusable strict reference-shape validation and adds malformed/oversized reference regressions."
+    }
+  ],
+  "groundTruth": {
+    "requiredEvidence": [
+      "verifier-implementation",
+      "regression-expectations"
+    ],
+    "validGoalPaths": [
+      [
+        "start",
+        "inspect-verifier",
+        "inspect-regression",
+        "infeasible-combined-check",
+        "cross-check-invariants",
+        "report-investigation"
+      ],
+      [
+        "start",
+        "inspect-verifier",
+        "recovery-probe",
+        "recovery-outcome-confirmed",
+        "inspect-regression",
+        "infeasible-combined-check",
+        "cross-check-invariants",
+        "report-investigation"
+      ]
+    ],
+    "recoveryOutcomeGate": {
+      "edge": {
+        "from": "recovery-probe",
+        "to": "recovery-outcome-confirmed",
+        "type": "recovers_to"
+      },
+      "requiredOutcome": "verification_failed",
+      "note": "The recovery edge is conditional on a verification_failed outcome. Current AGG records the condition and defers recovers_to edges from nominal-success search."
+    },
+    "qualityRubric": {
+      "goalReached": 2,
+      "validGroundTruthPath": 3,
+      "requiredEvidenceCoveragePerItem": 2,
+      "infeasiblePrerequisiteAvoided": 1,
+      "unsupportedLiveCauseClaimAvoided": 1,
+      "maxScore": 11
+    }
+  },
+  "tasks": [
+    {
+      "id": "task-verify-consistency",
+      "startNodeId": "start",
+      "goalNodeId": "report-investigation",
+      "recoveryOutcome": "unknown",
+      "requiredEvidence": [
+        "verifier-implementation",
+        "regression-expectations"
+      ],
+      "claimPolicy": "report static invariants and regression expectations; do not infer a live cause",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "goal",
+          "label": "Investigate recovery verifier",
+          "estimatedCost": 0,
+          "estimatedRisk": 0,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0.2,
+          "informationValue": 0
+        },
+        {
+          "id": "inspect-verifier",
+          "type": "task",
+          "label": "Inspect recovery verifier implementation",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.98,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "verifier-implementation"
+          ]
+        },
+        {
+          "id": "inspect-regression",
+          "type": "task",
+          "label": "Inspect regression expectations",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "regression-expectations"
+          ]
+        },
+        {
+          "id": "shortcut-guess",
+          "type": "idea",
+          "label": "Guess a live root cause without runtime evidence",
+          "estimatedCost": 0.1,
+          "estimatedRisk": 0.9,
+          "estimatedSuccessConfidence": 0.99,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "blocked-check",
+          "type": "experiment",
+          "label": "Check requiring unavailable recovery outcome",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.8,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "infeasible-combined-check",
+          "type": "experiment",
+          "label": "Cross-check both evidence sources",
+          "estimatedCost": 0.5,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.95,
+          "reusePotential": 0.7,
+          "informationValue": 0.9
+        },
+        {
+          "id": "recovery-probe",
+          "type": "experiment",
+          "label": "Attempt a recovery outcome probe",
+          "estimatedCost": 0.7,
+          "estimatedRisk": 0.3,
+          "estimatedSuccessConfidence": 0.8,
+          "reusePotential": 0.2,
+          "informationValue": 0.5
+        },
+        {
+          "id": "recovery-outcome-confirmed",
+          "type": "evidence",
+          "label": "Recovery outcome independently verified",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.9,
+          "reusePotential": 0.2,
+          "informationValue": 0.5,
+          "evidenceRefs": [
+            "recovery-outcome"
+          ]
+        },
+        {
+          "id": "cross-check-invariants",
+          "type": "task",
+          "label": "Cross-check invariants and avoid live-cause claims",
+          "estimatedCost": 0.4,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.94,
+          "reusePotential": 0.9,
+          "informationValue": 0.7
+        },
+        {
+          "id": "report-investigation",
+          "type": "goal",
+          "label": "Report evidence-backed investigation",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.02,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.9,
+          "informationValue": 0.8
+        }
+      ],
+      "edges": [
+        {
+          "from": "start",
+          "to": "inspect-verifier",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "shortcut-guess",
+          "type": "next_step"
+        },
+        {
+          "from": "shortcut-guess",
+          "to": "blocked-check",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "infeasible-combined-check",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-probe",
+          "to": "recovery-outcome-confirmed",
+          "type": "recovers_to",
+          "condition": {
+            "onOutcome": "verification_failed",
+            "requiresEvidenceNodeIds": [],
+            "requiresAllNodeIds": []
+          }
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "cross-check-invariants",
+          "to": "report-investigation",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "blocked-check",
+          "type": "requires_all"
+        }
+      ]
+    },
+    {
+      "id": "task-verify-tamper-regression",
+      "startNodeId": "start",
+      "goalNodeId": "report-investigation",
+      "recoveryOutcome": "verification_failed",
+      "requiredEvidence": [
+        "verifier-implementation",
+        "regression-expectations"
+      ],
+      "claimPolicy": "describe tested tamper detection and restoration behavior without extrapolating to live state",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "goal",
+          "label": "Investigate tamper regression",
+          "estimatedCost": 0,
+          "estimatedRisk": 0,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0.2,
+          "informationValue": 0
+        },
+        {
+          "id": "inspect-verifier",
+          "type": "task",
+          "label": "Inspect recovery verifier implementation",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.98,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "verifier-implementation"
+          ]
+        },
+        {
+          "id": "inspect-regression",
+          "type": "task",
+          "label": "Inspect regression expectations",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "regression-expectations"
+          ]
+        },
+        {
+          "id": "shortcut-guess",
+          "type": "idea",
+          "label": "Guess a live root cause without runtime evidence",
+          "estimatedCost": 0.1,
+          "estimatedRisk": 0.9,
+          "estimatedSuccessConfidence": 0.99,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "blocked-check",
+          "type": "experiment",
+          "label": "Check requiring unavailable recovery outcome",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.8,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "infeasible-combined-check",
+          "type": "experiment",
+          "label": "Cross-check both evidence sources",
+          "estimatedCost": 0.5,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.95,
+          "reusePotential": 0.7,
+          "informationValue": 0.9
+        },
+        {
+          "id": "recovery-probe",
+          "type": "experiment",
+          "label": "Attempt a recovery outcome probe",
+          "estimatedCost": 0.7,
+          "estimatedRisk": 0.3,
+          "estimatedSuccessConfidence": 0.8,
+          "reusePotential": 0.2,
+          "informationValue": 0.5
+        },
+        {
+          "id": "recovery-outcome-confirmed",
+          "type": "evidence",
+          "label": "Recovery outcome independently verified",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.9,
+          "reusePotential": 0.2,
+          "informationValue": 0.5,
+          "evidenceRefs": [
+            "recovery-outcome"
+          ]
+        },
+        {
+          "id": "cross-check-invariants",
+          "type": "task",
+          "label": "Cross-check invariants and avoid live-cause claims",
+          "estimatedCost": 0.4,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.94,
+          "reusePotential": 0.9,
+          "informationValue": 0.7
+        },
+        {
+          "id": "report-investigation",
+          "type": "goal",
+          "label": "Report evidence-backed investigation",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.02,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.9,
+          "informationValue": 0.8
+        }
+      ],
+      "edges": [
+        {
+          "from": "start",
+          "to": "inspect-verifier",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "shortcut-guess",
+          "type": "next_step"
+        },
+        {
+          "from": "shortcut-guess",
+          "to": "blocked-check",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "infeasible-combined-check",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-probe",
+          "to": "recovery-outcome-confirmed",
+          "type": "recovers_to",
+          "condition": {
+            "onOutcome": "verification_failed",
+            "requiresEvidenceNodeIds": [],
+            "requiresAllNodeIds": []
+          }
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "cross-check-invariants",
+          "to": "report-investigation",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "blocked-check",
+          "type": "requires_all"
+        }
+      ]
+    }
+  ]
+}

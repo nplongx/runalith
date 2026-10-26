@@ -466,12 +466,25 @@ await assert.rejects(() => inlinePayloadTamperProvider.collectResult('24680'),
 const sourceReaderProvider = new GitHubActionsProvider({
   token: 'test-token', owner: 'example', repo: 'repo', fetchImpl: async () => new Response('{}')
 });
-const sourceReaderCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-const expectedGitBlobBytes = execFileSync('git', ['show', `${sourceReaderCommit}:package.json`], { encoding: 'buffer' });
-assert.deepEqual(await sourceReaderProvider.taskPayloadSourceReader({ inputCommit: sourceReaderCommit, ref: 'package.json' }), expectedGitBlobBytes,
-  'the default task-payload source reader must return exact bytes from the pinned Git commit');
-assert.throws(() => sourceReaderProvider.taskPayloadSourceReader({ inputCommit: sourceReaderCommit, ref: '../package.json' }),
-  /safe workspace-relative path/, 'the default source reader must reject traversal refs before invoking Git');
+const gitMetadataAvailable = fs.existsSync(path.join(process.cwd(), '.git'));
+if (gitMetadataAvailable) {
+  const sourceReaderCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const expectedGitBlobBytes = execFileSync('git', ['show', `${sourceReaderCommit}:package.json`], { encoding: 'buffer' });
+  assert.deepEqual(await sourceReaderProvider.taskPayloadSourceReader({ inputCommit: sourceReaderCommit, ref: 'package.json' }), expectedGitBlobBytes,
+    'the default task-payload source reader must return exact bytes from the pinned Git commit');
+  assert.throws(() => sourceReaderProvider.taskPayloadSourceReader({ inputCommit: sourceReaderCommit, ref: '../package.json' }),
+    /safe workspace-relative path/, 'the default source reader must reject traversal refs before invoking Git');
+} else {
+  // Independent package replay intentionally extracts sources without .git/.
+  // Do not invent a commit ID or substitute working-tree bytes in this mode:
+  // the default reader must refuse an otherwise valid ref when its immutable
+  // Git object database is unavailable. Path validation still happens first.
+  assert.throws(() => sourceReaderProvider.taskPayloadSourceReader({ inputCommit: input.input_commit, ref: '../package.json' }),
+    /safe workspace-relative path/, 'traversal refs must be rejected before any Git metadata lookup even when .git is absent');
+  assert.throws(() => sourceReaderProvider.taskPayloadSourceReader({ inputCommit: input.input_commit, ref: 'package.json' }),
+    /git show|not a git repository|Command failed/i,
+    'the default source reader must fail closed rather than claim exact source provenance without Git metadata');
+}
 const refPayload = {
   schema_version: 1, job_id: input.job_id, task_id: input.task_id, role: 'architect',
   required_evidence: [...input.required_evidence], command: 'true', instructions: 'source-approved operation'

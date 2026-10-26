@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "manuscript_title": "AGG có mang lại lợi ích đo được không? Đánh giá thực nghiệm theo các giai đoạn phát triển Adaptive Goal Graph trong Runalith",
+  "prepared_date": "2026-10-25",
+  "data_policy": "Numbers in tables and figures are summarized from identified project artifacts. No synthetic trial rows are invented in this bundle. Any aggregation/transcription is stated below.",
+  "primary_artifacts": [
+    {
+      "phase": "Phase 1 algorithm benchmark",
+      "repository_relative_path": "artifacts/agg-phase1-hardening-20261023T152010Z-verified-final-preserved-candidate/phase1-algorithm-raw.json",
+      "sha256": "5fa2ce1d2927fe5ea34af6f275fa8535172c0797f9abd177159940e58c03f27c",
+      "fixture_id": "runalith-agg-phase1-verified-planning-catalog-v2",
+      "catalog_sha256": "ffa5cd7713426c5806a5d29e249a07c959c6c7e2948a95a12f3bd206d7f9a7b7",
+      "verification": "PASS_INTEGRITY_ONLY_NOT_ACCEPTANCE; CURRENT_SOURCE_HASHES_MATCH; 28 task templates, 7 family clusters, 140 graph instances, 700 records; zero errors and zero warnings.",
+      "used_for": [
+        "fig1_phase1_outcome_accuracy.pdf",
+        "fig2_phase1_cost_tradeoff.pdf",
+        "agg_phase1_algorithm_summary.csv"
+      ],
+      "limitations": [
+        "Frozen synthetic development/regression catalog, no owner-approved real-world holdout",
+        "Seven independent task-family clusters only",
+        "80 limit applies to successor-expansion counter, not total computation",
+        "Evidence coverage does not prove claim truth; evidenceClaimsVerifiedRate is zero"
+      ]
+    },
+    {
+      "phase": "Phase 2 discriminator holdout",
+      "repository_relative_path": "artifacts/agg-phase2-workflow-20261024T102000Z-source-callpath-trust-anchor-hardening-successor/holdout-evaluation.json",
+      "sha256": "67460827fd8b8b1dd6e329aca4c61ae092b4135f76b3c88966769ed3911184af",
+      "dataset_id": "agg-phase2-synthetic-technical-v2",
+      "model_sha256": "b29495bc9853172e53091fbf2d57b9440822f27f6358831c4f43ed54c6f5653a",
+      "dataset_file_sha256": "14f39456edc7ab37414d624c0822ca5f56ddd81e2257d283def0f59984c77328",
+      "holdout_split_sha256": "4ffacc782524c200ace90c5d69b3f28f66cdfa059d7d502c61ee789d8370e1bd",
+      "verification": "The stored independent verification report says VERIFIED/INTEGRITY_ONLY/ACCEPTANCE_REQUIRED and reports HOLDOUT_EVALUATION_REDERIVED PASS.",
+      "used_for": [
+        "fig3_phase2_reliability.pdf",
+        "agg_phase2_holdout_metrics.csv",
+        "agg_phase2_holdout_calibration.csv"
+      ],
+      "limitations": [
+        "40 examples are synthetic and labels are not independently adjudicated",
+        "Wilson interval [0.912378, 1.0] is only binomial descriptive uncertainty"
+      ]
+    },
+    {
+      "phase": "Phase 2 paired search benchmark",
+      "repository_relative_path": "artifacts/agg-phase2-workflow-20261024T102000Z-source-callpath-trust-anchor-hardening-successor/paired-benchmark.json",
+      "sha256": "a753fd1caf32f38a7436ac0928cea1f6002919b5c9a3a5439e099e295e70dd80",
+      "verification": "The stored verification report says the paired benchmark was replayed and paired metrics rederived; acceptance still required.",
+      "used_for": [
+        "fig4_phase2_paired_latency.pdf",
+        "agg_phase2_paired_five_cases.csv"
+      ],
+      "limitations": [
+        "Only five pairs",
+        "Runtime is observational and no repeated timing per case",
+        "Both methods succeeded on all five cases; no search-success lift"
+      ]
+    },
+    {
+      "phase": "Phase 3 paired Beam/MCTS benchmark",
+      "repository_relative_path": "artifacts/agg-phase3-mcts-shadow-evidence-20261024T194000+0700-successor3/runs/phase3-paired-benchmark.json",
+      "sha256": "f0a4e4a8707565ef625950636fe613a3e54af4522779a450e053cca9f21b723c",
+      "corpus_id": "agg-phase3-adversarial-synthetic-v1",
+      "acceptance": "offline_shadow_not_acceptance",
+      "evidence_level": "INTEGRITY_AND_SYNTHETIC_REPLAY_ONLY",
+      "used_for": [
+        "fig5_phase3_beam_mcts.pdf",
+        "agg_phase3_summary.csv"
+      ],
+      "limitations": [
+        "24 synthetic tasks (20 goal path, 4 no-solution), 5 seeds",
+        "83.3% majority outcome class",
+        "Independent adjudication and owner trust root not established",
+        "MCTS is non-exhaustive and cannot claim a no-solution proof"
+      ]
+    },
+    {
+      "phase": "Phase 4 knowledge reuse field observed in Phase 1 ledger",
+      "repository_relative_path": "artifacts/agg-phase1-hardening-20261023T152010Z-verified-final-preserved-candidate/phase1-algorithm-raw.json",
+      "raw_sha256": "5fa2ce1d2927fe5ea34af6f275fa8535172c0797f9abd177159940e58c03f27c",
+      "observed": {
+        "goal_count": 28,
+        "cross_goal_reused_node_count": 1,
+        "verified": false,
+        "usable_for_planning": false
+      },
+      "used_for": [
+        "fig6_phase4_reuse_status.pdf",
+        "agg_phase4_reuse_status.csv"
+      ],
+      "limitations": [
+        "Membership does not establish causal savings",
+        "No downstream time/cost/outcome study"
+      ]
+    }
+  ],
+  "derived_values": {
+    "beam4_minus_beam1_task_outcome_accuracy": "100% - 40% = +60 percentage points",
+    "beam4_mean_runtime_relative_to_beam1": "(1.19399 / 0.81353 - 1) * 100 = +46.77% in this measured run",
+    "beam4_expansions_relative_to_beam1": "(12.4643 / 7.3071 - 1) * 100 = +70.58%",
+    "phase2_observed_mean_runtime_change": "(1 - 0.6901908 / 1.2726602) * 100 = 45.77% lower; descriptive n=5 only",
+    "phase3_mcts_to_beam_goal_path_runtime_ratio": "0.62091012 / 0.24446236 = 2.5399",
+    "phase3_mcts_expansion_ratio_goal_path": "11 / 5 = 2.2"
+  },
+  "current_operational_boundary": "The research does not claim formal acceptance or production readiness. Source documentation reports PARTIAL_NOT_ACCEPTED, readiness BLOCKED, and execution gate CLOSED.",
+  "excluded_artifacts": [
+    {
+      "phase": "Historical local LLM pilot (excluded from quantitative inference)",
+      "repository_relative_path": "artifacts/agg-phase1-local-llm-raw-20261022T180210+0700.json",
+      "sha256": "c2b7a8acb3cb6fbf84cfca56b24d8236f983884ed8974d370c6b6e26fe883c28",
+      "exclusion_reason": "Excluded from manuscript tables and figures because the stored runtime source identity cannot be matched to current source and the comparison mixes prompted model inference with deterministic search over a supplied graph. No outcome or latency values from this artifact are used in the paper."
+    }
+  ],
+  "chart_reproduction": {
+    "script": "generate_agg_charts.py",
+    "inputs": [
+      "agg_phase1_algorithm_summary.csv",
+      "agg_phase2_paired_five_cases.csv",
+      "agg_phase2_holdout_calibration.csv",
+      "agg_phase2_holdout_metrics.csv",
+      "agg_phase3_summary.csv",
+      "agg_phase4_reuse_status.csv"
+    ],
+    "figures": [
+      "fig1_phase1_outcome_accuracy.pdf",
+      "fig2_phase1_cost_tradeoff.pdf",
+      "fig3_phase2_reliability.pdf",
+      "fig4_phase2_paired_latency.pdf",
+      "fig5_phase3_beam_mcts.pdf",
+      "fig6_phase4_reuse_status.pdf"
+    ],
+    "method": "Figures are derived from the bundled, disclosed summary/per-case CSVs. No trial rows are simulated, no external-paper results are included in these figures, and the historic local-LLM pilot is excluded."
+  }
+}

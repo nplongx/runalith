@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtimeManifestPath = ['plugin/manifest.json', 'manifest.json'].map(file => path.join(root, file)).find(file => fs.existsSync(file));
+if (!runtimeManifestPath) throw new Error('runtime manifest is missing');
+const runtimePath = path.join(root, JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8')).server.entry_point);
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cos-signal-shutdown-'));
 const dataDir = path.join(temp, 'private-data');
 const workspace = path.join(temp, 'workspace');
@@ -24,7 +27,7 @@ const env = {
 };
 delete env.OPENAI_API_KEY;
 
-const child = spawn(process.execPath, [path.join(root, 'server/index.js')], {
+const child = spawn(process.execPath, [runtimePath], {
   cwd: root,
   env,
   stdio: ['pipe', 'pipe', 'pipe'],

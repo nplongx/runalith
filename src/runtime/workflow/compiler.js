@@ -6,6 +6,8 @@ import { standardEngineeringTaskSpec, standardEngineeringTaskSpecs } from './cat
 import { hybridEngineeringTaskSpecs } from './catalog/hybrid-engineering.js';
 import { validateWorkflowDefinition } from './schema.js';
 import { canonicalJson, validateExecutionPlan } from './plan.js';
+import { artifactSchemaForType } from './artifacts.js';
+import { getAgentArtifactType, getAgentContract, validateCompiledActionIntent } from './agent-contracts.js';
 import { normalizeSuccessContract } from './success-contract.js';
 import { composePolicySuccessContract, resolveValidationProfileSnapshot, materializeValidationProfileTasks } from './policy-contract.js';
 import { BUILTIN_ROLE_PROFILE_OVERLAY_ROLES, createRoleProfileOverlay } from './role-profiles.js';
@@ -13,6 +15,95 @@ import { normalizeWorkspaceWriteContract, workspaceWriteScopeForRole } from './w
 
 function hash(value) {
   return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function applyActionIntentBindings(children, bindings) {
+  if (!Array.isArray(bindings)) throw new Error('actionIntentBindings must be an array');
+  if (bindings.length > 256) throw new Error('actionIntentBindings exceeds the 256-task review limit');
+  if (!bindings.length) return children;
+  const byTaskId = new Map();
+  const taskIdBySourceStepId = new Map();
+  for (const binding of bindings) {
+    if (!binding || typeof binding !== 'object' || Array.isArray(binding) ||
+        Object.keys(binding).sort().join(',') !== 'actionIntent,role,roleContractId,roleContractVersion,taskId' ||
+        typeof binding.taskId !== 'string' || !binding.taskId || byTaskId.has(binding.taskId)) {
+      throw new Error('actionIntentBindings must contain unique, exact task/role-contract records');
+    }
+    const child = children.find(item => item.id === binding.taskId);
+    if (!child || child.role !== binding.role || child.execution?.deterministic === true ||
+        child.execution?.custom_role_id || !binding.actionIntent || typeof binding.actionIntent !== 'object') {
+      throw new Error(`action-intent binding targets an unsupported, unknown, deterministic, or custom role task: ${binding.taskId}`);
+    }
+    const contract = getAgentContract(child.role);
+    if (binding.roleContractId !== contract.id || binding.roleContractVersion !== contract.version) {
+      throw new Error(`action-intent binding role contract is stale for task ${binding.taskId}`);
+    }
+    validateCompiledActionIntent(child.role, binding.actionIntent, child.id);
+    if (binding.actionIntent.role_contract_id !== binding.roleContractId ||
+        binding.actionIntent.role_contract_version !== binding.roleContractVersion) {
+      throw new Error(`action-intent binding and embedded role contract disagree for task ${binding.taskId}`);
+    }
+    if (taskIdBySourceStepId.has(binding.actionIntent.source_step_id)) {
+      throw new Error(`action-intent source step is mapped more than once: ${binding.actionIntent.source_step_id}`);
+    }
+    taskIdBySourceStepId.set(binding.actionIntent.source_step_id, binding.taskId);
+    byTaskId.set(binding.taskId, binding);
+  }
+  const childrenById = new Map(children.map(child => [child.id, child]));
+  const ancestorsOf = taskId => {
+    const ancestors = new Set();
+    const pending = [...(childrenById.get(taskId)?.dependencies || [])];
+    while (pending.length) {
+      const ancestorId = pending.pop();
+      if (ancestors.has(ancestorId)) continue;
+      const ancestor = childrenById.get(ancestorId);
+      if (!ancestor) throw new Error(`action-intent task ${taskId} depends on unknown plan task ${ancestorId}`);
+      ancestors.add(ancestorId);
+      pending.push(...(ancestor.dependencies || []));
+    }
+    return ancestors;
+  };
+  for (const [taskId, binding] of byTaskId) {
+    const intent = binding.actionIntent;
+    const ancestry = ancestorsOf(taskId);
+    for (const dependencyStepId of intent.dependency_step_ids) {
+      const dependencyTaskId = taskIdBySourceStepId.get(dependencyStepId);
+      if (!dependencyTaskId || !ancestry.has(dependencyTaskId)) {
+        throw new Error(`action-intent dependency ${dependencyStepId} is not preserved as an ancestor of task ${taskId}`);
+      }
+    }
+    for (const input of intent.task_input_bindings) {
+      const source = input.source;
+      const schema = artifactSchemaForType(input.input_type);
+      if (source.schema_version !== schema.schema_version) {
+        throw new Error(`action-intent input ${input.input_type} uses a stale artifact schema version for task ${taskId}`);
+      }
+      if (source.kind === 'evidence') {
+        if (source.reference !== source.artifact_id && source.reference !== `artifact://${source.artifact_id}`) {
+          throw new Error(`action-intent evidence reference does not match its pinned artifact identity for task ${taskId}`);
+        }
+        const producerContract = getAgentContract(source.producer_role);
+        if (producerContract.id == null || !producerContract.outputs.includes(input.input_type)) {
+          throw new Error(`action-intent evidence producer role does not declare ${input.input_type} output for task ${taskId}`);
+        }
+      } else {
+        const sourceTaskId = taskIdBySourceStepId.get(source.source_step_id);
+        const sourceTask = childrenById.get(sourceTaskId);
+        const sourceContract = sourceTask ? getAgentContract(sourceTask.role) : null;
+        const outputType = sourceTask ? (sourceTask.execution?.output_artifact_type || getAgentArtifactType(sourceTask.role)) : null;
+        if (!sourceTask || sourceTaskId !== source.task_id || !ancestry.has(sourceTaskId) ||
+            sourceTask.role !== source.role || sourceTask.capability !== source.capability ||
+            sourceContract?.id !== source.role_contract_id || sourceContract?.version !== source.role_contract_version ||
+            outputType !== input.input_type || !sourceContract.outputs.includes(input.input_type)) {
+          throw new Error(`action-intent ancestor output ${source.source_step_id} is not a contract-matching ancestor of task ${taskId}`);
+        }
+      }
+    }
+  }
+  return children.map(child => {
+    const binding = byTaskId.get(child.id);
+    return binding ? { ...child, execution: { ...(child.execution || {}), action_intent: binding.actionIntent } } : child;
+  });
 }
 
 function defaultBatchExecutionPolicy(children, { requiresWorkspaceValidation = false } = {}) {
@@ -31,14 +122,16 @@ function defaultBatchExecutionPolicy(children, { requiresWorkspaceValidation = f
   };
 }
 
-export function compileWorkflowPlan(job, { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = null, policyPacks = [], roleProfiles = [], requiredOperations = [], workspaceWriteScopes = [], workflowVersion = null, batchExecutionPolicy = undefined, validationProfileSelector = null } = {}) {
+export function compileWorkflowPlan(job, { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = null, policyPacks = [], roleProfiles = [], requiredOperations = [], workspaceWriteScopes = [], workflowVersion = null, batchExecutionPolicy = undefined, validationProfileSelector = null, actionIntentBindings = [] } = {}) {
   if (!job?.job_id) throw new Error('job is required to compile execution plan');
   // null is reserved for existing schema-v1 plans so runtime revalidation never rewrites their hashes.
   const preserveLegacyPlan = batchExecutionPolicy === null;
   if (!Array.isArray(policyPacks)) throw new Error('policyPacks must be an array');
   if (!Array.isArray(roleProfiles)) throw new Error('roleProfiles must be an array');
+  if (!Array.isArray(actionIntentBindings)) throw new Error('actionIntentBindings must be an array');
   const pinnedSuccessContract = normalizeSuccessContract(successContract || {}, job.title || job.job_id);
   if (customWorkflow) {
+    if (actionIntentBindings.length) throw new Error('typed AGG action-intent bindings are not supported for custom-workflow plans');
     if (validationProfileSelector != null) throw new Error('validation profiles are supported only for built-in standard-engineering v3+ plans');
     if ((requiredOperations || []).length || (workspaceWriteScopes || []).length) {
       throw new Error('custom workflows do not support workspace.write; use a supported built-in standard-engineering v3 plan with explicit role scopes');
@@ -153,7 +246,7 @@ export function compileWorkflowPlan(job, { workspace = process.env.WORKFLOW_WORK
         includeBatchValidation: Boolean(workspaceWriteContract && !preserveLegacyPlan && !validationProfileSnapshot),
         validationTasks: validationProfileTasks
       }) : engineeringTaskSpecs(workspace);
-  const children = baseChildren.map(spec => {
+  let children = baseChildren.map(spec => {
     const binding = profilesByRole.get(spec.role);
     let execution = spec.execution;
     if (workspaceWriteContract) {
@@ -183,6 +276,7 @@ export function compileWorkflowPlan(job, { workspace = process.env.WORKFLOW_WORK
   for (const role of profilesByRole.keys()) {
     if (!children.some(child => child.role === role)) throw new Error(`built-in role profile binding does not map to a task in this workflow: ${role}`);
   }
+  children = applyActionIntentBindings(children, actionIntentBindings);
   const synthesis = isProduction
     ? productionTaskSpec(ProductionTaskId.CTO_SYNTHESIS, { workspace })
     : isHybridEngineering

@@ -13,6 +13,7 @@ function gitFiles(args) {
     return execFileSync('git', ['-C', repoRoot, 'ls-files', ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
     })
       .split('\n')
       .map((entry) => entry.trim())
@@ -118,6 +119,12 @@ async function check() {
   const allFiles = new Set(gitFiles(['-co', '--exclude-standard']));
   const markdownFiles = [...allFiles]
     .filter((file) => file.toLowerCase().endsWith('.md'))
+    // Evidence packs retain byte-identical source snapshots. Those copies are
+    // provenance payloads, not additional documentation roots: relative links
+    // inside them intentionally resolve from their original repository path.
+    // Exclude only the two exact snapshot subtree names under artifacts; keep
+    // pack READMEs, reports, and ordinary repository Markdown in the check.
+    .filter((file) => !(file.startsWith('artifacts/') && /(?:^|\/)(?:source-snapshot|untracked-source-overlay)\//.test(file)))
     .filter((file) => existsSync(path.join(repoRoot, file)))
     .sort();
   const trackedHtml = gitFiles(['-c', '--', 'docs/diagrams/rendered/*.html']);

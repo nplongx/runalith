@@ -67,7 +67,7 @@ try {
   const fakeBin = path.join(temp, 'fake-bin');
   fs.mkdirSync(fakeBin);
   const nodeWrapper = path.join(fakeBin, 'node');
-  fs.writeFileSync(nodeWrapper, `#!/usr/bin/env bash\nfor arg in "$@"; do\n  if [[ "$arg" == */tests/test-runalith-plugin.js ]]; then\n    printf '%s\\n' 'Bundled plugin runtime smoke test PASS (initialize + tools/list: 50/50 manifest tools exposed)' 'Runalith local MCP E2E: PASS'\n    echo 'intentional nonzero integration-test failure after deceptive PASS-looking output' >&2\n    exit 91\n  fi\ndone\nexec "$REAL_NODE" "$@"\n`);
+  fs.writeFileSync(nodeWrapper, `#!/usr/bin/env bash\nfor arg in "$@"; do\n  if [[ "$arg" == */tests/test-runalith-plugin.js ]]; then\n    printf '%s\\n' 'Bundled plugin runtime smoke test PASS (initialize + tools/list: 67/67 manifest tools exposed)' 'Runalith local MCP E2E: PASS'\n    echo 'intentional nonzero integration-test failure after deceptive PASS-looking output' >&2\n    exit 91\n  fi\ndone\nexec "$REAL_NODE" "$@"\n`);
   fs.chmodSync(nodeWrapper, 0o755);
   const failedBuild = path.join(temp, 'must-not-publish.mcpb');
   const failedBuildResult = spawnSync('bash', [script], {

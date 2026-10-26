@@ -42,16 +42,20 @@ function integerTokenMatchesNumber(token, value) {
   return exactInteger === value;
 }
 
-export function parseStrictJson(input, label = 'JSON evidence') {
+export function parseStrictJson(input, label = 'JSON evidence', options = {}) {
+  const maxBytes = options?.maxBytes ?? MAX_STRICT_JSON_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 256 * 1024 * 1024) {
+    throw new Error(`${label} parser byte limit must be an integer from 1 to ${256 * 1024 * 1024}`);
+  }
   let text;
   if (typeof input === 'string') {
-    if (input.length > MAX_STRICT_JSON_BYTES || Buffer.byteLength(input, 'utf8') > MAX_STRICT_JSON_BYTES) {
-      throw new Error(`${label} exceeds the ${MAX_STRICT_JSON_BYTES}-byte limit`);
+    if (input.length > maxBytes || Buffer.byteLength(input, 'utf8') > maxBytes) {
+      throw new Error(`${label} exceeds the ${maxBytes}-byte limit`);
     }
     text = input;
   } else {
     if (!input || typeof input.byteLength !== 'number') throw new Error(`${label} input must be a string or byte buffer`);
-    if (input.byteLength > MAX_STRICT_JSON_BYTES) throw new Error(`${label} exceeds the ${MAX_STRICT_JSON_BYTES}-byte limit`);
+    if (input.byteLength > maxBytes) throw new Error(`${label} exceeds the ${maxBytes}-byte limit`);
     try {
       // Preserve a leading BOM in the decoded string so the JSON grammar below
       // rejects it rather than silently normalizing byte-input differently
@@ -61,10 +65,10 @@ export function parseStrictJson(input, label = 'JSON evidence') {
       throw new Error(`${label} is not valid UTF-8: ${error.message}`);
     }
   }
-  if (text.length > MAX_STRICT_JSON_BYTES) {
+  if (text.length > maxBytes) {
     // UTF-8 byte input can decode to one UTF-16 code unit per byte at most,
     // but keep the post-decode check explicit as a parser work bound.
-    throw new Error(`${label} exceeds the ${MAX_STRICT_JSON_BYTES}-byte limit`);
+    throw new Error(`${label} exceeds the ${maxBytes}-byte limit`);
   }
   let index = 0;
   let nodes = 0;

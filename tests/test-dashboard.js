@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createDashboardServer } from '../dashboard/server.js';
+import { createAdaptiveGoalKnowledgeStore } from '../src/runtime/adaptive-goal-knowledge-store.js';
+import { createAdaptiveGoalPlannerTelemetryStore } from '../src/runtime/adaptive-goal-planner-telemetry.js';
 import { createPolicySnapshot, initializeWorkflowPolicyStore, normalizePolicyDefinition } from '../src/runtime/workflow/policy-contract.js';
 import { canonicalJson } from '../src/runtime/workflow/plan.js';
 
@@ -66,7 +68,65 @@ CREATE TABLE custom_role_versions(role_id TEXT,version INTEGER,name TEXT,descrip
 CREATE TABLE custom_workflow_versions(workflow_id TEXT,version INTEGER,name TEXT,description TEXT,input_contract_json TEXT,tasks_json TEXT,created_at TEXT,created_by TEXT,PRIMARY KEY(workflow_id,version));
 `);
 initializeWorkflowPolicyStore(db);
+const aggKnowledge = createAdaptiveGoalKnowledgeStore(db);
+const aggHypothesis = aggKnowledge.saveNode({
+  goalId: 'goal-alpha', stableKey: 'hypothesis-alpha', type: 'hypothesis',
+  content: { title: 'Alpha hypothesis', summary: 'Synthetic test fixture claim.' },
+  provenance: { source: 'dashboard-test-fixture', actor: 'fixture-runner', reference: 'fixture://alpha' },
+  evidenceRefs: ['fixture://evidence-alpha']
+});
+const aggSharedHypothesis = aggKnowledge.saveNode({
+  goalId: 'goal-beta', stableKey: 'hypothesis-alpha', type: 'hypothesis',
+  content: { title: 'Alpha hypothesis', summary: 'Synthetic test fixture claim.' },
+  provenance: { source: 'dashboard-test-fixture', actor: 'fixture-runner', reference: 'fixture://alpha' },
+  evidenceRefs: ['fixture://evidence-alpha']
+});
+assert.equal(aggSharedHypothesis.id, aggHypothesis.id, 'identical goal-scoped fixture claim shares stable identity');
+const aggExperiment = aggKnowledge.saveNode({
+  goalId: 'goal-alpha', stableKey: 'experiment-alpha', type: 'experiment',
+  content: { title: 'Alpha experiment', summary: 'Synthetic experiment fixture.' },
+  provenance: { source: 'dashboard-test-fixture', actor: 'fixture-runner' }
+});
+const aggKnowledgeEdge = aggKnowledge.addEdge({
+  goalId: 'goal-alpha', fromId: aggHypothesis.id, toId: aggExperiment.id, type: 'tested_by',
+  provenance: { source: 'dashboard-test-fixture', actor: 'fixture-runner' }, evidenceRefs: ['fixture://evidence-alpha']
+});
+aggKnowledge.saveNode({
+  goalId: 'goal-alpha', stableKey: 'hypothesis-alpha', type: 'hypothesis',
+  content: { title: 'Alpha hypothesis', summary: 'Updated synthetic test fixture claim.' },
+  provenance: { source: 'dashboard-test-fixture', actor: 'fixture-runner', reference: 'fixture://alpha' },
+  evidenceRefs: ['fixture://evidence-alpha'], expectedRevision: 1
+});
+const aggPlannerTelemetry = createAdaptiveGoalPlannerTelemetryStore(db,{processInstanceId:'dashboard-test-instance',serverVersion:'test-fixture'});
 const now = new Date().toISOString();
+const aggPlannerInputGraph = {
+  schemaVersion:1,startNodeId:'caller-start',goalNodeId:'caller-goal',
+  nodes:[{id:'caller-start',type:'task',label:'Caller start',evidenceRefs:[]},{id:'caller-goal',type:'goal',label:'Caller goal',evidenceRefs:[]}],
+  edges:[{from:'caller-start',to:'caller-goal',type:'next_step'}]
+};
+const aggPlannerGraph = {
+  ...aggPlannerInputGraph,
+  nodes:[...aggPlannerInputGraph.nodes,
+    {id:aggHypothesis.id,type:'hypothesis',label:'Alpha hypothesis',evidenceRefs:['fixture://evidence-alpha']},
+    {id:aggExperiment.id,type:'experiment',label:'Alpha experiment',evidenceRefs:[]}],
+  edges:[...aggPlannerInputGraph.edges,{from:aggHypothesis.id,to:aggExperiment.id,type:'tested_by',evidenceRefs:['fixture://evidence-alpha']}]
+};
+const aggLatestKnowledge=aggKnowledge.getNode(aggHypothesis.id),aggLatestExperiment=aggKnowledge.getNode(aggExperiment.id);
+const aggKnowledgeSnapshot={goalId:'goal-alpha',selectedNodeIds:[aggHypothesis.id,aggExperiment.id],nodeContentHashes:[aggLatestKnowledge,aggLatestExperiment].map(node=>({id:node.id,contentHash:node.contentHash,provenanceHash:node.provenanceHash,revision:node.revision})),storedEdgeIds:[aggKnowledgeEdge.edgeId],persistedNodesVerified:false,persistedNodesUsableForPlanning:false,snapshotHash:'b'.repeat(64)};
+function seedAggPlannerRun({toolName='adaptive_goal_graph_search',status='completed',algorithmStatus='proposals_found',durationMs=123,includeResult=true}={}){
+  const started=aggPlannerTelemetry.beginRun({toolName,args:{graph:aggPlannerInputGraph,knowledge_goal_id:'goal-alpha',options:{maxExpansions:20}}});
+  aggPlannerTelemetry.observeSearchInput(started.runId,aggPlannerGraph,aggKnowledgeSnapshot);
+  aggPlannerTelemetry.recordSearchEvent(started.runId,{type:'state_expanded',sequence:1,currentNodeId:'caller-start',observedAt:now});
+  if(includeResult){
+    const result={schemaVersion:1,mode:'shadow',status:algorithmStatus,graphHash:'a'.repeat(64),goalNodeId:'caller-goal',candidates:[{planId:'candidate-test',candidateKind:'complete_path_candidate',status:'proposed',pathNodeIds:['caller-start','caller-goal'],pathEdgeTypes:['next_step'],depth:1,metrics:{estimatedCost:null},verification:{status:'unverified',verified:false}}],bestPartialCandidates:[],search:{searchRunId:`search-${started.runId}`,expansions:3,generatedStates:4,prunedStates:1,exploredDepth:1,terminationReason:'frontier_exhausted',exhaustive:false},auditTrace:{searchRunId:`search-${started.runId}`,eventCount:1,omittedEventCount:0,truncated:false,counters:{expansions:3,rejectedCycles:0},events:[]}};
+    aggPlannerTelemetry.observeAlgorithmResult(started.runId,result,aggPlannerGraph,aggKnowledgeSnapshot);
+    if(status!=='running')aggPlannerTelemetry.finishRun({runId:started.runId,result:{...result,artifactEvidence:[{reference:'fixture://evidence-alpha',kind:'durable_artifact',classification:'durable_artifact_lineage_verified_claim_unverified',artifactId:'artifact-fixture',sourceJobId:'job-demo-001',contentHash:'c'.repeat(64),lineageVerified:true,claimVerified:false}]},observed:{result,graph:aggPlannerGraph,knowledgeSnapshot:aggKnowledgeSnapshot},durationMs});
+  }else if(status!=='running')aggPlannerTelemetry.finishRun({runId:started.runId,error:Object.assign(new Error('fixture search error'),{code:'ERR_FIXTURE_SEARCH'}),durationMs});
+  return started.runId;
+}
+const aggCompletedRunId=seedAggPlannerRun();
+const aggFailedRunId=seedAggPlannerRun({toolName:'adaptive_goal_phase2_shadow_search',status:'failed',includeResult:false,durationMs:9});
+const aggUnfinishedRunId=seedAggPlannerRun({toolName:'adaptive_goal_phase3_mcts_shadow_search',status:'running'});
 const insertJob = db.prepare('INSERT INTO jobs(job_id,conversation_key,title,state,status,active_task_id,created_at,updated_at,approved_at) VALUES(?,?,?,?,?,?,?,?,?)');
 insertJob.run('job-demo-001','test:demo','Dashboard smoke test','EXECUTING','active','task-demo-001',now,now,now);
 insertJob.run('job-demo-002','test:failed','Failed test workflow','FAILED','failed',null,now,now,null);
@@ -167,6 +227,57 @@ try {
   result = await get('/api/overview');
   assert.equal(result.res.status,200); assert.equal(result.body.counts.jobs,2); assert.equal(result.body.counts.tasks,3); assert.equal(result.body.counts.events,3); assert.equal(result.body.counts.custom_profiles,2); assert.equal(result.body.counts.role_versions,3); assert.equal(result.body.counts.custom_workflows,1); assert.equal(result.body.counts.individual_executions,2);
   assert.equal(result.body.job_statuses.find(x=>x.status==='active').count,1);
+
+  // Durable AGG planner telemetry remains read-only through HTTP and preserves actual tool lifecycle separately from algorithm outcomes.
+  result = await get('/api/agg/runs'); assert.equal(result.res.status,200); assert.equal(result.body.available,true);
+  assert.equal(result.body.total,3); assert.equal(result.body.summary.completed,1); assert.equal(result.body.summary.failed,1); assert.equal(result.body.summary.non_terminal,1);
+  assert.equal(result.body.items[0].terminal_observed,false,'running row must remain non-terminal until a terminal write is observed');
+  assert.equal(result.body.items.find(run=>run.run_id===aggCompletedRunId).duration_ms,123);
+  result = await get('/api/agg/runs?status=failed'); assert.equal(result.res.status,200); assert.equal(result.body.total,1); assert.equal(result.body.items[0].status,'failed');
+  result = await get('/api/agg/runs?tool=adaptive_goal_phase2_shadow_search'); assert.equal(result.body.total,1); assert.equal(result.body.items[0].run_id,aggFailedRunId);
+  result = await get('/api/agg/runs?q=Alpha%20hypothesis'); assert.equal(result.body.total,3,'search can retrieve runs by immutable linked node label');
+  result = await get(`/api/agg/runs/${aggCompletedRunId}`); assert.equal(result.res.status,200);
+  assert.equal(result.body.run.status,'completed'); assert.equal(result.body.run.algorithm_status,'proposals_found');
+  assert.equal(result.body.run.duration_ms,123); assert.equal(result.body.run.links.run,`/?view=agg&run_id=${aggCompletedRunId}`);
+  assert.equal(result.body.counts.nodes,4); assert.equal(result.body.counts.edges,2); assert.equal(result.body.counts.evidence,1);
+  const linkedHypothesis=result.body.nodes.find(node=>node.node_id===aggHypothesis.id);
+  assert.equal(linkedHypothesis.source_kind,'persisted_knowledge'); assert.equal(linkedHypothesis.revision,2); assert.equal(linkedHypothesis.content_hash,aggLatestKnowledge.contentHash);
+  assert.match(linkedHypothesis.links.node,/revision=2/,'node deep link pins the exact persisted knowledge revision used by the run');
+  const linkedKnowledgeEdge=result.body.edges.find(edge=>edge.edge_id===aggKnowledgeEdge.edgeId);
+  assert.equal(linkedKnowledgeEdge.source_kind,'persisted_knowledge'); assert.equal(linkedKnowledgeEdge.goal_id,'goal-alpha');
+  assert.ok(result.body.snapshot_limits.edge_details_returned>=result.body.edges.length);
+  assert.ok(result.body.evidence.some(evidence=>evidence.reference==='fixture://evidence-alpha'&&evidence.artifact_id==='artifact-fixture'&&evidence.lineage_verified===true&&evidence.claim_verified===false));
+  assert.equal(result.body.metrics.expansions,3); assert.equal(result.body.metrics.generated_states,4);
+  assert.equal(result.body.metrics.estimated_success_confidence,undefined,'unobserved estimated confidence remains absent');
+  result = await get(`/api/agg/runs/${aggCompletedRunId}/events?afterSequence=0&limit=2`); assert.equal(result.res.status,200);
+  assert.equal(result.body.items.length,2); assert.equal(result.body.has_more,true); assert.equal(result.body.items[1].event_type,'search_input_observed');
+  result = await get(`/api/agg/runs/${aggCompletedRunId}/events?afterSequence=${result.body.next_after_sequence}&limit=3`); assert.equal(result.body.items.length,3); assert.equal(result.body.items[0].event_type,'state_expanded'); assert.equal(result.body.has_more,false);
+  result = await get(`/api/agg/runs/${aggFailedRunId}`); assert.equal(result.body.run.status,'failed'); assert.equal(result.body.run.algorithm_status,null); assert.equal(result.body.run.error.code,'ERR_FIXTURE_SEARCH');
+  result = await get(`/api/agg/runs/${aggUnfinishedRunId}`); assert.equal(result.body.run.status,'running'); assert.equal(result.body.run.finished_at,null); assert.equal(result.body.run.duration_ms,null);
+  result = await get('/api/agg/runs/not-a-uuid'); assert.equal(result.res.status,400);
+  result = await get('/api/agg/runs/00000000-0000-4000-8000-000000000000'); assert.equal(result.res.status,404);
+  result = await get(`/api/agg/runs/${aggCompletedRunId}/events?afterSequence=-2`); assert.equal(result.res.status,200); assert.equal(result.body.after_sequence,0,'invalid event cursor is clamped safely');
+
+  // AGG graph inspection reads only persisted knowledge records and never upgrades the trust state.
+  result = await get('/api/agg/graph'); assert.equal(result.res.status,200); assert.equal(result.body.available,true);
+  assert.equal(result.body.summary.nodes,2); assert.equal(result.body.summary.edges,1); assert.equal(result.body.summary.goals,2);
+  assert.equal(result.body.summary.revisions,3); assert.equal(result.body.summary.reused_nodes,1); assert.equal(result.body.summary.unverified_nodes,2); assert.equal(result.body.summary.usable_for_planning,0);
+  assert.ok(result.body.nodes.every(node=>node.verified===false&&node.usable_for_planning===false&&node.status==='unverified'));
+  assert.equal(result.body.nodes.find(node=>node.id===aggHypothesis.id).memberships.length,2);
+  assert.equal(result.body.edges[0].type,'tested_by'); assert.equal(result.body.activity.length>0,true);
+  result = await get('/api/agg/graph?goalId=goal-alpha'); assert.equal(result.res.status,200); assert.equal(result.body.nodes.length,2); assert.equal(result.body.edges.length,1);
+  result = await get('/api/agg/graph?type=evidence'); assert.equal(result.res.status,200); assert.equal(result.body.nodes.length,0);
+  result = await get('/api/agg/graph?q=Updated%20synthetic'); assert.equal(result.res.status,200); assert.equal(result.body.nodes.length,1); assert.equal(result.body.nodes[0].id,aggHypothesis.id);
+  result = await get(`/api/agg/nodes/${encodeURIComponent(aggHypothesis.id)}`); assert.equal(result.res.status,200);
+  assert.equal(result.body.id,aggHypothesis.id); assert.equal(result.body.label,'Alpha hypothesis'); assert.equal(result.body.content_hash.length,64);
+  assert.equal(result.body.revision,2); assert.equal(result.body.current_revision,2); assert.equal(result.body.content.summary,'Updated synthetic test fixture claim.');
+  assert.equal(result.body.history.length,2); assert.equal(result.body.memberships.length,2); assert.equal(result.body.provenance.source,'dashboard-test-fixture');
+  assert.deepEqual(result.body.evidence_refs,['fixture://evidence-alpha']); assert.equal(result.body.relations.length,1);
+  result = await get(`/api/agg/nodes/${encodeURIComponent(aggHypothesis.id)}?revision=1`); assert.equal(result.res.status,200);
+  assert.equal(result.body.revision,1); assert.equal(result.body.current_revision,2); assert.equal(result.body.content.summary,'Synthetic test fixture claim.');
+  result = await get(`/api/agg/nodes/${encodeURIComponent(aggHypothesis.id)}?revision=0`); assert.equal(result.res.status,400);
+  result = await get('/api/agg/nodes/not-a-real-node'); assert.equal(result.res.status,404);
+  result = await get('/api/agg/nodes/%ZZ'); assert.equal(result.res.status,400);
 
   // The role registry exposes durable custom profiles, skill snapshots and exact workflow role-version pins without enabling writes.
   result = await get('/api/roles'); assert.equal(result.res.status,200);
@@ -318,17 +429,20 @@ try {
   result = await get('/api/files/preview?path=runtime%2Funsafe.bin'); assert.equal(result.res.status,403);
   result = await get('/api/files/preview?path=runtime%2Flinked.txt'); assert.equal(result.res.status,403);
   // Serving security headers, local-only Host/Origin guard, and read-only method boundary.
-  result = await get('/'); assert.equal(result.res.status,200); assert.match(result.res.headers.get('content-security-policy'),/default-src 'self'/); assert.equal(result.res.headers.get('x-content-type-options'),'nosniff'); assert.match(result.body,/<title>Runalith Local Workbench<\/title>/); assert.match(result.body,/RUNALITH<span> \/ <\/span>WORKBENCH/); assert.match(result.body,/RUNALITH <span class="footer-separator">\/<\/span> LOCAL WORKBENCH/); assert.doesNotMatch(result.body,/LOCAL <span class="footer-separator">\/<\/span> WORKFLOW MONITOR/,'legacy shell branding removed'); assert.match(result.body,/LOCAL DASHBOARD/); assert.doesNotMatch(result.body,/ORBIT \/ OPS|ORBIT DASHBOARD/,'user-facing dashboard labels use generic wording'); assert.match(result.body,/Search everything…/); assert.match(result.body,/id="wb-primary-sidebar"/); assert.match(result.body,/id="wb-sidebar-groups"/); assert.match(result.body,/data-sidebar-group="explorer"/); assert.match(result.body,/data-sidebar-group="sourceControl"/); assert.match(result.body,/data-sidebar-group="runalith"/); assert.match(result.body,/id="wb-explorer-sidebar"/); assert.match(result.body,/id="wb-source-sidebar"/); assert.match(result.body,/id="wb-utility-view"/); assert.match(result.body,/id="wb-utility-content"/); assert.doesNotMatch(result.body,/<nav class="primary-nav" aria-label="Primary navigation">/,'legacy all-domains sidebar navigation has been replaced by contextual groups'); assert.match(result.body,/data-view="roles"/); assert.match(result.body,/data-view="policies"/); assert.match(result.body,/id="policy-list"/); assert.match(result.body,/id="policy-attachment-list"/); assert.match(result.body,/data-view="batches"/); assert.match(result.body,/id="role-list"/); assert.match(result.body,/id="builtin-role-profile-pin-list"/); assert.match(result.body,/id="batch-list"/); assert.match(result.body,/id="individual-execution-list"/);
+  result = await get('/'); assert.equal(result.res.status,200); assert.match(result.res.headers.get('content-security-policy'),/default-src 'self'/); assert.equal(result.res.headers.get('x-content-type-options'),'nosniff'); assert.match(result.body,/<title>Runalith · Operations dashboard<\/title>/); assert.match(result.body,/RUNALITH<span> \/ <\/span>OPERATIONS/); assert.match(result.body,/RUNALITH <span class="footer-separator">\/<\/span> OPERATIONS DASHBOARD/); assert.doesNotMatch(result.body,/LOCAL <span class="footer-separator">\/<\/span> WORKFLOW MONITOR/,'legacy shell branding removed'); assert.match(result.body,/LOCAL DASHBOARD/); assert.doesNotMatch(result.body,/ORBIT \/ OPS|ORBIT DASHBOARD/,'user-facing dashboard labels use generic wording'); assert.match(result.body,/Search everything…/); assert.match(result.body,/id="wb-primary-sidebar"/); assert.match(result.body,/id="wb-sidebar-groups"/); assert.match(result.body,/data-sidebar-group="explorer"/); assert.match(result.body,/data-sidebar-group="sourceControl"/); assert.match(result.body,/data-sidebar-group="runalith"/); assert.match(result.body,/id="wb-explorer-sidebar"/); assert.match(result.body,/id="wb-source-sidebar"/); assert.match(result.body,/id="wb-utility-view"/); assert.match(result.body,/id="wb-utility-content"/); assert.doesNotMatch(result.body,/<nav class="primary-nav" aria-label="Primary navigation">/,'legacy all-domains sidebar navigation has been replaced by contextual groups'); assert.match(result.body,/data-view="agg"/); assert.match(result.body,/id="agg-graph-canvas"/); assert.match(result.body,/id="agg-node-inspector"/); assert.match(result.body,/id="agg-run-graph-show-secondary"/); assert.match(result.body,/id="agg-trust-copy"/); assert.match(result.body,/id="agg-copy-snapshot"/); assert.match(result.body,/class="agg-edge-legend"/); assert.match(result.body,/data-edge="contradicts"/); assert.match(result.body,/data-view="roles"/); assert.match(result.body,/data-view="policies"/); assert.match(result.body,/id="policy-list"/); assert.match(result.body,/id="policy-attachment-list"/); assert.match(result.body,/data-view="batches"/); assert.match(result.body,/id="role-list"/); assert.match(result.body,/id="builtin-role-profile-pin-list"/); assert.match(result.body,/id="batch-list"/); assert.match(result.body,/id="individual-execution-list"/); assert.match(result.body,/dashboard-overhaul\.css/);
   assert.match(result.body,/id="attention-list"/); assert.match(result.body,/id="clear-workflow-filters"/); assert.match(result.body,/ux-overrides\.css/); assert.ok(result.body.includes('aria-keyshortcuts="/"')); assert.ok(result.body.includes('class="skip-link" href="#main-content"')); assert.ok(result.body.includes('aria-current="page"')); assert.ok(result.body.includes('id="last-updated" data-sync-state="syncing"'));
   result = await get('/workbench.css'); assert.equal(result.res.status,200); assert.match(result.body,/\.wb-activity/); assert.match(result.body,/prefers-reduced-motion/);
-  result = await get('/workbench.js'); assert.equal(result.res.status,200); assert.match(result.body,/tabs\.setAttribute\('role','navigation'\)/); assert.match(result.body,/aria-current/); assert.doesNotMatch(result.body,/tabs\.setAttribute\('role','tablist'\)/,'the view strip is navigation, not an invalid tablist'); assert.match(result.body,/Source Control/); assert.match(result.body,/wb-command-palette/); assert.match(result.body,/loadTreePath/); assert.match(result.body,/OPEN EDITORS/); assert.match(result.body,/wb-diff-mode/); assert.match(result.body,/searchWorkspace/); assert.match(result.body,/runGlobalSearch/); assert.match(result.body,/renderProblems/); assert.match(result.body,/renderDiagnostics/); assert.match(result.body,/openQuickOpen/); assert.match(result.body,/data-sidebar-group/);
+  result = await get('/workbench.js'); assert.equal(result.res.status,200); assert.match(result.body,/tabs\.setAttribute\('role','navigation'\)/); assert.match(result.body,/aria-current/); assert.doesNotMatch(result.body,/tabs\.setAttribute\('role','tablist'\)/,'the view strip is navigation, not an invalid tablist'); assert.match(result.body,/Source Control/); assert.match(result.body,/wb-command-palette/); assert.match(result.body,/loadTreePath/); assert.match(result.body,/OPEN EDITORS/); assert.match(result.body,/wb-diff-mode/); assert.match(result.body,/searchWorkspace/); assert.match(result.body,/runGlobalSearch/); assert.match(result.body,/renderProblems/); assert.match(result.body,/renderDiagnostics/); assert.match(result.body,/openQuickOpen/); assert.match(result.body,/data-sidebar-group/); assert.match(result.body,/initialView=params\.get\('view'\)\|\|''/); assert.match(result.body,/nav\.some\(button=>button\.dataset\.view===initialView\)/);
+  result = await get('/dashboard-overhaul.css'); assert.equal(result.res.status,200); assert.match(result.body,/\.wb-activity, \.wb-tabs, \.wb-breadcrumbs, #wb-bottom, #wb-status \{ display: none !important; \}/); assert.match(result.body,/grid-template-columns: 234px minmax\(0, 1fr\) !important/); assert.match(result.body,/\.agg-svg-node\.selected rect/); assert.match(result.body,/\.agg-trust-banner/); assert.match(result.body,/prefers-reduced-motion/); assert.match(result.body,/max-width: 720px/); assert.match(result.body,/#wb-sidebar-groups\.primary-nav \{ display: flex !important/);
   result = await get('/ux-overrides.css'); assert.equal(result.res.status,200); assert.match(result.body,/\.attention-panel/); assert.match(result.body,/\.pin-button/); assert.match(result.body,/\.attention-list\s*\{\s*display:\s*grid/); assert.match(result.body,/\.attention-head\s*\{\s*display:\s*flex/); assert.match(result.body,/\.registry-summary/); assert.match(result.body,/\.registry-summary\.batch-summary-grid/); assert.match(result.body,/\.individual-executions-panel \.data-table/); assert.match(result.body,/\.role-skill-card/); assert.match(result.body,/\.batch-item-card/); assert.match(result.body,/color-scheme:\s*light/); assert.match(result.body,/--bg:\s*#f2f4f3/); assert.match(result.body,/max-width:\s*720px/); assert.doesNotMatch(result.body,/linear-gradient|radial-gradient|filter:\s*blur|backdrop-filter:\s*blur|hover:scale/); assert.ok(result.body.includes('.skip-link:focus')); assert.ok(result.body.includes('.sync-indicator')); assert.ok(result.body.includes('scrollbar-width: thin')); assert.ok(result.body.includes('overflow-x: auto;')); assert.ok(result.body.includes('@media (prefers-reduced-motion: reduce)'));
-  result = await get('/app.js'); assert.equal(result.res.status,200); assert.match(result.body,/function isStaleJob/); assert.ok(result.body.includes('function setSyncUi(mode)')); assert.ok(result.body.includes("setSyncUi('syncing')")); assert.ok(result.body.includes('aria-busy')); assert.ok(result.body.includes("if(mode==='syncing' && !state.lastSync) label.textContent='SYNCING SNAPSHOT';"),'retry before first success restores the syncing label'); assert.ok(result.body.includes("label.textContent='SYNC FAILED'"),'initial refresh failure has an explicit visible label'); assert.ok(result.body.includes('Refresh failed. Last successful snapshot:'),'later failures keep last-success context in the tooltip'); assert.ok(result.body.includes('aria-current')); assert.match(result.body,/function copyText/); assert.match(result.body,/sessionStorage/); assert.match(result.body,/data-quick-status/); assert.match(result.body,/auto-refresh every 20s/); assert.match(result.body,/setInterval\([^\n]+20000\)/); assert.match(result.body,/el\('details','payload-block'\)/); assert.match(result.body,/assign_children/); assert.match(result.body,/function loadRoles\(/); assert.match(result.body,/builtin-role-profile-pin-list/); assert.match(result.body,/proposal pin; approval\/execution not implied/); assert.match(result.body,/function loadBatches\(/); assert.match(result.body,/individual-execution-list/); assert.match(result.body,/finishedCell\.append\(finished\?relativeTime\(finished\)/); assert.match(result.body,/taskRoleLabel\(/); assert.match(result.body,/querySelector\('\.filter-rail'\)\?\.classList\.add\('hidden'\)/); assert.match(result.body,/workflow-results-meta.*state\.jobTotal.*search applied/); assert.match(result.body,/updatedTd\.append\(relativeTime\(job\.updated_at\)\)/); assert.match(result.body,/actionsTd\.append\(actions\)/);
+  result = await get('/app.js'); assert.equal(result.res.status,200); assert.match(result.body,/function isStaleJob/); assert.ok(result.body.includes('function setSyncUi(mode)')); assert.ok(result.body.includes("setSyncUi('syncing')")); assert.ok(result.body.includes('aria-busy')); assert.ok(result.body.includes("if(mode==='syncing' && !state.lastSync) label.textContent='SYNCING SNAPSHOT';"),'retry before first success restores the syncing label'); assert.ok(result.body.includes("label.textContent='SYNC FAILED'"),'initial refresh failure has an explicit visible label'); assert.ok(result.body.includes('Refresh failed. Last successful snapshot:'),'later failures keep last-success context in the tooltip'); assert.ok(result.body.includes('aria-current')); assert.match(result.body,/function copyText/); assert.match(result.body,/sessionStorage/); assert.match(result.body,/data-quick-status/); assert.match(result.body,/auto-refresh every 20s/); assert.match(result.body,/setInterval\([^\n]+20000\)/); assert.match(result.body,/el\('details','payload-block'\)/); assert.match(result.body,/assign_children/); assert.match(result.body,/function loadRoles\(/); assert.match(result.body,/builtin-role-profile-pin-list/); assert.match(result.body,/proposal pin; approval\/execution not implied/); assert.match(result.body,/function loadBatches\(/); assert.match(result.body,/individual-execution-list/); assert.match(result.body,/finishedCell\.append\(finished\?relativeTime\(finished\)/); assert.match(result.body,/taskRoleLabel\(/); assert.match(result.body,/querySelector\('\.filter-rail'\)\?\.classList\.add\('hidden'\)/); assert.match(result.body,/workflow-results-meta.*state\.jobTotal.*search applied/); assert.match(result.body,/updatedTd\.append\(relativeTime\(job\.updated_at\)\)/); assert.match(result.body,/actionsTd\.append\(actions\)/); assert.match(result.body,/async function loadAggGraph/); assert.match(result.body,/async function loadAggNodeDetail/); assert.match(result.body,/renderAggSignals/); assert.match(result.body,/Planner-run telemetry/); assert.match(result.body,/No independent verifier/); assert.match(result.body,/new URLSearchParams\(window\.location\.search\)/); assert.match(result.body,/initialParams\.get\('view'\)/); assert.match(result.body,/async function loadAggRuns/); assert.match(result.body,/async function loadAggRunDetail/); assert.match(result.body,/async function loadAggRunEvents/); assert.match(result.body,/renderAggRunTrend/); assert.match(result.body,/setAggRunUrl\(runId,nodeId=null,revision=null\)/); assert.match(result.body,/searchParams\.set\('revision',String\(Number\(revision\)\)\)/); assert.match(result.body,/Graph edges · /); assert.match(result.body,/All returned metric fields and implementation counters/);
+  assert.match(result.body,/Multi-row flowchart/); assert.match(result.body,/const colsPerRow=4/); assert.match(result.body,/edge\.dataset\.secondary!=='true'/,'secondary relation edges stay hidden unless explicitly enabled');
   assert.match(result.body,/async function loadPolicies\(/); assert.match(result.body,/api\/policies/); assert.match(result.body,/policy-event-list/);
   result = await get('/not-an-asset.js'); assert.equal(result.res.status,404);
   result = await get('/api/health',{'origin':'http://attacker.example'}); assert.equal(result.res.status,403);
   result = await rawGet('/api/health',{'host':'attacker.example'}); assert.equal(result.res.status,403);
   const post = await fetch(`${base}/api/jobs`,{method:'POST'}); assert.equal(post.status,405);
+  const telemetryPost = await fetch(`${base}/api/agg/runs`,{method:'POST'}); assert.equal(telemetryPost.status,405,'planner telemetry HTTP API is read-only');
   const gitPost = await fetch(`${base}/api/git/status`,{method:'POST'}); assert.equal(gitPost.status,405);
   const gitDiffPost = await fetch(`${base}/api/git/diff?path=sample.js`,{method:'POST'}); assert.equal(gitDiffPost.status,405);
   assert.throws(()=>createDashboardServer({host:'0.0.0.0',port:0,dataDir,dbPath}),/loopback|127\.0\.0\.1/);
@@ -337,7 +451,7 @@ try {
   const readOnly = new DatabaseSync(dbPath,{readOnly:true});
   assert.throws(()=>readOnly.exec('INSERT INTO jobs(job_id,conversation_key,title,state,status,created_at,updated_at) VALUES("no","x","x","x","active","x","x")'));
   readOnly.close();
-  console.log('PASS dashboard: read-only SQLite, overview, job filters/details, event/artifact bounds, safe file browser, Host/Origin and method guards');
+  console.log('PASS dashboard: read-only SQLite, overview, AGG graph/node provenance, job filters/details, event/artifact bounds, safe file browser, Host/Origin and method guards');
 } finally {
   await app.close();
   fs.rmSync(temp,{recursive:true,force:true});

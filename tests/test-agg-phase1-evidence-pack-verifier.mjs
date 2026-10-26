@@ -1,0 +1,448 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { serializePluginPackageMetadata } from '../scripts/plugin-package-metadata.mjs';
+import { verifyMcpbSourceAlignment } from '../scripts/verify-mcpb-source-alignment.mjs';
+import { captureAggPhase1EvidenceTreeIdentity, verifyAggPhase1EvidencePack } from '../scripts/verify-agg-phase1-evidence-pack.mjs';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const jsonBytes = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
+const ignoredProtocolDocs = [
+  'docs/plugin-workflow-benchmark-phase1-freeze.md',
+  'docs/plugin-workflow-benchmark-preflight-evidence.md'
+];
+const requiredReplayCommands = [
+  'tool-node', 'tool-npm', 'tool-git', 'tool-zip', 'tool-unzip', 'tool-tar', 'tool-platform',
+  'focused-agg-phase1-tests', 'npm-test', 'docs-check', 'git-diff-check', 'package-reproducibility',
+  'package-no-overwrite', 'mcpb-build-and-extracted-e2e', 'candidate-source-alignment', 'mcpb-extracted-fast-smoke',
+  'offline-agg-algorithm-benchmark', 'offline-agg-ledger-integrity', 'official-readiness-fail-closed',
+  'phase2-package-boundary-diagnostic'
+];
+
+function writeFile(root, relative, bytes) {
+  const destination = path.join(root, relative);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.writeFileSync(destination, bytes, { flag: 'wx', mode: 0o600 });
+}
+
+function walkFiles(root, prefix = '') {
+  const result = [];
+  const directory = path.join(root, prefix);
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+    const relative = prefix ? prefix + '/' + entry.name : entry.name;
+    const full = path.join(root, relative);
+    if (entry.isSymbolicLink()) throw new Error('unexpected symlink in test fixture: ' + relative);
+    if (entry.isDirectory()) result.push(...walkFiles(root, relative));
+    else if (entry.isFile() && !['SHA256SUMS.txt', 'evidence-pack-manifest.json', 'evidence-pack-verification.json'].includes(relative)) result.push(relative);
+  }
+  return result;
+}
+
+function writeChecksums(root) {
+  const rows = [];
+  const walk = (directory, prefix = '') => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, 'en'))) {
+      const relative = prefix ? prefix + '/' + entry.name : entry.name;
+      if (relative === 'SHA256SUMS.txt') continue;
+      const full = path.join(directory, entry.name);
+      const stat = fs.lstatSync(full);
+      assert.equal(stat.isSymbolicLink(), false, 'checksum walker refuses symlinks: ' + relative);
+      if (stat.isDirectory()) walk(full, relative);
+      else if (stat.isFile()) rows.push({ path: relative, sha256: digest(fs.readFileSync(full)) });
+      else throw new Error('unexpected special file: ' + relative);
+    }
+  };
+  walk(root);
+  const bytes = rows.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+    .map(item => item.sha256 + '  ' + item.path).join('\n') + '\n';
+  fs.writeFileSync(path.join(root, 'SHA256SUMS.txt'), bytes, { flag: 'wx', mode: 0o600 });
+}
+
+test('independent verifier inventory detects same-byte inode replacement and directory/path drift', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-phase1-verifier-tree-identity-'));
+  try {
+    const evidence = path.join(temp, 'evidence');
+    fs.mkdirSync(path.join(evidence, 'logs'), { recursive: true, mode: 0o700 });
+    const target = path.join(evidence, 'logs', 'raw.log');
+    fs.writeFileSync(target, 'same bytes\n', { flag: 'wx', mode: 0o600 });
+    const initial = captureAggPhase1EvidenceTreeIdentity(evidence);
+    assert.equal(captureAggPhase1EvidenceTreeIdentity(evidence).length, initial.length);
+
+    const replacement = path.join(evidence, 'logs', 'replacement.tmp');
+    fs.writeFileSync(replacement, 'same bytes\n', { flag: 'wx', mode: 0o600 });
+    fs.renameSync(replacement, target);
+    assert.notDeepEqual(captureAggPhase1EvidenceTreeIdentity(evidence), initial,
+      'identical content at a replacement inode must not preserve the evidence snapshot identity');
+
+    const afterReplacement = captureAggPhase1EvidenceTreeIdentity(evidence);
+    fs.writeFileSync(path.join(evidence, 'added-receipt.json'), '{}\n', { flag: 'wx', mode: 0o600 });
+    assert.notDeepEqual(captureAggPhase1EvidenceTreeIdentity(evidence), afterReplacement,
+      'new evidence paths must change the complete tree inventory');
+
+    const symlink = path.join(evidence, 'linked.log');
+    fs.symlinkSync(target, symlink);
+    assert.throws(() => captureAggPhase1EvidenceTreeIdentity(evidence),
+      /symlink or path substitution inside evidence pack/,
+      'symlink substitution must fail closed even if its target bytes are valid');
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+function createFixtureCommands(evidenceRoot, sourceRoot, candidatePath, provenancePath, snapshotMetadata) {
+  const startedAt = '2026-10-23T00:00:00.000Z';
+  const endedAt = startedAt;
+  const stdout = Buffer.from('fixture command output\n');
+  const stderr = Buffer.alloc(0);
+  return requiredReplayCommands.map(name => {
+    let command = 'node';
+    let args = ['fixture', name];
+    let envOverrides = {};
+    const needsCandidateBinding = ['mcpb-build-and-extracted-e2e', 'candidate-source-alignment', 'mcpb-extracted-fast-smoke', 'phase2-package-boundary-diagnostic'].includes(name);
+    if (name === 'mcpb-build-and-extracted-e2e') {
+      command = 'npm'; args = ['run', 'pack:runalith-mcpb']; envOverrides = { PLUGIN_BUNDLE_OUT: candidatePath };
+    } else if (name === 'candidate-source-alignment') {
+      command = process.execPath; args = ['scripts/verify-mcpb-source-alignment.mjs', '--source-root', sourceRoot, '--bundle', candidatePath, '--output', provenancePath];
+    } else if (name === 'mcpb-extracted-fast-smoke') {
+      command = 'npm'; args = ['run', 'test:mcpb-candidate', '--', candidatePath];
+    } else if (name === 'phase2-package-boundary-diagnostic') {
+      command = process.execPath; args = ['scripts/verify-agg-phase1-phase2-package-boundary.mjs', '--phase1-bundle', candidatePath, '--output', path.join(evidenceRoot, 'phase2-package-boundary.json')];
+    } else if (name.startsWith('tool-')) {
+      const specs = {
+        'tool-node': [process.execPath, ['--version']], 'tool-npm': ['npm', ['--version']], 'tool-git': ['git', ['--version']],
+        'tool-zip': ['zip', ['-v']], 'tool-unzip': ['unzip', ['-v']], 'tool-tar': ['tar', ['--version']], 'tool-platform': ['uname', ['-srmo']]
+      };
+      [command, args] = specs[name];
+    } else {
+      const specs = {
+        'npm-test': ['npm', ['test']], 'docs-check': ['npm', ['run', 'docs:check']],
+        'git-diff-check': ['git', ['diff', '--check']], 'package-reproducibility': ['npm', ['run', 'test:package-reproducibility']],
+        'package-no-overwrite': [process.execPath, ['tests/test-package-no-overwrite.js']],
+        'offline-agg-algorithm-benchmark': [process.execPath, ['benchmarks/adaptive-goal-graph/run-phase1-benchmark.mjs', '--output', path.join(evidenceRoot, 'phase1-algorithm-raw.json'), '--report', path.join(evidenceRoot, 'phase1-algorithm-report.md')]],
+        'offline-agg-ledger-integrity': [process.execPath, ['benchmarks/adaptive-goal-graph/verify-phase1-ledger.mjs', '--raw', path.join(evidenceRoot, 'phase1-algorithm-raw.json'), '--manifest', path.join(evidenceRoot, 'phase1-algorithm-raw.json.manifest.json')]],
+        'official-readiness-fail-closed': [process.execPath, ['benchmarks/plugin-workflow-benchmark/phase1-protocol-runner.mjs', 'readiness', '--output', path.join(evidenceRoot, 'official-readiness.json')]]
+      };
+      if (specs[name]) [command, args] = specs[name];
+      if (name === 'focused-agg-phase1-tests') { command = process.execPath; args = ['--test', 'tests/test-plugin-workflow-benchmark-phase1-protocol.mjs', 'tests/test-agg-phase1-evidence-pack-verifier.mjs']; }
+    }
+    const record = {
+      name, command, args, startedAt, endedAt, durationMs: 0,
+      cwd: sourceRoot, envOverrides, argvSha256: digest(Buffer.from(JSON.stringify([command, ...args]))),
+      sourceBinding: {
+        baseGitHead: snapshotMetadata.baseGitHead,
+        sourceSnapshotSha256: snapshotMetadata.sourceSnapshotSha256,
+        trackedPatchSha256: snapshotMetadata.trackedPatchSha256,
+        untrackedSourceOverlaySha256: snapshotMetadata.untrackedSourceOverlaySha256
+      },
+      exitCode: 0, signal: null, spawnError: null,
+      logPath: `logs/${name}.log`, stdoutPath: `logs/${name}.stdout.bin`, stderrPath: `logs/${name}.stderr.bin`,
+      logSha256: '', stdoutSha256: digest(stdout), stderrSha256: digest(stderr)
+    };
+    if (needsCandidateBinding) record.candidateBinding = {
+      path: candidatePath,
+      sha256: digest(fs.readFileSync(candidatePath)),
+      relation: ({ 'mcpb-build-and-extracted-e2e': 'produced', 'candidate-source-alignment': 'verified', 'mcpb-extracted-fast-smoke': 'consumed', 'phase2-package-boundary-diagnostic': 'compared' })[name]
+    };
+    writeFile(evidenceRoot, record.stdoutPath, stdout);
+    writeFile(evidenceRoot, record.stderrPath, stderr);
+    const log = Buffer.concat([
+      Buffer.from(`COMMAND: ${record.command} ${record.args.join(' ')}\nCWD: ${record.cwd}\nARGV_JSON: ${JSON.stringify([record.command, ...record.args])}\nENV_OVERRIDES_JSON: ${JSON.stringify(record.envOverrides)}\nARGV_SHA256: ${record.argvSha256}\nSOURCE_BINDING_JSON: ${JSON.stringify(record.sourceBinding)}\nSTARTED_AT: ${record.startedAt}\nENDED_AT: ${record.endedAt}\nEXIT_CODE: 0\nSIGNAL: none\nERROR: none\nDURATION_MS: 0.000\n--- STDOUT ---\n`),
+      stdout, Buffer.from('\n--- STDERR ---\n'), stderr, Buffer.from('\n')
+    ]);
+    record.logSha256 = digest(log);
+    writeFile(evidenceRoot, record.logPath, log);
+    return record;
+  });
+}
+
+test('evidence-pack verifier binds every file, source snapshot, candidate bytes, provenance and blocked readiness', () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-phase1-evidence-pack-'));
+  try {
+    const sourceRoot = path.join(temp, 'source');
+    const evidenceDir = path.join(temp, 'evidence');
+    const stage = path.join(temp, 'stage');
+    fs.mkdirSync(sourceRoot);
+    fs.mkdirSync(evidenceDir);
+    fs.mkdirSync(stage);
+
+    const sourcePackage = { name: 'fixture', version: '1.0.0', description: 'test-only package', runtimeEntryPoint: 'server/index.js', type: 'module' };
+    const pluginManifest = { version: '1.0.0', server: { entry_point: 'server/index.js' }, tools: [{ name: 'fixture_tool', description: 'fixture only' }] };
+    writeFile(sourceRoot, 'package.json', jsonBytes(sourcePackage));
+    writeFile(sourceRoot, 'plugin/manifest.json', jsonBytes(pluginManifest));
+    writeFile(sourceRoot, 'README.md', Buffer.from('fixture README\n'));
+    writeFile(sourceRoot, 'LICENSE', Buffer.from('fixture license\n'));
+    writeFile(sourceRoot, 'server/index.js', Buffer.from('export const fixtureOnly = true;\n'));
+    const sourceInputs = [
+      'scripts/package-runalith-mcpb.sh', 'scripts/collect-plugin-runtime.mjs', 'scripts/plugin-package-metadata.mjs',
+      'scripts/verify-mcpb-source-alignment.mjs', 'scripts/validate-agg-trust-config.mjs',
+      'scripts/reconcile-active-workflows.mjs',
+      'tests/test-reconcile-active-workflows.mjs',
+      'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs',
+      'benchmarks/plugin-workflow-benchmark/phase2-inventory-diagnostics.mjs',
+      'scripts/verify-agg-phase1-phase2-package-boundary.mjs',
+      'tests/test-extracted-package-tool-schemas.mjs', 'benchmarks/plugin-workflow-benchmark/phase1-protocol-runner.mjs',
+      'tests/test-agg-phase1-phase2-package-boundary.mjs',
+      'tests/test-mcpb-source-alignment.mjs',
+      'tests/test-plugin-workflow-benchmark-phase1-protocol.mjs',
+      'scripts/test-mcpb-candidate.mjs',
+      'src/runtime/strict-json.js', 'src/runtime/adaptive-goal-trust-configuration.js',
+      'tests/test-adaptive-goal-trust-configuration.mjs', 'tests/test-adaptive-goal-trust-entrypoint.mjs',
+      'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v1.json',
+      'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
+      'docs/plugin-workflow-benchmark-plan.md',
+      'scripts/replay-agg-phase1-finalization.mjs', 'scripts/verify-agg-phase1-evidence-pack.mjs',
+      'tests/test-agg-phase1-evidence-pack-verifier.mjs'
+    ];
+    for (const relative of sourceInputs.concat(ignoredProtocolDocs)) {
+      writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
+    }
+    execFileSync('git', ['init', '-q'], { cwd: sourceRoot });
+    execFileSync('git', ['config', 'user.name', 'AGG Phase 1 verifier test'], { cwd: sourceRoot });
+    execFileSync('git', ['config', 'user.email', 'agg-phase1-verifier-test@example.invalid'], { cwd: sourceRoot });
+    fs.appendFileSync(path.join(sourceRoot, '.git', 'info', 'exclude'), `\n/${ignoredProtocolDocs[0]}\n/${ignoredProtocolDocs[1]}\n`);
+    execFileSync('git', ['add', '-A'], { cwd: sourceRoot });
+    execFileSync('git', ['commit', '-q', '-m', 'fixture frozen base snapshot'], { cwd: sourceRoot });
+    const baseGitHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceRoot, encoding: 'utf8' }).trim();
+    fs.appendFileSync(path.join(sourceRoot, 'README.md'), '\nTracked working-tree patch fixture.\n');
+
+    for (const relative of ['README.md', 'LICENSE', 'server/index.js']) writeFile(stage, relative, fs.readFileSync(path.join(sourceRoot, relative)));
+    writeFile(stage, 'manifest.json', fs.readFileSync(path.join(sourceRoot, 'plugin/manifest.json')));
+    writeFile(stage, 'package.json', serializePluginPackageMetadata(sourcePackage));
+    const candidatePath = path.join(evidenceDir, 'candidate.mcpb');
+    execFileSync('zip', ['-X', '-q', candidatePath, 'README.md', 'LICENSE', 'manifest.json', 'package.json', 'server/index.js'], { cwd: stage });
+    const provenance = verifyMcpbSourceAlignment({ sourceRoot, bundlePath: candidatePath });
+    const provenancePath = path.join(evidenceDir, 'source-binary-provenance.json');
+    writeFile(evidenceDir, 'source-binary-provenance.json', jsonBytes(provenance));
+
+    const readiness = {
+      decision: 'BLOCKED_NO_TRUSTED_CORPUS_OR_REAL_AB_RUNS',
+      sourceProtocol: { targetBinding: { executionGateOpen: false, releaseApproved: false } },
+      blockers: ['Fixture only: trusted ten-scenario corpus and operational A/B evidence are absent.'],
+      acceptanceGates: {
+        frozenPhase1ExecutionGateRemainsClosed: true,
+        durableOneShotGateConsumptionEvidenceSuppliedToReadiness: false,
+        executionGateOpenedByReadinessOrScorer: false
+      }
+    };
+    writeFile(evidenceDir, 'official-readiness.json', jsonBytes(readiness));
+    const phase2Boundary = {
+      schemaVersion: 1,
+      status: 'BLOCKED_PHASE2_FROZEN_COUNT_NOT_APPLICABLE_TO_CURRENT_PHASE1_PACKAGE',
+      phase2ContractChanged: false,
+      phase1ArchiveTrimmed: false,
+      phase1CandidateSubstitutedAsPhase2Approval: false,
+      officialAcceptanceClaimed: false,
+      frozenPhase2RequiredEntryCount: 71,
+      phase1: {
+        path: 'candidate.mcpb', sha256: provenance.bundleSha256, sizeBytes: provenance.bundleBytes,
+        version: '1.0.9-rc.5', archiveEntryCount: provenance.archiveEntryCount,
+        manifestSha256: digest(fs.readFileSync(path.join(sourceRoot, 'plugin/manifest.json'))),
+        manifestToolCount: provenance.manifestToolCount
+      },
+      historicalPhase2Reference: {
+        path: 'historical-phase2-reference.mcpb',
+        sha256: '2e9937d309e0c3085f9bf789b38ceff21b91c6fc093ba4ee344cf214c173a956',
+        sizeBytes: 513203, version: '1.0.9-rc.5', archiveEntryCount: 71,
+        manifestSha256: 'd'.repeat(64), manifestToolCount: 59,
+        status: 'HISTORICAL_COUNT_REFERENCE_NOT_CURRENT_SOURCE_VERIFIED_NOT_APPROVED'
+      },
+      sameSemanticVersionString: true,
+      packageContractsDiffer: true,
+      pathDelta: { phase1Only: [], phase2Only: [] },
+      toolDelta: { phase1Only: [], phase2Only: [] },
+      observedBoundaryMatchesFrozenHistoricalShape: true
+    };
+    writeFile(evidenceDir, 'phase2-package-boundary.json', jsonBytes(phase2Boundary));
+
+    const snapshotDir = path.join(evidenceDir, 'source-snapshot');
+    fs.mkdirSync(snapshotDir);
+    const patchBytes = execFileSync('git', ['diff', '--binary', 'HEAD'], { cwd: sourceRoot, encoding: 'buffer' });
+    writeFile(evidenceDir, 'source-snapshot/tracked-working-tree.patch', patchBytes);
+    writeFile(evidenceDir, 'source-snapshot/git-status-normal-at-snapshot.txt', execFileSync('git', ['status', '--short', '--untracked-files=normal'], { cwd: sourceRoot }));
+    writeFile(evidenceDir, 'source-snapshot/git-status-all-at-snapshot.txt', execFileSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], { cwd: sourceRoot }));
+    const overlayPath = path.join(snapshotDir, 'untracked-source-overlay.tar.gz');
+    execFileSync('tar', ['-czf', overlayPath, ...ignoredProtocolDocs], { cwd: sourceRoot });
+    const overlayBytes = fs.readFileSync(overlayPath);
+    const sourceOverlayEntries = ignoredProtocolDocs.map(relative => {
+      const bytes = fs.readFileSync(path.join(sourceRoot, relative));
+      return {
+        path: relative, sizeBytes: bytes.byteLength, sha256: digest(bytes),
+        mode: fs.statSync(path.join(sourceRoot, relative)).mode & 0o777
+      };
+    });
+    const ignoredHashes = sourceOverlayEntries.map(({ path: relative, sha256 }) => ({ path: relative, sha256 }));
+    const repositorySourceSnapshotSha256 = digest(Buffer.from(
+      baseGitHead + '\0' + digest(patchBytes) + '\0' + digest(overlayBytes) + '\0', 'utf8'));
+    const snapshotMetadata = {
+      schemaVersion: 2, baseGitHead,
+      trackedPatchSha256: digest(patchBytes), trackedPatchBytes: patchBytes.byteLength,
+      untrackedSourceFileCount: 0, sourceOverlayFileCount: ignoredProtocolDocs.length,
+      sourceOverlayEntries,
+      ignoredButRetainedSourceFiles: ignoredHashes,
+      untrackedSourceOverlaySha256: digest(overlayBytes), untrackedSourceOverlayBytes: overlayBytes.byteLength,
+      sourceSnapshotSha256: repositorySourceSnapshotSha256,
+      historicalArtifactsCopied: false, createdFromDirtyWorkingTree: true
+    };
+    writeFile(evidenceDir, 'source-snapshot/snapshot-metadata.json', jsonBytes(snapshotMetadata));
+    const snapshotArchivePath = path.join(evidenceDir, 'source-snapshot-transport.tar.gz');
+    execFileSync('tar', ['-czf', snapshotArchivePath, '-C', snapshotDir,
+      'tracked-working-tree.patch', 'untracked-source-overlay.tar.gz', 'snapshot-metadata.json',
+      'git-status-all-at-snapshot.txt', 'git-status-normal-at-snapshot.txt']);
+
+    const candidate = {
+      path: 'candidate.mcpb', sha256: provenance.bundleSha256, sizeBytes: provenance.bundleBytes,
+      archiveEntryCount: provenance.archiveEntryCount, manifestToolCount: provenance.manifestToolCount,
+      sourceSnapshotSha256: provenance.sourceSnapshotSha256
+    };
+    const statusReport = {
+      schemaVersion: 1, disposition: 'DEVELOPMENT_CANDIDATE_VALIDATED_LOCALLY_NOT_OFFICIALLY_ACCEPTED',
+      repository: { sourceSnapshotSha256: repositorySourceSnapshotSha256 }, candidate,
+      verification: {
+        gitDiffCheck: 'PASS',
+        phase2BoundaryShapeVerified: true,
+        phase2InventoryStatus: phase2Boundary.status
+      },
+      readiness: { decision: readiness.decision, executionGateOpen: false, releaseApproved: false },
+      phase2PackageBoundaryReportPath: 'phase2-package-boundary.json',
+      sourceSnapshotReconstruction: {
+        status: 'PASS', candidateSha256: candidate.sha256,
+        repositorySourceSnapshotSha256, candidateSourceSnapshotSha256: provenance.sourceSnapshotSha256
+      }
+    };
+    writeFile(evidenceDir, 'candidate-final-status.json', jsonBytes(statusReport));
+    writeFile(evidenceDir, 'release-checklist.md', Buffer.from('# Fixture release checklist\n\nIntegrity only; not acceptance.\n'));
+    const commandResults = createFixtureCommands(evidenceDir, sourceRoot, candidatePath, provenancePath, snapshotMetadata);
+    const toolchain = {
+      node: 'fixture command output', npm: 'fixture command output', git: 'fixture command output', zip: 'fixture command output',
+      unzip: 'fixture command output', tar: 'fixture command output', platform: 'fixture command output'
+    };
+    statusReport.commands = commandResults;
+    statusReport.toolchain = toolchain;
+    fs.writeFileSync(path.join(evidenceDir, 'candidate-final-status.json'), jsonBytes(statusReport));
+
+    const snapshotManifest = {
+      ...snapshotMetadata, snapshotArchivePath: 'source-snapshot-transport.tar.gz',
+      snapshotArchiveSha256: digest(fs.readFileSync(snapshotArchivePath)),
+      statusNormalPath: 'source-snapshot/git-status-normal-at-snapshot.txt',
+      statusAllPath: 'source-snapshot/git-status-all-at-snapshot.txt'
+    };
+    const files = walkFiles(evidenceDir).map(relative => ({
+      path: relative, sizeBytes: fs.statSync(path.join(evidenceDir, relative)).size,
+      sha256: digest(fs.readFileSync(path.join(evidenceDir, relative)))
+    }));
+    const pack = {
+      schemaVersion: 2, status: 'INTEGRITY_VERIFIED_NOT_ACCEPTANCE',
+      disposition: 'DEVELOPMENT_CANDIDATE_VALIDATED_LOCALLY_NOT_OFFICIALLY_ACCEPTED',
+      candidate,
+      provenance: { path: 'source-binary-provenance.json', sha256: digest(fs.readFileSync(path.join(evidenceDir, 'source-binary-provenance.json'))) },
+      readiness: { reportPath: 'official-readiness.json', decision: readiness.decision, executionGateOpen: false, releaseApproved: false },
+      sourceSnapshot: snapshotManifest,
+      phase2Boundary: { ...phase2Boundary, reportPath: 'phase2-package-boundary.json' },
+      commandResults,
+      toolchain,
+      sourceSnapshotReconstruction: {
+        status: 'PASS', baseGitHead, sourceSnapshotSha256: repositorySourceSnapshotSha256,
+        candidateSourceSnapshotSha256: provenance.sourceSnapshotSha256, candidateSha256: candidate.sha256
+      },
+      verificationReportPath: 'evidence-pack-verification.json',
+      files
+    };
+    writeFile(evidenceDir, 'evidence-pack-manifest.json', jsonBytes(pack));
+    writeChecksums(evidenceDir);
+    execFileSync('sha256sum', ['-c', 'SHA256SUMS.txt'], { cwd: evidenceDir, encoding: 'utf8' });
+
+    const preflight = verifyAggPhase1EvidencePack({ evidenceDir, sourceRoot, allowMissingVerificationReport: true });
+    assert.equal(preflight.status, 'PASS_INTEGRITY_ONLY_NOT_ACCEPTANCE');
+    const verificationReport = {
+      schemaVersion: 1, status: 'PASS_INTEGRITY_ONLY_NOT_ACCEPTANCE', verifiedAt: new Date().toISOString(),
+      manifestSha256: digest(fs.readFileSync(path.join(evidenceDir, 'evidence-pack-manifest.json'))),
+      candidateSha256: candidate.sha256,
+      sourceSnapshotSha256: provenance.sourceSnapshotSha256,
+      repositorySourceSnapshotSha256,
+      readinessDecision: readiness.decision,
+      checksumVerificationStatus: 'PASS', cleanCloneReconstructionStatus: 'PASS',
+      evidenceFilesVerified: preflight.evidenceFilesVerified,
+      acceptanceClaimed: false, releaseApproved: false
+    };
+    writeFile(evidenceDir, 'evidence-pack-verification.json', jsonBytes(verificationReport));
+    fs.unlinkSync(path.join(evidenceDir, 'SHA256SUMS.txt'));
+    writeChecksums(evidenceDir);
+    execFileSync('sha256sum', ['-c', 'SHA256SUMS.txt'], { cwd: evidenceDir, encoding: 'utf8' });
+
+    const verified = verifyAggPhase1EvidencePack({ evidenceDir, sourceRoot });
+    assert.equal(verified.status, 'PASS_INTEGRITY_ONLY_NOT_ACCEPTANCE');
+    assert.equal(verified.candidateSha256, candidate.sha256);
+    assert.equal(verified.sourceSnapshotSha256, candidate.sourceSnapshotSha256);
+    assert.equal(verified.repositorySourceSnapshotSha256, repositorySourceSnapshotSha256);
+    assert.equal(verified.readinessDecision, 'BLOCKED_NO_TRUSTED_CORPUS_OR_REAL_AB_RUNS');
+    assert.equal(verified.acceptanceClaimed, false);
+    assert.equal(verified.currentSourceRootStatus, 'PASS_CURRENT_SOURCE_ROOT_MATCHES_CAPTURED_GIT_AND_OVERLAY_STATE');
+
+    const readmePath = path.join(sourceRoot, 'README.md');
+    const capturedReadmeBytes = fs.readFileSync(readmePath);
+    fs.writeFileSync(readmePath, Buffer.concat([capturedReadmeBytes, Buffer.from('unrecorded post-snapshot drift\n')]));
+    assert.throws(() => verifyAggPhase1EvidencePack({ evidenceDir, sourceRoot }),
+      /current Git HEAD or tracked working-tree patch differs from the source snapshot|source\/archive byte mismatch for README\.md/,
+      'the verifier must reject a cleanly re-hashed pack when the current source root has drifted from the captured snapshot');
+    fs.writeFileSync(readmePath, capturedReadmeBytes);
+
+    writeFile(evidenceDir, 'unbound-extra.txt', Buffer.from('unlisted evidence injection\n'));
+    assert.throws(() => verifyAggPhase1EvidencePack({ evidenceDir, sourceRoot }), /not listed in SHA256SUMS\.txt/);
+    fs.unlinkSync(path.join(evidenceDir, 'unbound-extra.txt'));
+
+    const manifestPath = path.join(evidenceDir, 'evidence-pack-manifest.json');
+    const originalManifest = fs.readFileSync(manifestPath, 'utf8');
+    fs.writeFileSync(manifestPath, originalManifest.replace(
+      '"status": "INTEGRITY_VERIFIED_NOT_ACCEPTANCE",',
+      '"status": "INTEGRITY_VERIFIED_NOT_ACCEPTANCE",\n  "status": "ACCEPTED",'
+    ));
+    assert.throws(() => verifyAggPhase1EvidencePack({ evidenceDir, sourceRoot }), /duplicate|strict/i,
+      'duplicate JSON keys must be rejected before trust decisions');
+    fs.writeFileSync(manifestPath, originalManifest);
+
+    const commandMutationDir = path.join(temp, 'command-ledger-mutation');
+    fs.cpSync(evidenceDir, commandMutationDir, { recursive: true, errorOnExist: true });
+    const commandManifestPath = path.join(commandMutationDir, 'evidence-pack-manifest.json');
+    const commandManifest = JSON.parse(fs.readFileSync(commandManifestPath, 'utf8'));
+    commandManifest.commandResults = commandManifest.commandResults.filter(item => item.name !== 'offline-agg-ledger-integrity');
+    fs.writeFileSync(commandManifestPath, jsonBytes(commandManifest));
+    const commandVerificationPath = path.join(commandMutationDir, 'evidence-pack-verification.json');
+    const commandVerification = JSON.parse(fs.readFileSync(commandVerificationPath, 'utf8'));
+    commandVerification.manifestSha256 = digest(fs.readFileSync(commandManifestPath));
+    fs.writeFileSync(commandVerificationPath, jsonBytes(commandVerification));
+    fs.unlinkSync(path.join(commandMutationDir, 'SHA256SUMS.txt'));
+    writeChecksums(commandMutationDir);
+    assert.throws(() => verifyAggPhase1EvidencePack({ evidenceDir: commandMutationDir, sourceRoot }),
+      /command ledger is incomplete/, 'a fully re-hashed pack must still fail when a required command receipt has been omitted');
+
+    const logMutationDir = path.join(temp, 'command-log-mutation');
+    fs.cpSync(evidenceDir, logMutationDir, { recursive: true, errorOnExist: true });
+    const logManifestPath = path.join(logMutationDir, 'evidence-pack-manifest.json');
+    const logManifest = JSON.parse(fs.readFileSync(logManifestPath, 'utf8'));
+    const outputPath = 'logs/npm-test.stdout.bin';
+    fs.appendFileSync(path.join(logMutationDir, outputPath), 'post-hoc output substitution\n');
+    const outputBytes = fs.readFileSync(path.join(logMutationDir, outputPath));
+    const outputEntry = logManifest.files.find(item => item.path === outputPath);
+    outputEntry.sizeBytes = outputBytes.byteLength;
+    outputEntry.sha256 = digest(outputBytes);
+    fs.writeFileSync(logManifestPath, jsonBytes(logManifest));
+    const logVerificationPath = path.join(logMutationDir, 'evidence-pack-verification.json');
+    const logVerification = JSON.parse(fs.readFileSync(logVerificationPath, 'utf8'));
+    logVerification.manifestSha256 = digest(fs.readFileSync(logManifestPath));
+    fs.writeFileSync(logVerificationPath, jsonBytes(logVerification));
+    fs.unlinkSync(path.join(logMutationDir, 'SHA256SUMS.txt'));
+    writeChecksums(logMutationDir);
+    assert.throws(() => verifyAggPhase1EvidencePack({ evidenceDir: logMutationDir, sourceRoot }),
+      /command npm-test log\/stdout\/stderr hashes do not match/,
+      're-hashing the inventory must not let modified raw command output replace the immutable command receipt hashes');
+
+    fs.writeFileSync(path.join(evidenceDir, 'official-readiness.json'), '{"decision":"ACCEPTED"}\n');
+    assert.throws(() => verifyAggPhase1EvidencePack({ evidenceDir, sourceRoot }), /evidence file hash\/size mismatch: official-readiness\.json/);
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+});

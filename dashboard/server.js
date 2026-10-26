@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
@@ -258,6 +259,361 @@ function getOverview(db) {
     job_statuses: jobStatuses, task_statuses: taskStatuses, phases,
     activity: activity.map(x => ({ day: x.day, count: Number(x.count) })),
     recent_events: recent
+  };
+}
+
+const AGG_NODE_TYPES = new Set(['hypothesis','idea','capability','experiment','evidence','condition']);
+const AGG_EDGE_TYPES = new Set(['supports','tested_by','enables','contradicts','alternative_to','recovers_to','depends_on','requires_all']);
+function safeAggJson(value, max = 4_000) {
+  const parsed = parseJson(value, max);
+  return parsed.malformed ? null : parsed.value;
+}
+function aggContentLabel(content, stableKey) {
+  if (typeof content === 'string') return boundedText(content, 110) || stableKey;
+  if (content && typeof content === 'object' && !Array.isArray(content)) {
+    for (const key of ['title','name','label','statement','claim','summary','description','goal']) {
+      const value = content[key];
+      if (typeof value === 'string' && value.trim()) return boundedText(value.trim(), 110);
+    }
+  }
+  return boundedText(stableKey, 110);
+}
+function getAggGraph(db, params) {
+  const required = ['adaptive_goal_knowledge_nodes','adaptive_goal_knowledge_memberships','adaptive_goal_knowledge_revisions','adaptive_goal_knowledge_edges'];
+  const missing = required.filter(name => !dbHasTable(db, name));
+  if (missing.length) return {
+    available: false, reason: missing.length === required.length
+      ? 'AGG knowledge graph has not been initialized in this workflow database.'
+      : 'AGG knowledge graph schema is incomplete; runtime initialization may not have run.',
+    missing_tables: missing, generated_at: new Date().toISOString(),
+    summary: { nodes: 0, edges: 0, goals: 0, reused_nodes: 0, revisions: 0, unverified_nodes: 0, usable_for_planning: 0 },
+    nodes: [], edges: [], goals: [], node_types: [], edge_types: [], activity: []
+  };
+
+  const goalId = boundedText(params.get('goalId') || '', 200).trim();
+  const query = boundedText(params.get('q') || '', 120).trim();
+  const type = boundedText(params.get('type') || '', 40).trim();
+  const includeRecovery = params.get('recovery') === '1';
+  const where = [];
+  const values = [];
+  if (goalId) { where.push('EXISTS (SELECT 1 FROM adaptive_goal_knowledge_memberships gm WHERE gm.node_id=n.id AND gm.goal_id=?)'); values.push(goalId); }
+  if (AGG_NODE_TYPES.has(type)) { where.push('n.type=?'); values.push(type); }
+  if (query) {
+    where.push("(n.stable_key LIKE ? ESCAPE '\\' OR n.id LIKE ? ESCAPE '\\' OR r.content_json LIKE ? ESCAPE '\\')");
+    values.push(...Array(3).fill(`%${query.replace(/[\\%_]/g, char => `\\${char}`)}%`));
+  }
+  const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const totalNodes = Number(queryOne(db, `SELECT COUNT(DISTINCT n.id) n FROM adaptive_goal_knowledge_nodes n JOIN adaptive_goal_knowledge_revisions r ON r.node_id=n.id AND r.revision=n.current_revision ${filter}`, values)?.n || 0);
+  const nodeRows = queryRows(db, `SELECT n.id,n.stable_key,n.type,n.current_revision AS revision,n.created_at,
+      r.status,r.content_hash,r.created_at AS revision_created_at,
+      CASE WHEN json_valid(r.content_json) THEN COALESCE(json_extract(r.content_json,'$.title'),json_extract(r.content_json,'$.name'),json_extract(r.content_json,'$.label'),json_extract(r.content_json,'$.statement'),json_extract(r.content_json,'$.claim'),json_extract(r.content_json,'$.summary'),json_extract(r.content_json,'$.description'),json_extract(r.content_json,'$.goal')) END AS content_label,
+      (SELECT COUNT(*) FROM adaptive_goal_knowledge_revisions rh WHERE rh.node_id=n.id) AS revision_count,
+      (SELECT COUNT(*) FROM json_each(r.evidence_refs_json)) AS evidence_count
+    FROM adaptive_goal_knowledge_nodes n JOIN adaptive_goal_knowledge_revisions r ON r.node_id=n.id AND r.revision=n.current_revision
+    ${filter} ORDER BY n.type,n.stable_key LIMIT 180`, values);
+  const ids = nodeRows.map(row => row.id);
+  const memberships = ids.length
+    ? queryRows(db, `SELECT node_id,goal_id FROM adaptive_goal_knowledge_memberships WHERE node_id IN (${ids.map(() => '?').join(',')}) ORDER BY goal_id,node_id`, ids)
+    : [];
+  const membersByNode = new Map();
+  for (const row of memberships) {
+    if (!membersByNode.has(row.node_id)) membersByNode.set(row.node_id, []);
+    const items = membersByNode.get(row.node_id); if (items.length < 30) items.push(row.goal_id);
+  }
+  const nodes = nodeRows.map(row => ({
+    id: row.id, stable_key: boundedText(row.stable_key, 200), type: row.type,
+    label: aggContentLabel(row.content_label, row.stable_key), revision: Number(row.revision), revision_count: Number(row.revision_count),
+    status: row.status || 'unverified', verified: false, usable_for_planning: false,
+    content_hash: row.content_hash, evidence_count: Number(row.evidence_count || 0),
+    memberships: membersByNode.get(row.id) || [],
+    created_at: row.created_at, revision_created_at: row.revision_created_at
+  }));
+  const visibleIds = new Set(ids);
+  let edgeRows = [];
+  if (ids.length) {
+    const edgeWhere = [`from_id IN (${ids.map(() => '?').join(',')})`, `to_id IN (${ids.map(() => '?').join(',')})`];
+    const edgeValues = [...ids, ...ids];
+    if (goalId) { edgeWhere.push('goal_id=?'); edgeValues.push(goalId); }
+    if (!includeRecovery) edgeWhere.push("type <> 'recovers_to'");
+    edgeRows = queryRows(db, `SELECT edge_id,goal_id,from_id,to_id,type,created_at,
+        CASE WHEN condition_json IS NOT NULL THEN substr(condition_json,1,500) END AS condition_json,
+        CASE WHEN outcome_json IS NOT NULL THEN substr(outcome_json,1,500) END AS outcome_json,
+        (SELECT COUNT(*) FROM json_each(evidence_refs_json)) AS evidence_count
+      FROM adaptive_goal_knowledge_edges WHERE ${edgeWhere.join(' AND ')} ORDER BY created_at DESC LIMIT 500`, edgeValues)
+      .filter(edge => visibleIds.has(edge.from_id) && visibleIds.has(edge.to_id));
+  }
+  const edges = edgeRows.map(edge => ({
+    id: edge.edge_id, goal_id: boundedText(edge.goal_id, 200), from: edge.from_id, to: edge.to_id,
+    type: AGG_EDGE_TYPES.has(edge.type) ? edge.type : 'unknown', created_at: edge.created_at,
+    condition: safeAggJson(edge.condition_json, 500), outcome: safeAggJson(edge.outcome_json, 500), evidence_count: Number(edge.evidence_count || 0)
+  }));
+  const summaryRow = queryOne(db, `SELECT
+      (SELECT COUNT(*) FROM adaptive_goal_knowledge_nodes) AS nodes,
+      (SELECT COUNT(*) FROM adaptive_goal_knowledge_edges) AS edges,
+      (SELECT COUNT(DISTINCT goal_id) FROM adaptive_goal_knowledge_memberships) AS goals,
+      (SELECT COUNT(*) FROM adaptive_goal_knowledge_nodes n WHERE (SELECT COUNT(DISTINCT goal_id) FROM adaptive_goal_knowledge_memberships m WHERE m.node_id=n.id)>1) AS reused_nodes,
+      (SELECT COUNT(*) FROM adaptive_goal_knowledge_revisions) AS revisions,
+      (SELECT COUNT(*) FROM adaptive_goal_knowledge_nodes n JOIN adaptive_goal_knowledge_revisions r ON r.node_id=n.id AND r.revision=n.current_revision WHERE r.status='unverified') AS status_unverified_nodes`);
+  const goals = queryRows(db, `SELECT m.goal_id,COUNT(DISTINCT m.node_id) AS node_count,
+      (SELECT COUNT(*) FROM adaptive_goal_knowledge_edges e WHERE e.goal_id=m.goal_id) AS edge_count,
+      MAX(m.created_at) AS last_membership_at
+    FROM adaptive_goal_knowledge_memberships m ${goalId ? 'WHERE m.goal_id=?' : ''}
+    GROUP BY m.goal_id ORDER BY last_membership_at DESC,m.goal_id LIMIT 100`, goalId ? [goalId] : [])
+    .map(goal => ({ id: boundedText(goal.goal_id, 200), node_count: Number(goal.node_count), edge_count: Number(goal.edge_count), last_membership_at: goal.last_membership_at }));
+  const nodeTypes = queryRows(db, 'SELECT type,COUNT(*) AS count FROM adaptive_goal_knowledge_nodes GROUP BY type ORDER BY type').map(row => ({ type: row.type, count: Number(row.count) }));
+  const edgeTypes = queryRows(db, `SELECT type,COUNT(*) AS count FROM adaptive_goal_knowledge_edges ${includeRecovery ? '' : "WHERE type <> 'recovers_to'"} GROUP BY type ORDER BY type`).map(row => ({ type: row.type, count: Number(row.count) }));
+  const activity = queryRows(db, `SELECT created_at,kind,record_id,goal_id,detail FROM (
+      SELECT r.created_at,'node_revision' AS kind,n.id AS record_id,
+        (SELECT m.goal_id FROM adaptive_goal_knowledge_memberships m WHERE m.node_id=n.id ORDER BY m.created_at LIMIT 1) AS goal_id,
+        n.stable_key AS detail FROM adaptive_goal_knowledge_revisions r JOIN adaptive_goal_knowledge_nodes n ON n.id=r.node_id
+      UNION ALL SELECT e.created_at,'edge_added' AS kind,e.edge_id AS record_id,e.goal_id,
+        e.type || ': ' || e.from_id || ' → ' || e.to_id AS detail FROM adaptive_goal_knowledge_edges e
+    ) ORDER BY created_at DESC LIMIT 30`).map(item => ({ ...item, record_id: boundedText(item.record_id, 100), goal_id: boundedText(item.goal_id, 200), detail: boundedText(item.detail, 220) }));
+  return {
+    available: true, generated_at: new Date().toISOString(), goal_filter: goalId || null, query: query || null,
+    filters: { type: AGG_NODE_TYPES.has(type) ? type : null, include_recovery: includeRecovery },
+    summary: {
+      nodes: Number(summaryRow.nodes), filtered_nodes: totalNodes, edges: Number(summaryRow.edges), filtered_edges: edges.length,
+      goals: Number(summaryRow.goals), reused_nodes: Number(summaryRow.reused_nodes), revisions: Number(summaryRow.revisions),
+      unverified_nodes: Number(summaryRow.nodes), status_unverified_nodes: Number(summaryRow.status_unverified_nodes), usable_for_planning: 0
+    },
+    nodes, edges, goals, node_types: nodeTypes, edge_types: edgeTypes, activity,
+    truncated: totalNodes > nodes.length,
+    planning: { verifier_available: false, usable_node_ids: [] },
+    observability_note: 'This view reads the persisted knowledge ledger. Planner invocation lifecycle, duration, observed search steps, algorithm outcomes and errors are retained separately in adaptive_goal_planner_runs and linked run snapshot tables. Those observations do not establish claim truth, search quality, acceptance or approval.'
+  };
+}
+function getAggNodeDetail(db, nodeId, requestedRevision = null) {
+  if (!['adaptive_goal_knowledge_nodes','adaptive_goal_knowledge_memberships','adaptive_goal_knowledge_revisions','adaptive_goal_knowledge_edges'].every(name => dbHasTable(db, name))) return null;
+  const current = queryOne(db, 'SELECT current_revision FROM adaptive_goal_knowledge_nodes WHERE id=?', [nodeId]);
+  if (!current) return null;
+  const revision = requestedRevision === null ? Number(current.current_revision) : requestedRevision;
+  if (!Number.isSafeInteger(revision) || revision < 1) return null;
+  const row = queryOne(db, `SELECT n.id,n.stable_key,n.type,n.current_revision,r.revision,r.content_json,r.evidence_refs_json,r.content_hash,r.status,r.provenance_json,r.created_at
+    FROM adaptive_goal_knowledge_nodes n JOIN adaptive_goal_knowledge_revisions r ON r.node_id=n.id AND r.revision=? WHERE n.id=?`, [revision, nodeId]);
+  if (!row) return null;
+  const history = queryRows(db, `SELECT revision,content_hash,status,created_at FROM adaptive_goal_knowledge_revisions WHERE node_id=? ORDER BY revision DESC LIMIT 30`, [nodeId]).map(item => ({ revision: Number(item.revision), content_hash: item.content_hash, status: item.status, created_at: item.created_at }));
+  const contentTruncated = row.content_json.length > 24_000;
+  const parsedContent = safeAggJson(row.content_json, 24_000);
+  const content = parsedContent === null && contentTruncated
+    ? { preview: boundedText(row.content_json, 1_200), truncated: true }
+    : parsedContent;
+  const provenance = safeAggJson(row.provenance_json, 4_000) || {};
+  const refs = safeAggJson(row.evidence_refs_json, 24_000);
+  const memberships = queryRows(db, 'SELECT goal_id,created_at FROM adaptive_goal_knowledge_memberships WHERE node_id=? ORDER BY goal_id LIMIT 100', [nodeId])
+    .map(item => ({ goal_id: boundedText(item.goal_id, 200), created_at: item.created_at }));
+  const relations = queryRows(db, `SELECT edge_id,goal_id,from_id,to_id,type,evidence_refs_json,provenance_json,created_at FROM adaptive_goal_knowledge_edges WHERE from_id=? OR to_id=? ORDER BY created_at DESC LIMIT 100`, [nodeId,nodeId])
+    .map(edge => ({ id: edge.edge_id, goal_id: boundedText(edge.goal_id, 200), from: edge.from_id, to: edge.to_id, type: edge.type, created_at: edge.created_at, evidence_count: (safeAggJson(edge.evidence_refs_json, 12_000) || []).length, provenance_hash: requireHashFromJson(edge.provenance_json) }));
+  return {
+    id: row.id, stable_key: boundedText(row.stable_key, 200), type: row.type, revision: Number(row.revision), current_revision: Number(row.current_revision),
+    label: aggContentLabel(parsedContent, row.stable_key), content, content_truncated: contentTruncated,
+    content_hash: row.content_hash, status: row.status, verified: false, usable_for_planning: false,
+    evidence_refs: Array.isArray(refs) ? refs.slice(0, 12).map(ref => boundedText(ref, 500)) : [],
+    evidence_refs_count: Array.isArray(refs) ? refs.length : 0,
+    provenance: {
+      source: boundedText(provenance.source, 200), actor: boundedText(provenance.actor, 120),
+      reference: boundedText(provenance.reference, 500), note: boundedText(provenance.note, 500)
+    }, memberships, history, relations, created_at: row.created_at
+  };
+}
+function requireHashFromJson(value) {
+  if (typeof value !== 'string' || value.length > 4_000) return null;
+  return createHash('sha256').update(value).digest('hex');
+}
+const AGG_PLANNER_TOOL_NAMES = new Set([
+  'adaptive_goal_graph_search', 'adaptive_goal_phase2_shadow_search', 'adaptive_goal_phase3_mcts_shadow_search'
+]);
+function hasAggPlannerTelemetry(db) {
+  return dbHasTable(db, 'adaptive_goal_planner_runs') && dbHasTable(db, 'adaptive_goal_planner_run_events') &&
+    dbHasTable(db, 'adaptive_goal_planner_run_nodes') && dbHasTable(db, 'adaptive_goal_planner_run_edges') &&
+    dbHasTable(db, 'adaptive_goal_planner_run_goals') && dbHasTable(db, 'adaptive_goal_planner_run_evidence');
+}
+function formatAggPlannerRun(row, nowMs = Date.now()) {
+  const startedMs = Date.parse(row.started_at || '');
+  const terminal = row.status !== 'running' && Boolean(row.finished_at);
+  const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : null;
+  return {
+    run_id: row.run_id, tool_name: row.tool_name, status: row.status,
+    run_state: terminal ? row.status : (elapsedMs !== null && elapsedMs > 120_000 ? 'possibly_interrupted' : 'non_terminal'),
+    terminal_observed: terminal,
+    started_at: row.started_at, finished_at: row.finished_at,
+    duration_ms: terminal ? (Number.isSafeInteger(Number(row.duration_ms)) ? Number(row.duration_ms) : null) : null,
+    tool_result_observed_duration_ms: row.tool_result_observed_duration_ms === null || row.tool_result_observed_duration_ms === undefined ? null : Number(row.tool_result_observed_duration_ms),
+    elapsed_ms: terminal ? null : elapsedMs,
+    request_sha256: row.request_sha256, input_graph_sha256: row.input_graph_sha256,
+    graph_hash: row.graph_hash, search_run_id: row.search_run_id,
+    goal_id: row.goal_id, goal_node_id: row.goal_node_id,
+    input_node_count: row.input_node_count === null ? null : Number(row.input_node_count),
+    input_edge_count: row.input_edge_count === null ? null : Number(row.input_edge_count),
+    observed_node_count: row.observed_node_count === null ? null : Number(row.observed_node_count),
+    observed_edge_count: row.observed_edge_count === null ? null : Number(row.observed_edge_count),
+    algorithm_status: row.algorithm_status, termination_reason: row.termination_reason,
+    candidate_count: row.candidate_count === null ? null : Number(row.candidate_count),
+    partial_candidate_count: row.partial_candidate_count === null ? null : Number(row.partial_candidate_count),
+    search_event_count: row.search_event_count === null ? null : Number(row.search_event_count),
+    search_event_count_recorded: Number(row.search_event_count_recorded || 0),
+    search_event_count_omitted: Number(row.search_event_count_omitted || 0),
+    search_events_truncated: Boolean(row.search_events_truncated),
+    metrics: safeAggJson(row.metrics_json, 48_000) || {},
+    error: row.status === 'failed' ? { code: row.error_code, name: row.error_name, message: row.error_message } : null,
+    links: { run: `/?view=agg&run_id=${encodeURIComponent(row.run_id)}`, goal_id: row.goal_id, goal_node_id: row.goal_node_id }
+  };
+}
+function getAggPlannerRuns(db, params) {
+  if (!hasAggPlannerTelemetry(db)) return {
+    available: false,
+    reason: 'AGG planner telemetry schema is not initialized. Start the updated writable runtime once; this read-only dashboard never runs migrations.',
+    items: [], total: 0, offset: 0, limit: 20,
+    summary: { total: 0, completed: 0, failed: 0, non_terminal: 0, average_duration_ms: null, outcome_counts: [] }, trend: []
+  };
+  const q = boundedText(params.get('q') || '', 180).trim();
+  const status = boundedText(params.get('status') || '', 40).trim();
+  const tool = boundedText(params.get('tool') || '', 100).trim();
+  const goalId = boundedText(params.get('goalId') || '', 200).trim();
+  const nodeId = boundedText(params.get('nodeId') || '', 512).trim();
+  const since = boundedText(params.get('since') || '', 32).trim();
+  const until = boundedText(params.get('until') || '', 32).trim();
+  const limit = clampInt(params.get('limit'), 20, 1, 100);
+  const offset = clampInt(params.get('offset'), 0, 0, 1_000_000);
+  const where = []; const values = [];
+  if (['running','completed','failed'].includes(status)) { where.push('r.status=?'); values.push(status); }
+  if (tool && AGG_PLANNER_TOOL_NAMES.has(tool)) { where.push('r.tool_name=?'); values.push(tool); }
+  if (goalId) { where.push('(r.goal_id=? OR EXISTS (SELECT 1 FROM adaptive_goal_planner_run_goals rg WHERE rg.run_id=r.run_id AND rg.goal_id=?))'); values.push(goalId, goalId); }
+  if (nodeId) { where.push('EXISTS (SELECT 1 FROM adaptive_goal_planner_run_nodes rn WHERE rn.run_id=r.run_id AND rn.node_id=?)'); values.push(nodeId); }
+  if (since && /^\d{4}-\d{2}-\d{2}(?:T[^ ]+)?$/.test(since)) { where.push('r.started_at>=?'); values.push(since.length === 10 ? `${since}T00:00:00.000Z` : since); }
+  if (until && /^\d{4}-\d{2}-\d{2}(?:T[^ ]+)?$/.test(until)) { where.push('r.started_at<=?'); values.push(until.length === 10 ? `${until}T23:59:59.999Z` : until); }
+  if (q) {
+    const escaped = `%${q.replace(/[\\%_]/g, char => `\\${char}`)}%`;
+    where.push(`(r.run_id LIKE ? ESCAPE '\\' OR r.tool_name LIKE ? ESCAPE '\\' OR COALESCE(r.algorithm_status,'') LIKE ? ESCAPE '\\' OR COALESCE(r.goal_id,'') LIKE ? ESCAPE '\\' OR COALESCE(r.goal_node_id,'') LIKE ? ESCAPE '\\' OR COALESCE(r.graph_hash,'') LIKE ? ESCAPE '\\' OR COALESCE(r.input_graph_sha256,'') LIKE ? ESCAPE '\\' OR COALESCE(r.search_run_id,'') LIKE ? ESCAPE '\\' OR COALESCE(r.request_sha256,'') LIKE ? ESCAPE '\\' OR COALESCE(r.error_message,'') LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM adaptive_goal_planner_run_nodes qn WHERE qn.run_id=r.run_id AND (qn.node_id LIKE ? ESCAPE '\\' OR qn.label LIKE ? ESCAPE '\\')) OR EXISTS (SELECT 1 FROM adaptive_goal_planner_run_evidence qe WHERE qe.run_id=r.run_id AND qe.reference LIKE ? ESCAPE '\\'))`);
+    values.push(...Array(13).fill(escaped));
+  }
+  const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const total = Number(queryOne(db, `SELECT COUNT(*) AS count FROM adaptive_goal_planner_runs r ${filter}`, values)?.count || 0);
+  const rows = queryRows(db, `SELECT r.*,
+      (SELECT COUNT(*) FROM adaptive_goal_planner_run_nodes n WHERE n.run_id=r.run_id) AS linked_nodes,
+      (SELECT COUNT(*) FROM adaptive_goal_planner_run_edges e WHERE e.run_id=r.run_id) AS linked_edges,
+      (SELECT COUNT(DISTINCT reference) FROM adaptive_goal_planner_run_evidence v WHERE v.run_id=r.run_id) AS evidence_refs,
+      (SELECT COUNT(*) FROM adaptive_goal_planner_run_events ev WHERE ev.run_id=r.run_id AND ev.event_source='search_observer') AS observed_steps
+    FROM adaptive_goal_planner_runs r ${filter} ORDER BY r.started_at DESC,r.run_id DESC LIMIT ? OFFSET ?`, [...values,limit,offset]);
+  const allSummary = queryOne(db, `SELECT COUNT(*) AS total,
+      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN status='running' OR finished_at IS NULL THEN 1 ELSE 0 END) AS non_terminal,
+      AVG(CASE WHEN status IN ('completed','failed') AND duration_ms IS NOT NULL THEN duration_ms END) AS average_duration_ms
+    FROM adaptive_goal_planner_runs`);
+  const outcomeCounts = queryRows(db, `SELECT algorithm_status,COUNT(*) AS count FROM adaptive_goal_planner_runs WHERE algorithm_status IS NOT NULL GROUP BY algorithm_status ORDER BY count DESC,algorithm_status LIMIT 20`)
+    .map(row => ({ status: row.algorithm_status, count: Number(row.count) }));
+  const trendRows = queryRows(db, `SELECT substr(started_at,1,10) AS day,
+      COUNT(*) AS runs,
+      SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed,
+      SUM(CASE WHEN status='running' OR finished_at IS NULL THEN 1 ELSE 0 END) AS non_terminal
+    FROM adaptive_goal_planner_runs WHERE started_at>=? GROUP BY substr(started_at,1,10) ORDER BY day`,
+    [new Date(Date.now() - 13 * 24 * 60 * 60 * 1000).toISOString().slice(0,10) + 'T00:00:00.000Z']);
+  const trendByDay = new Map(trendRows.map(row => [row.day, { day: row.day, runs: Number(row.runs), completed: Number(row.completed || 0), failed: Number(row.failed || 0), non_terminal: Number(row.non_terminal || 0) }]));
+  const trend = [];
+  const today = new Date(); today.setUTCHours(0,0,0,0);
+  for (let i = 13; i >= 0; i--) {
+    const day = new Date(today); day.setUTCDate(today.getUTCDate() - i);
+    const key = day.toISOString().slice(0,10);
+    trend.push(trendByDay.get(key) || { day: key, runs: 0, completed: 0, failed: 0, non_terminal: 0 });
+  }
+  return {
+    available: true, generated_at: new Date().toISOString(),
+    filters: { q: q || null, status: status || null, tool: tool || null, goal_id: goalId || null, node_id: nodeId || null, since: since || null, until: until || null },
+    items: rows.map(row => ({ ...formatAggPlannerRun(row), linked_node_count: Number(row.linked_nodes), linked_edge_count: Number(row.linked_edges), evidence_reference_count: Number(row.evidence_refs), observed_step_count: Number(row.observed_steps) })),
+    total, offset, limit, has_more: offset + rows.length < total,
+    summary: { total: Number(allSummary.total || 0), completed: Number(allSummary.completed || 0), failed: Number(allSummary.failed || 0), non_terminal: Number(allSummary.non_terminal || 0), average_duration_ms: allSummary.average_duration_ms === null ? null : Math.round(Number(allSummary.average_duration_ms)), algorithm_outcome_counts: outcomeCounts },
+    trend, semantics: {
+      completed_means_tool_returned_result: true,
+      failed_means_tool_invocation_threw: true,
+      algorithm_status_is_not_acceptance_or_verified_success: true,
+      non_terminal_means_no_terminal_record_observed: true,
+      possibly_interrupted_is_age_heuristic_only: true
+    }
+  };
+}
+function getAggPlannerRunDetail(db, runId) {
+  if (!hasAggPlannerTelemetry(db)) return null;
+  const row = queryOne(db, 'SELECT * FROM adaptive_goal_planner_runs WHERE run_id=?', [runId]);
+  if (!row) return null;
+  const nodes = queryRows(db, 'SELECT * FROM adaptive_goal_planner_run_nodes WHERE run_id=? ORDER BY node_type,node_id LIMIT 500', [runId]).map(node => ({
+    node_id: node.node_id, node_type: node.node_type, label: boundedText(node.label, 500), source_kind: node.source_kind,
+    knowledge_goal_id: node.knowledge_goal_id, revision: node.revision === null ? null : Number(node.revision),
+    content_hash: node.content_hash, provenance_hash: node.provenance_hash,
+    evidence_refs: safeAggJson(node.evidence_refs_json, 12_000) || [], node_snapshot: safeAggJson(node.node_snapshot_json, MAX_AGG_NODE_SNAPSHOT_BYTES) || {},
+    links: { node: `/?view=agg&run_id=${encodeURIComponent(runId)}&node_id=${encodeURIComponent(node.node_id)}${node.revision === null ? '' : `&revision=${encodeURIComponent(node.revision)}`}` }
+  }));
+  const edges = queryRows(db, 'SELECT * FROM adaptive_goal_planner_run_edges WHERE run_id=? ORDER BY edge_type,from_node_id,to_node_id LIMIT 1000', [runId]).map(edge => ({
+    edge_id: edge.edge_id, goal_id: edge.goal_id, from_node_id: edge.from_node_id, to_node_id: edge.to_node_id,
+    edge_type: edge.edge_type, source_kind: edge.source_kind, evidence_refs: safeAggJson(edge.evidence_refs_json, 12_000) || [],
+    edge_snapshot: safeAggJson(edge.edge_snapshot_json, 4_000) || {}
+  }));
+  const goals = queryRows(db, 'SELECT goal_id,goal_kind,source_kind FROM adaptive_goal_planner_run_goals WHERE run_id=? ORDER BY goal_kind,goal_id LIMIT 200', [runId]);
+  const evidence = queryRows(db, 'SELECT * FROM adaptive_goal_planner_run_evidence WHERE run_id=? ORDER BY reference,observation_source LIMIT 500', [runId]).map(item => ({
+    reference: item.reference, source_node_id: item.source_node_id || null, observation_source: item.observation_source,
+    kind: item.kind, classification: item.classification, artifact_id: item.artifact_id, source_job_id: item.source_job_id,
+    content_hash: item.content_hash, lineage_verified: item.lineage_verified === null ? null : Boolean(item.lineage_verified),
+    claim_verified: item.claim_verified === null ? null : Boolean(item.claim_verified), details: safeAggJson(item.details_json, 12_000) || {},
+    links: { node_id: item.source_node_id || null, artifact_id: item.artifact_id || null, goal_id: row.goal_id || null }
+  }));
+  const events = queryRows(db, 'SELECT sequence,event_type,observed_at,event_source,payload_json,payload_truncated FROM adaptive_goal_planner_run_events WHERE run_id=? ORDER BY sequence LIMIT 80', [runId]).map(event => ({
+    sequence: Number(event.sequence), event_type: event.event_type, observed_at: event.observed_at, event_source: event.event_source,
+    payload: safeAggJson(event.payload_json, 24_000) || {}, payload_truncated: Boolean(event.payload_truncated)
+  }));
+  const counts = queryOne(db, `SELECT (SELECT COUNT(*) FROM adaptive_goal_planner_run_events WHERE run_id=?) AS events,
+      (SELECT COUNT(*) FROM adaptive_goal_planner_run_events WHERE run_id=? AND event_source='search_observer') AS steps,
+      (SELECT COUNT(*) FROM adaptive_goal_planner_run_nodes WHERE run_id=?) AS nodes,
+      (SELECT COUNT(*) FROM adaptive_goal_planner_run_edges WHERE run_id=?) AS edges,
+      (SELECT COUNT(DISTINCT reference) FROM adaptive_goal_planner_run_evidence WHERE run_id=?) AS evidence,
+      (SELECT COUNT(*) FROM adaptive_goal_planner_run_evidence WHERE run_id=?) AS evidence_observations`, [runId,runId,runId,runId,runId,runId]);
+  const countsAsNumbers = Object.fromEntries(Object.entries(counts).map(([key,value]) => [key,Number(value || 0)]));
+  const graphSnapshotTruncated = (Number(row.observed_node_count || 0) > countsAsNumbers.nodes) ||
+    (Number(row.observed_edge_count || 0) > countsAsNumbers.edges);
+  return {
+    available: true, run: formatAggPlannerRun(row),
+    metrics: safeAggJson(row.metrics_json, 48_000) || {},
+    candidates: safeAggJson(row.candidates_json, MAX_AGG_RUN_CANDIDATES_BYTES) || [],
+    provenance: safeAggJson(row.provenance_json, 24_000) || {},
+    nodes, edges, goals, evidence, events,
+    counts: countsAsNumbers,
+    events_truncated_in_response: Number(counts.events || 0) > events.length,
+    nodes_truncated_in_response: countsAsNumbers.nodes > nodes.length,
+    edges_truncated_in_response: countsAsNumbers.edges > edges.length,
+    evidence_truncated_in_response: countsAsNumbers.evidence_observations > evidence.length,
+    graph_snapshot_truncated: graphSnapshotTruncated,
+    snapshot_limits: {
+      graph_nodes_persisted_per_run: 500,
+      graph_edges_persisted_per_run: 2000,
+      distinct_evidence_references_persisted_per_run: 5000,
+      node_snapshot_json_bytes: MAX_AGG_NODE_SNAPSHOT_BYTES,
+      run_candidates_json_bytes: MAX_AGG_RUN_CANDIDATES_BYTES,
+      node_details_returned: 500,
+      edge_details_returned: 1000,
+      timeline_initial_events: 80,
+      timeline_page_max: 250,
+      evidence_observations_returned: 500,
+      note: 'Limits bound stored/returned records. A count difference indicates truncation; absence of a linked record does not prove the planner never observed it.'
+    },
+    trace_semantics: 'Search observer timestamps are wall-clock observations recorded at event emission. Run duration spans the full MCP tool invocation; no per-node runtime or quality score is inferred. Unfinished runs have no terminal record, so elapsed time is provisional.'
+  };
+}
+const MAX_AGG_NODE_SNAPSHOT_BYTES = 12 * 1024;
+const MAX_AGG_RUN_CANDIDATES_BYTES = 128 * 1024;
+function getAggPlannerRunEvents(db, runId, params) {
+  if (!hasAggPlannerTelemetry(db)) return null;
+  if (!queryOne(db, 'SELECT run_id FROM adaptive_goal_planner_runs WHERE run_id=?', [runId])) return null;
+  const limit = clampInt(params.get('limit'), 100, 1, 250);
+  const after = clampInt(params.get('afterSequence'), 0, 0, 2_000_000_000);
+  const type = boundedText(params.get('type') || '', 120).trim();
+  const where = ['run_id=?','sequence>?']; const values = [runId,after];
+  if (type) { where.push('event_type=?'); values.push(type); }
+  const rows = queryRows(db, `SELECT sequence,event_type,observed_at,event_source,payload_json,payload_truncated FROM adaptive_goal_planner_run_events WHERE ${where.join(' AND ')} ORDER BY sequence LIMIT ?`, [...values,limit+1]);
+  const hasMore = rows.length > limit; if (hasMore) rows.pop();
+  return {
+    available: true, run_id: runId, after_sequence: after, limit, has_more: hasMore,
+    items: rows.map(event => ({ sequence: Number(event.sequence), event_type: event.event_type, observed_at: event.observed_at, event_source: event.event_source, payload: safeAggJson(event.payload_json, 24_000) || {}, payload_truncated: Boolean(event.payload_truncated) })),
+    next_after_sequence: rows.length ? Number(rows.at(-1).sequence) : after
   };
 }
 function safeJsonArray(value, max = 24_000, options = {}) {
@@ -929,6 +1285,34 @@ export function createDashboardServer(options = {}) {
         let payload;
         if (route === '/api/health') payload = { status:'ok', database:'connected', database_path:path.basename(dbPath), data_root:path.basename(dataRoot), files_root:path.basename(filesRoot), mode:'local-read-only', read_only:true, host, port:server.address()?.port || port };
         else if (route === '/api/overview') payload = getOverview(db);
+        else if (route === '/api/agg/runs') payload = getAggPlannerRuns(db, url.searchParams);
+        else if (route.startsWith('/api/agg/runs/')) {
+          let suffix;
+          try { suffix = decodeURIComponent(route.slice('/api/agg/runs/'.length)); }
+          catch { return sendJson(res,400,{error:'invalid AGG run id encoding',read_only:true}); }
+          const eventSuffix = '/events';
+          const isEvents = suffix.endsWith(eventSuffix);
+          const runId = isEvents ? suffix.slice(0,-eventSuffix.length) : suffix;
+          if (!/^[a-f0-9-]{36}$/i.test(runId)) return sendJson(res,400,{error:'invalid AGG run id',read_only:true});
+          if (isEvents) {
+            payload = getAggPlannerRunEvents(db,runId,url.searchParams);
+            if (!payload) return sendJson(res,404,{error:'AGG planner run not found or telemetry schema is unavailable',read_only:true});
+          } else {
+            payload = getAggPlannerRunDetail(db,runId);
+            if (!payload) return sendJson(res,404,{error:'AGG planner run not found or telemetry schema is unavailable',read_only:true});
+          }
+        }
+        else if (route === '/api/agg/graph') payload = getAggGraph(db, url.searchParams);
+        else if (route.startsWith('/api/agg/nodes/')) {
+          let id;
+          try { id = decodeURIComponent(route.slice('/api/agg/nodes/'.length)); }
+          catch { return sendJson(res,400,{error:'invalid AGG node id encoding'}); }
+          if (!id || id.includes('/') || id.length > 128) return sendJson(res,400,{error:'invalid AGG node id'});
+          const rawRevision = url.searchParams.get('revision');
+          const requestedRevision = rawRevision === null ? null : Number(rawRevision);
+          if (rawRevision !== null && (!Number.isSafeInteger(requestedRevision) || requestedRevision < 1)) return sendJson(res,400,{error:'revision must be a positive integer'});
+          payload = getAggNodeDetail(db,id,requestedRevision); if (!payload) return sendJson(res,404,{error:'AGG node/revision not found or knowledge graph is not initialized'});
+        }
         else if (route === '/api/roles') payload = getRoles(db,url.searchParams);
         else if (route === '/api/policies') payload = getPolicies(db,url.searchParams);
         else if (route === '/api/batches') payload = getBatches(db,url.searchParams);
@@ -997,7 +1381,7 @@ export function createDashboardServer(options = {}) {
         return sendJson(res,500,{error:'dashboard query failed',details:boundedText(error?.message||error,300)});
       }
     }
-    const assets = new Map([['/','index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/ux-overrides.css','ux-overrides.css'],['/app.js','app.js'],['/workbench.css','workbench.css'],['/workbench.js','workbench.js']]);
+    const assets = new Map([['/','index.html'],['/index.html','index.html'],['/styles.css','styles.css'],['/ux-overrides.css','ux-overrides.css'],['/dashboard-overhaul.css','dashboard-overhaul.css'],['/app.js','app.js'],['/workbench.css','workbench.css'],['/workbench.js','workbench.js']]);
     const asset = assets.get(route);
     if (!asset) return sendJson(res,404,{error:'not found'});
     try {

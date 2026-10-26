@@ -4,31 +4,34 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#f2f4f3">
-  <title>Runalith Local Workbench</title>
+  <meta name="theme-color" content="#f4f6f3">
+  <title>Runalith · Operations dashboard</title>
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/ux-overrides.css">
   <link rel="stylesheet" href="/workbench.css">
+  <link rel="stylesheet" href="/dashboard-overhaul.css">
   <script src="/app.js" defer></script>
   <script src="/workbench.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main-content">Skip to dashboard content</a>
   <div class="app-shell">
-    <aside class="sidebar" id="wb-primary-sidebar" aria-label="Workbench primary sidebar">
+    <aside class="sidebar" id="wb-primary-sidebar" aria-label="Dashboard navigation">
       <div class="brand-lockup">
         <div class="brand-mark" aria-hidden="true">R</div>
-        <div><div class="brand-name">RUNALITH<span> / </span>WORKBENCH</div><div class="brand-caption">LOCAL ORCHESTRATOR</div></div>
+          <div><div class="brand-name">RUNALITH<span> / </span>OPERATIONS</div><div class="brand-caption">LOCAL RUNTIME OBSERVABILITY</div></div>
       </div>
       <div class="wb-sidebar-context"><span id="wb-sidebar-title">HOME</span><span class="mini-live"><b></b> LOCAL</span></div>
       <nav id="wb-sidebar-groups" class="primary-nav" aria-label="Context navigation">
         <section class="wb-sidebar-group" data-sidebar-group="home">
-          <div class="wb-group-label">HOME</div>
-          <button class="nav-item active" data-container="home" data-view="overview" aria-label="Overview" title="Overview" aria-current="page"><span class="nav-symbol" aria-hidden="true">⌂</span><span>Overview</span><span class="nav-arrow" aria-hidden="true">↗</span></button>
+          <div class="wb-group-label">MONITOR</div>
+          <button class="nav-item active" data-container="home" data-view="overview" aria-label="Overview" title="Overview" aria-current="page"><span class="nav-symbol" aria-hidden="true">⌂</span><span>Overview</span></button>
+          <button class="nav-item" data-container="home" data-view="agg" aria-label="AGG knowledge graph" title="AGG knowledge graph"><span class="nav-symbol" aria-hidden="true">◇</span><span>AGG Graph</span><span class="nav-count" id="nav-agg-count">—</span></button>
+          <button class="nav-item" data-container="explorer" data-view="files" aria-label="Workspace files" title="Workspace files"><span class="nav-symbol" aria-hidden="true">▤</span><span>Workspace files</span></button>
         </section>
         <section class="wb-sidebar-group" data-sidebar-group="explorer" hidden>
-          <div class="wb-group-label">EXPLORER</div>
-          <button class="nav-item" data-container="explorer" data-view="files" aria-label="File explorer" title="File explorer"><span class="nav-symbol" aria-hidden="true">▤</span><span>Workspace files</span></button>
+          <div class="wb-group-label">WORKSPACE INSPECTOR</div>
+          <button class="wb-context-action" data-workbench-action="sourceControl"><span aria-hidden="true">⑂</span><span>Source Control</span></button>
           <div id="wb-explorer-sidebar" class="wb-context-tools"></div>
         </section>
         <section class="wb-sidebar-group" data-sidebar-group="search" hidden>
@@ -43,14 +46,14 @@
           <p class="wb-sidebar-note">Diffs are read-only. Staging and Git mutations are unavailable.</p>
         </section>
         <section class="wb-sidebar-group" data-sidebar-group="runalith" hidden>
-          <div class="wb-group-label">RUNALITH</div>
+          <div class="wb-group-label">WORKFLOWS</div>
           <button class="nav-item" data-container="runalith" data-view="workflows" aria-label="Workflows" title="Workflows"><span class="nav-symbol" aria-hidden="true">⌘</span><span>Workflows</span><span class="nav-count" id="nav-jobs-count">—</span></button>
           <button class="nav-item" data-container="runalith" data-view="roles" aria-label="Roles and skills" title="Roles &amp; skills"><span class="nav-symbol" aria-hidden="true">◎</span><span>Roles &amp; skills</span><span class="nav-count" id="nav-roles-count">—</span></button>
           <button class="nav-item" data-container="runalith" data-view="policies" aria-label="Policies" title="Policies"><span class="nav-symbol" aria-hidden="true">⚖</span><span>Policies</span><span class="nav-count" id="nav-policies-count">—</span></button>
           <button class="nav-item" data-container="runalith" data-view="artifacts" aria-label="Artifacts" title="Artifacts"><span class="nav-symbol" aria-hidden="true">▧</span><span>Artifacts</span></button>
         </section>
         <section class="wb-sidebar-group" data-sidebar-group="observability" hidden>
-          <div class="wb-group-label">OBSERVABILITY</div>
+          <div class="wb-group-label">EVIDENCE &amp; HISTORY</div>
           <button class="nav-item" data-container="observability" data-view="batches" aria-label="Batch execution" title="Batch execution"><span class="nav-symbol" aria-hidden="true">▤</span><span>Batch execution</span><span class="nav-count" id="nav-batches-count">—</span></button>
           <button class="nav-item" data-container="observability" data-view="events" aria-label="Event stream" title="Event stream"><span class="nav-symbol" aria-hidden="true">≋</span><span>Event stream</span><span class="nav-count" id="nav-events-count">—</span></button>
         </section>
@@ -64,7 +67,7 @@
       <div class="sidebar-bottom">
         <div class="secure-card"><div class="secure-icon">⌑</div><div><strong>LOCAL-FIRST</strong><span>Read-only inspection</span></div><span class="secure-check">✓</span></div>
         <div class="source-foot"><span class="source-dot"></span><span>SQLITE SOURCE OF TRUTH</span></div>
-        <div class="sidebar-version">LOCAL DASHBOARD <span>v1.0</span></div>
+        <div class="sidebar-version">LOCAL DASHBOARD <span>READ-ONLY</span></div>
       </div>
     </aside>
 
@@ -101,6 +104,11 @@
             <article class="metric-card metric-violet"><div class="metric-head"><span>EVENTS</span><span class="metric-glyph">≋</span></div><div class="metric-value" id="metric-events">—</div><div class="metric-foot"><span class="metric-indicator"></span><span>Recorded signals</span><span class="metric-spark" id="spark-events"></span></div></article>
             <article class="metric-card metric-amber"><div class="metric-head"><span>ARTIFACTS</span><span class="metric-glyph">▧</span></div><div class="metric-value" id="metric-artifacts">—</div><div class="metric-foot"><span class="metric-indicator"></span><span id="metric-artifact-foot">Evidence objects</span><span class="metric-spark" id="spark-artifacts"></span></div></article>
           </div>
+          <section class="agg-overview panel" aria-labelledby="agg-overview-title">
+            <div class="agg-overview-copy"><div class="panel-kicker">ADAPTIVE GOAL GRAPH</div><h2 id="agg-overview-title">Knowledge &amp; evidence ledger</h2><p>Inspect stored concepts, relations, provenance and unresolved trust. This is not a live trace of individual planner runs.</p></div>
+            <div class="agg-overview-metrics"><div><span>Nodes</span><strong id="overview-agg-nodes">—</strong></div><div><span>Relations</span><strong id="overview-agg-edges">—</strong></div><div><span>Cross-goal reuse</span><strong id="overview-agg-reuse">—</strong></div><div><span>Usable for planning</span><strong id="overview-agg-usable">—</strong></div></div>
+            <button class="primary-button agg-open-button" data-open-view="agg">Open knowledge graph <span>↗</span></button>
+          </section>
 
           <div class="dashboard-grid">
             <article class="panel activity-panel">
@@ -120,6 +128,82 @@
           <div class="bottom-grid">
             <article class="panel event-panel"><div class="panel-head"><div><h2>Latest events</h2></div><button class="text-button" data-open-view="events">All events <span>↗</span></button></div><div id="latest-events" class="event-list"><div class="table-empty">Waiting for events…</div></div></article>
             <article class="panel insight-panel"><div class="panel-head"><div><h2>Stored records</h2></div></div><div class="inventory-list" id="inventory-list"></div><div class="inventory-note"><span>i</span> Read-only records from the local database.</div></article>
+          </div>
+        </section>
+
+        <section id="agg-view" class="view-panel hidden">
+          <div class="section-toolbar agg-toolbar"><div><h2>AGG Knowledge Graph</h2><p>Persisted knowledge ledger, not a live per-run planner trace. Inspect nodes, typed relations, provenance and revision history.</p></div><div class="toolbar-fields"><span class="read-only-badge">LOCAL SQLITE · READ-ONLY</span><button id="agg-copy-snapshot" class="small-button">Copy filtered snapshot</button><button id="agg-refresh" class="small-button">Refresh graph</button></div></div>
+          <div id="agg-connection-note" class="agg-connection-note" role="status">Loading AGG graph snapshot…</div>
+          <section id="agg-run-graph-panel" class="panel agg-run-graph-stage-panel" aria-labelledby="agg-run-graph-stage-title">
+            <div class="panel-head agg-run-graph-stage-head"><div><div class="panel-kicker">SELECTED RUN · INPUT GRAPH</div><h2 id="agg-run-graph-stage-title">Planner run graph</h2><p id="agg-run-graph-stage-subtitle">Choose a recorded run to explore its input graph, branches and convergence.</p></div><div class="agg-run-stage-actions"><button type="button" id="agg-run-copy-link" class="small-button" disabled>Copy run link</button><button type="button" id="agg-run-export-json" class="small-button" disabled>Export JSON</button><button type="button" id="agg-run-export-svg" class="small-button" disabled>Export SVG</button></div></div>
+            <div class="agg-run-stage-facts" id="agg-run-graph-stage-facts"><span>No run selected</span></div>
+            <div class="agg-run-graph-toolbar" aria-label="Selected run graph controls">
+              <label class="agg-run-quick-select-label">Recent run<select id="agg-run-quick-select" disabled><option value="">Loading recent runs…</option></select></label>
+              <label class="agg-run-graph-search-label">Find node<input id="agg-run-graph-search" type="search" placeholder="Label or node ID…" autocomplete="off" disabled></label>
+              <label>Node type<select id="agg-run-graph-type-filter" disabled><option value="">All node types</option><option value="goal">Goal</option><option value="task">Task</option><option value="hypothesis">Hypothesis</option><option value="idea">Idea</option><option value="candidate">Candidate</option><option value="experiment">Experiment</option><option value="capability">Capability</option><option value="evidence">Evidence</option><option value="condition">Condition</option></select></label>
+              <button type="button" id="agg-run-graph-clear" class="small-button" disabled>Clear filters</button>
+              <label class="agg-run-secondary-toggle"><input type="checkbox" id="agg-run-graph-show-secondary" disabled> Show secondary links</label>
+              <button type="button" id="agg-run-graph-reset-view" class="small-button" disabled>Reset view</button>
+              <label class="agg-run-graph-zoom-label">Zoom <input id="agg-run-graph-zoom" type="range" min="50" max="140" step="10" value="100" disabled><output id="agg-run-graph-zoom-value" for="agg-run-graph-zoom">100%</output></label>
+              <button type="button" id="agg-run-copy-node" class="small-button" disabled>Copy selected node ID</button>
+            </div>
+            <div id="agg-run-graph-controls-status" class="agg-run-graph-controls-status" role="status" aria-live="polite">Graph controls will activate after a run is selected.</div>
+            <div id="agg-run-graph-node-detail" class="agg-run-graph-node-detail hidden" aria-live="polite"></div>
+            <div id="agg-run-graph-stage" class="agg-run-graph-stage"><div class="agg-empty">Loading the most recent recorded planner graph…</div></div>
+          </section>
+          <div class="agg-metric-grid">
+            <article class="agg-metric"><span>Persisted nodes</span><strong id="agg-metric-nodes">—</strong><small id="agg-node-detail">All current node revisions</small></article>
+            <article class="agg-metric"><span>Typed relations</span><strong id="agg-metric-edges">—</strong><small id="agg-edge-detail">Visible links in current view</small></article>
+            <article class="agg-metric"><span>Goal scopes</span><strong id="agg-metric-goals">—</strong><small id="agg-goal-detail">Distinct membership scopes</small></article>
+            <article class="agg-metric"><span>Cross-goal reuse</span><strong id="agg-metric-reuse">—</strong><small id="agg-reuse-detail">Shared node identities</small></article>
+            <article class="agg-metric agg-trust-metric"><span>Usable for planning</span><strong id="agg-metric-usable">—</strong><small id="agg-trust-detail">Requires independent verification</small></article>
+          </div>
+          <div class="agg-trust-banner"><span class="agg-trust-mark" aria-hidden="true">!</span><div><strong>Trust boundary</strong><p id="agg-trust-copy">Knowledge is review-only until an independent verifier exists. Hash integrity and provenance do not establish truth.</p></div><span class="status-pill status-pending">UNVERIFIED BY DEFAULT</span></div>
+
+          <section class="agg-run-dashboard" aria-labelledby="agg-run-heading">
+            <div class="agg-run-heading"><div><div class="panel-kicker">DURABLE RUNTIME TELEMETRY</div><h2 id="agg-run-heading">Planner run history</h2><p>Observed MCP invocations, live search steps, results and errors. Tool completion is not acceptance; unfinished runs remain explicitly non-terminal.</p></div><button type="button" id="agg-runs-refresh" class="small-button">Refresh run history</button></div>
+            <div class="agg-run-metric-grid">
+              <article class="agg-run-metric"><span>Recorded runs</span><strong id="agg-run-total">—</strong><small>Durable invocation records</small></article>
+              <article class="agg-run-metric"><span>Tool completed</span><strong id="agg-run-completed">—</strong><small>Tool returned a result; not acceptance</small></article>
+              <article class="agg-run-metric agg-run-failed"><span>Tool errors</span><strong id="agg-run-failed">—</strong><small>Invocation threw an error</small></article>
+              <article class="agg-run-metric agg-run-unfinished"><span>Non-terminal</span><strong id="agg-run-unfinished">—</strong><small>No terminal record observed</small></article>
+              <article class="agg-run-metric"><span>Mean duration</span><strong id="agg-run-average">—</strong><small>Terminal invocations only</small></article>
+            </div>
+            <article class="panel agg-run-trend-panel"><div class="panel-head"><div><h3>Observed activity · last 14 days</h3><p>Counts of recorded invocations by start date, separated by lifecycle status.</p></div><div class="agg-run-trend-legend"><span class="completed">Tool completed</span><span class="failed">Tool error</span><span class="unfinished">Non-terminal</span></div></div><div id="agg-run-trend" class="agg-run-trend" role="img" aria-label="Recorded AGG planner invocations by day for the last 14 days"><div class="agg-empty">Loading planner-run trend…</div></div></article>
+            <div class="agg-run-filters" aria-label="Filter AGG planner runs">
+              <label>Search runs, goal, node or evidence<input id="agg-run-search" type="search" placeholder="Run ID, outcome, node ID, evidence ref…" autocomplete="off"></label>
+              <label>Tool lifecycle<select id="agg-run-status-filter"><option value="">All lifecycle states</option><option value="running">Non-terminal</option><option value="completed">Tool completed</option><option value="failed">Tool error</option></select></label>
+              <label>Search implementation<select id="agg-run-tool-filter"><option value="">All search tools</option><option value="adaptive_goal_graph_search">Phase 1 · beam</option><option value="adaptive_goal_phase2_shadow_search">Phase 2 · learned beam</option><option value="adaptive_goal_phase3_mcts_shadow_search">Phase 3 · MCTS</option></select></label>
+              <label>Linked goal<select id="agg-run-goal-filter"><option value="">All linked goals</option></select></label>
+              <label>Linked node ID<input id="agg-run-node-filter" type="search" placeholder="Exact node ID" autocomplete="off"></label>
+              <button type="button" id="agg-run-filters-clear" class="small-button">Clear filters</button>
+            </div>
+            <div id="agg-run-availability" class="agg-connection-note" role="status">Loading durable planner-run telemetry…</div>
+            <div class="agg-run-layout">
+              <section class="panel agg-runs-panel" aria-labelledby="agg-runs-list-heading"><div class="panel-head"><div><h3 id="agg-runs-list-heading">Recorded invocations</h3><p id="agg-runs-meta">Recent runs ordered by start time.</p></div></div><div id="agg-run-list" class="agg-run-list"><div class="agg-empty">Loading run history…</div></div><div class="agg-run-pagination"><span id="agg-run-pagination-label">—</span><div><button type="button" id="agg-run-newer" class="small-button" disabled>Newer</button><button type="button" id="agg-run-older" class="small-button" disabled>Older</button></div></div></section>
+              <aside class="panel agg-run-inspector" aria-labelledby="agg-run-inspector-title"><div class="panel-head"><div><h3 id="agg-run-inspector-title">Run inspector</h3><p id="agg-run-inspector-subtitle">Select a run to trace its observed lifecycle.</p></div></div><div id="agg-run-inspector-body" class="agg-run-inspector-body"><div class="agg-empty">Run details will include the input graph hash, observed counters, linked goal/nodes, resolver observations, errors and ordered audit events. The runtime never infers claim truth or acceptance.</div></div></aside>
+            </div>
+          </section>
+          <div class="agg-filterbar" aria-label="Filter knowledge graph">
+            <label>Goal scope<select id="agg-goal-filter"><option value="">All goals</option></select></label>
+            <label>Node type<select id="agg-type-filter"><option value="">All node types</option><option value="hypothesis">Hypothesis</option><option value="idea">Idea</option><option value="capability">Capability</option><option value="experiment">Experiment</option><option value="evidence">Evidence</option><option value="condition">Condition</option></select></label>
+            <label class="agg-search-label">Find node<input id="agg-search" type="search" placeholder="Stable key, claim, node ID…" autocomplete="off"></label>
+            <label class="agg-recovery-toggle"><input id="agg-recovery-filter" type="checkbox"> Include recovery edges</label>
+          </div>
+          <div class="agg-graph-utilitybar" aria-label="Knowledge graph actions"><span id="agg-graph-utility-note">Select a node to inspect its 1-hop neighborhood.</span><div><button type="button" id="agg-neighborhood-toggle" class="small-button" disabled>Focus neighbors</button><button type="button" id="agg-export-svg" class="small-button">Export SVG</button><button type="button" id="agg-export-json" class="small-button">Export JSON</button><button type="button" id="agg-reset-filters" class="small-button">Reset filters</button></div></div>
+          <div class="agg-workspace-grid">
+            <section class="panel agg-graph-panel" aria-labelledby="agg-graph-title">
+              <div class="panel-head agg-graph-head"><div><h2 id="agg-graph-title">Knowledge graph</h2><p id="agg-graph-meta">Nodes and relationships from the local append-only ledger.</p></div><div class="agg-graph-actions"><button type="button" id="agg-zoom-out" class="small-button" aria-label="Zoom out graph">−</button><button type="button" id="agg-zoom-reset" class="small-button">Fit</button><button type="button" id="agg-zoom-in" class="small-button" aria-label="Zoom in graph">+</button></div></div>
+              <div class="agg-legend" id="agg-legend"><span data-type="hypothesis">Hypothesis</span><span data-type="idea">Idea</span><span data-type="capability">Capability</span><span data-type="experiment">Experiment</span><span data-type="evidence">Evidence</span><span data-type="condition">Condition</span></div>
+              <div class="agg-edge-legend" aria-label="Relation type legend"><span data-edge="supports">Supports</span><span data-edge="tested_by">Tested by</span><span data-edge="enables">Enables</span><span data-edge="contradicts">Contradicts</span><span data-edge="alternative_to">Alternative</span><span data-edge="depends_on">Depends on</span><span data-edge="requires_all">Requires all</span><span data-edge="recovers_to">Recovery</span></div>
+              <div id="agg-graph-scroll" class="agg-graph-scroll"><div id="agg-graph-canvas" class="agg-graph-canvas"><div class="agg-empty">Waiting for graph data…</div></div></div>
+              <div class="agg-graph-foot"><span id="agg-visible-count">—</span><span>Scroll horizontally to see every node type. Select a node to inspect revisions, hashes and evidence references.</span></div>
+            </section>
+            <aside class="panel agg-inspector" aria-labelledby="agg-inspector-title"><div class="panel-head"><div><h2 id="agg-inspector-title">Node inspector</h2><p id="agg-inspector-subtitle">Select a graph node to trace it.</p></div></div><div id="agg-node-inspector" class="agg-inspector-body"><div class="agg-empty">Select a node to inspect its revision, SHA-256, memberships, evidence references and provenance.</div></div></aside>
+          </div>
+          <div class="agg-lower-grid">
+            <section class="panel agg-phase-panel"><div class="panel-head"><div><h2>AGG progress signals</h2><p>Observed data surfaces, not a claim that roadmap phases are accepted or complete.</p></div></div><div class="agg-signal-list" id="agg-signal-list"><div class="table-empty">Loading progress signals…</div></div></section>
+            <section class="panel agg-activity-panel"><div class="panel-head"><div><h2>Knowledge ledger activity</h2><p>Recent node revisions and relation additions.</p></div></div><div id="agg-activity-list" class="agg-activity-list"><div class="table-empty">Loading ledger activity…</div></div></section>
           </div>
         </section>
 
@@ -189,7 +273,7 @@
         </section>
 
         <section id="wb-utility-view" class="view-panel hidden" aria-labelledby="wb-utility-heading"><div id="wb-utility-content" class="wb-utility-content"></div></section>
-        <footer class="page-footer"><div>RUNALITH <span class="footer-separator">/</span> LOCAL WORKBENCH</div><div><span class="footer-lock">⌑</span> READ-ONLY <span class="footer-separator">·</span> LOOPBACK ONLY <span class="footer-separator">·</span> <span id="footer-clock">—</span></div></footer>
+        <footer class="page-footer"><div>RUNALITH <span class="footer-separator">/</span> OPERATIONS DASHBOARD</div><div><span class="footer-lock">⌑</span> READ-ONLY <span class="footer-separator">·</span> LOOPBACK ONLY <span class="footer-separator">·</span> <span id="footer-clock">—</span></div></footer>
       </div>
     </main>
   </div>

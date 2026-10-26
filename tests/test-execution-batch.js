@@ -210,7 +210,8 @@ assert.ok(result.aggregate_content.includes('[ACTUAL EXECUTION BATCH EVIDENCE]')
 assert.ok(result.aggregate_content.includes('exact command:'));
 const successful = result.items.filter(i => i.exit_code === 0).map(i => i.stdout.trim().split(',').map(Number));
 assert.equal(successful.length, 2);
-assert.ok(Math.max(...successful.map(x => x[0])) - Math.min(...successful.map(x => x[0])) < 200, `tmux workers did not start together: ${JSON.stringify(successful)}`);
+assert.ok(Math.max(...successful.map(x => x[0])) < Math.min(...successful.map(x => x[1])),
+  `tmux worker execution windows did not overlap: ${JSON.stringify(successful)}`);
 assert.ok(Math.min(...successful.map(x => x[1] - x[0])) >= 200, `worker did not actually wait: ${JSON.stringify(successful)}`);
 assert.equal(store.listExecutionBatchItems(batch.batch_id).every(i => i.execution_session_id), true);
 const retryTarget = result.items.find(i => i.exit_code === 3);

@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ENTRY_POINT="$(node --input-type=module - "$ROOT/package.json" "$ROOT/plugin/manifest.json" <<'NODE'
+import fs from 'node:fs';
+const [packagePath, manifestPath] = process.argv.slice(2);
+const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const entry = pkg.runtimeEntryPoint;
+if (typeof entry !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(entry) || entry.startsWith('/') ||
+    entry.split('/').some(part => !part || part === '.' || part === '..') ||
+    manifest.server?.entry_point !== entry || pkg.version !== manifest.version) {
+  throw new Error('package.json and plugin/manifest.json must agree on a safe versioned runtime entry point and version');
+}
+process.stdout.write(entry);
+NODE
+)"
 assert_regular_source() {
   local relative="$1" current="$ROOT" part index=0
   local -a parts
@@ -20,7 +34,7 @@ assert_regular_source() {
   done
   [[ "$(realpath -e "$current")" == "$current" ]] || { echo "Refusing non-canonical package source: $relative" >&2; exit 2; }
 }
-for SOURCE in README.md LICENSE package.json plugin/manifest.json tests/test-runalith-plugin.js tests/test-production-behavioral-qa.js tests/test-extracted-package-tool-schemas.mjs tests/test-execution-lease-fencing.js tests/test-execution-control-process-boundary.js tests/test-mcp-stdio-backpressure.mjs tests/test-temp-dir.js tests/test-execution-batch.js tests/test-execution-batch-concurrency.js tests/test-execution-batch-terminal-recovery.js tests/test-execution-success-contract.js tests/test-phase5-recovery.js tests/test-agent-tool-guidance.js tests/test-mcp-graceful-signal-shutdown-20261017.js tests/test-mcp-shutdown-backpressure-deadline-20261017.js tests/test-mcp-eof-shutdown-framing-20261017.js scripts/package-runalith-mcpb.sh scripts/collect-plugin-runtime.mjs scripts/plugin-package-metadata.mjs; do
+for SOURCE in README.md LICENSE package.json plugin/manifest.json "$ENTRY_POINT" tests/test-runalith-plugin.js tests/test-production-behavioral-qa.js tests/test-adaptive-goal-current-scope-producer-e2e.mjs tests/test-adaptive-goal-knowledge-verifier.mjs tests/test-adaptive-goal-trust-configuration.mjs tests/test-adaptive-goal-trust-entrypoint.mjs tests/test-adaptive-goal-reviewer-identity.js tests/test-reconcile-active-workflows.mjs scripts/reconcile-active-workflows.mjs tests/test-extracted-package-tool-schemas.mjs tests/test-execution-lease-fencing.js tests/test-execution-control-process-boundary.js tests/test-mcp-stdio-backpressure.mjs tests/test-temp-dir.js tests/test-execution-batch.js tests/test-execution-batch-concurrency.js tests/test-execution-batch-terminal-recovery.js tests/test-execution-success-contract.js tests/test-phase5-recovery.js tests/test-agent-tool-guidance.js tests/test-mcp-graceful-signal-shutdown-20261017.js tests/test-mcp-shutdown-backpressure-deadline-20261017.js tests/test-mcp-eof-shutdown-framing-20261017.js tests/test-adaptive-goal-evidence-lineage.js scripts/package-runalith-mcpb.sh scripts/collect-plugin-runtime.mjs scripts/plugin-package-metadata.mjs scripts/verify-mcpb-source-alignment.mjs benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs; do
   assert_regular_source "$SOURCE"
 done
 
@@ -31,8 +45,15 @@ MANDATORY_VALIDATION_TESTS=(
   tests/test-execution-success-contract.js
   tests/test-phase5-recovery.js
   tests/test-agent-tool-guidance.js
+  tests/test-adaptive-goal-trust-configuration.mjs
+  tests/test-adaptive-goal-trust-entrypoint.mjs
+  tests/test-adaptive-goal-reviewer-identity.js
+  tests/test-reconcile-active-workflows.mjs
+  tests/test-adaptive-goal-knowledge-verifier.mjs
+  tests/test-adaptive-goal-current-scope-producer-e2e.mjs
   tests/test-execution-lease-fencing.js
   tests/test-execution-control-process-boundary.js
+  tests/test-adaptive-goal-evidence-lineage.js
 )
 
 VERSION="$(node -p "require('$ROOT/package.json').version")"
@@ -79,6 +100,12 @@ mkdir -p "$PAYLOAD/tests"
 cp "$ROOT/tests/test-temp-dir.js" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-runalith-plugin.js" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-production-behavioral-qa.js" "$PAYLOAD/tests/"
+cp "$ROOT/tests/test-adaptive-goal-current-scope-producer-e2e.mjs" "$PAYLOAD/tests/"
+cp "$ROOT/tests/test-adaptive-goal-knowledge-verifier.mjs" "$PAYLOAD/tests/"
+cp "$ROOT/tests/test-adaptive-goal-trust-configuration.mjs" "$PAYLOAD/tests/"
+cp "$ROOT/tests/test-reconcile-active-workflows.mjs" "$PAYLOAD/tests/"
+mkdir -p "$PAYLOAD/scripts"
+cp "$ROOT/scripts/reconcile-active-workflows.mjs" "$PAYLOAD/scripts/"
 cp "$ROOT/tests/test-mcp-stdio-backpressure.mjs" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-mcp-graceful-signal-shutdown-20261017.js" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-mcp-shutdown-backpressure-deadline-20261017.js" "$PAYLOAD/tests/"
@@ -105,11 +132,15 @@ find "$PAYLOAD" -exec touch -h -t 198001010000 {} +
   # Feed ZIP a stable, locale-independent file order. Recursive zip traversal
   # can otherwise emit directory entries in filesystem enumeration order even
   # when every payload timestamp and byte is identical.
-  find manifest.json README.md LICENSE package.json server src protocol tests -type f -print \
+  find manifest.json README.md LICENSE package.json server src protocol tests scripts -type f -print \
     | LC_ALL=C sort \
     | zip -X -q "$BUNDLE" -@
 )
 unzip -t "$BUNDLE" >/dev/null
+# Bind every packaged file to the current source bytes (or to the documented
+# package.json projection) before any candidate can be published. This checks
+# the actual ZIP payload and emits the source snapshot digest used in evidence.
+node "$ROOT/scripts/verify-mcpb-source-alignment.mjs" --bundle "$BUNDLE" --source-root "$ROOT"
 # Test the archive's actual payload bytes, not the pre-archive staging tree.
 # A correct staging tree does not prove that the ZIP contains those same bytes
 # or that the extracted entry point/tests still work after packaging.
@@ -120,15 +151,15 @@ for SOURCE in "${MANDATORY_VALIDATION_TESTS[@]}"; do
   [[ -f "$EXTRACTED/$SOURCE" && ! -L "$EXTRACTED/$SOURCE" ]] || { echo "Mandatory validation test missing from extracted MCPB archive: $SOURCE" >&2; exit 2; }
   cmp -s "$ROOT/$SOURCE" "$EXTRACTED/$SOURCE" || { echo "Mandatory validation test bytes differ in extracted MCPB archive: $SOURCE" >&2; exit 2; }
 done
-STRICT_JSON_MODULE="$ROOT/src/runtime/strict-json.js" node --input-type=module - "$BUNDLE" <<'NODE'
+EXPECTED_RUNTIME_ENTRY_POINT="$ENTRY_POINT" STRICT_JSON_MODULE="$ROOT/src/runtime/strict-json.js" node --input-type=module - "$BUNDLE" <<'NODE'
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 const { parseStrictJson } = await import(pathToFileURL(process.env.STRICT_JSON_MODULE));
 const file = process.argv[2];
 const manifest = parseStrictJson(execFileSync('unzip', ['-p', file, 'manifest.json'], { encoding: 'utf8' }), 'candidate package manifest');
-if (manifest.server?.entry_point !== 'server/index.js') throw new Error('bundle manifest entry point mismatch');
-for (const item of ['server/index.js', 'src/runtime/job-store.js', 'src/runtime/execution-manager.js', 'protocol/cos-ap-v1/index.js']) {
+if (manifest.server?.entry_point !== process.env.EXPECTED_RUNTIME_ENTRY_POINT) throw new Error('bundle manifest entry point mismatch');
+for (const item of [process.env.EXPECTED_RUNTIME_ENTRY_POINT, 'server/index.js', 'src/runtime/job-store.js', 'src/runtime/execution-manager.js', 'protocol/cos-ap-v1/index.js']) {
   execFileSync('unzip', ['-p', file, item], { stdio: 'ignore' });
 }
 const entries = execFileSync('unzip', ['-l', file], { encoding: 'utf8' });
@@ -148,6 +179,9 @@ mkdir -p "$SMOKE_DATA_DIR"
 chmod 700 "$SMOKE_DATA_DIR"
 SMOKE_DB_PATH="$SMOKE_DATA_DIR/workflow.db"
 SMOKE_OUTPUT="$(env -u OPENAI_API_KEY \
+  AGG_PHASE2_SHADOW_TOOL_ENABLED=1 \
+  AGG_PHASE3_MCTS_TOOL_ENABLED=1 \
+  AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED=1 \
   RUNALITH_DATA_DIR="$SMOKE_DATA_DIR" \
   RUNALITH_WORKFLOW_DB="$SMOKE_DB_PATH" \
   RUNALITH_EXECUTION_TMP_DIR="$SMOKE_DATA_DIR/runtime" \
@@ -160,16 +194,21 @@ SMOKE_OUTPUT="$(env -u OPENAI_API_KEY \
   EXECUTION_TMP_DIR="$SMOKE_DATA_DIR/runtime" \
   CHAT_ON_STEROIDS_WORKSPACE="$EXTRACTED" \
   WORKFLOW_WORKSPACE="$EXTRACTED" \
-  node "$EXTRACTED/server/index.js" <<'JSONRPC'
+  node "$EXTRACTED/$ENTRY_POINT" <<'JSONRPC'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"bundle-smoke","version":"1"}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
 JSONRPC
 )"
-SMOKE_OUTPUT="$SMOKE_OUTPUT" EXPECTED_MANIFEST="$PAYLOAD/manifest.json" STRICT_JSON_MODULE="$ROOT/src/runtime/strict-json.js" node --input-type=module <<'NODE'
+# The full MCP tools/list JSON now exceeds ARG_MAX when passed in an environment
+# variable. Keep the exact handshake responses in the private staging directory
+# and let the validator read those exact bytes from a file.
+SMOKE_OUTPUT_PATH="$STAGE/mcp-smoke-output.jsonl"
+printf '%s\n' "$SMOKE_OUTPUT" > "$SMOKE_OUTPUT_PATH"
+EXPECTED_MANIFEST="$PAYLOAD/manifest.json" SMOKE_OUTPUT_PATH="$SMOKE_OUTPUT_PATH" STRICT_JSON_MODULE="$ROOT/src/runtime/strict-json.js" node --input-type=module <<'NODE'
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 const { parseStrictJson } = await import(pathToFileURL(process.env.STRICT_JSON_MODULE));
-const lines = process.env.SMOKE_OUTPUT.trim().split(/\r?\n/).map((line, index) => parseStrictJson(line, `MCP smoke response ${index + 1}`));
+const lines = fs.readFileSync(process.env.SMOKE_OUTPUT_PATH, 'utf8').trim().split(/\r?\n/).map((line, index) => parseStrictJson(line, `MCP smoke response ${index + 1}`));
 if (lines.length !== 2 || lines[0].result?.serverInfo?.name !== 'runalith-agent-orchestrator') throw new Error('bundled MCP initialize failed');
 const exposed = lines[1].result?.tools || [];
 const expected = parseStrictJson(fs.readFileSync(process.env.EXPECTED_MANIFEST, 'utf8'), 'source package manifest').tools.map(tool => tool.name);
@@ -184,7 +223,11 @@ NODE
 # Validate the tool schema contract from the exact candidate archive as well
 # as the MCP tool names/count. A candidate must not be published merely because
 # every declared tool name appears while its extracted schema is malformed.
-PHASE2_CANDIDATE_BUNDLE="$BUNDLE" PHASE2_ALLOW_EXTERNAL_CANDIDATE_BUNDLE=1 node "$ROOT/tests/test-extracted-package-tool-schemas.mjs"
+PHASE2_CANDIDATE_BUNDLE="$BUNDLE" PHASE2_ALLOW_EXTERNAL_CANDIDATE_BUNDLE=1 \
+  AGG_PHASE2_SHADOW_TOOL_ENABLED=1 \
+  AGG_PHASE3_MCTS_TOOL_ENABLED=1 \
+  AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED=1 \
+  node "$ROOT/tests/test-extracted-package-tool-schemas.mjs"
 
 # Log an explicit invocation boundary and exit code for each packaged regression.
 # These tests run from extracted archive bytes, never from a source-tree path.
@@ -202,7 +245,17 @@ run_extracted_validation_test() {
   }
   printf 'EXTRACTED_VALIDATION_TEST_BEGIN path=%s context=archive-extracted\n' "$relative"
   local test_status=0
-  if node "$extracted"; then test_status=0; else test_status=$?; fi
+  if [[ "$relative" == "tests/test-mcp-stdio-backpressure.mjs" ]]; then
+    # The package manifest declares the three opt-in AGG tools. Exercise that
+    # full advertised schema surface here; the separate acceptance E2E below
+    # still runs with the default environment and asserts that they stay hidden.
+    if env AGG_PHASE2_SHADOW_TOOL_ENABLED=1 AGG_PHASE3_MCTS_TOOL_ENABLED=1 \
+      AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED=1 node "$extracted"; then
+      test_status=0
+    else
+      test_status=$?
+    fi
+  elif node "$extracted"; then test_status=0; else test_status=$?; fi
   printf 'EXTRACTED_VALIDATION_TEST_EXIT path=%s exit_code=%d context=archive-extracted\n' "$relative" "$test_status"
   return "$test_status"
 }
@@ -212,8 +265,13 @@ run_extracted_validation_test tests/test-mcp-stdio-backpressure.mjs
 run_extracted_validation_test tests/test-mcp-graceful-signal-shutdown-20261017.js
 run_extracted_validation_test tests/test-mcp-shutdown-backpressure-deadline-20261017.js
 run_extracted_validation_test tests/test-mcp-eof-shutdown-framing-20261017.js
+run_extracted_validation_test tests/test-adaptive-goal-trust-configuration.mjs
+run_extracted_validation_test tests/test-adaptive-goal-trust-entrypoint.mjs
+run_extracted_validation_test tests/test-adaptive-goal-reviewer-identity.js
+run_extracted_validation_test tests/test-reconcile-active-workflows.mjs
 
 # Run the complete acceptance workflow against bytes extracted from the exact archive.
+env -u OPENAI_API_KEY node "$EXTRACTED/tests/test-adaptive-goal-current-scope-producer-e2e.mjs"
 env -u OPENAI_API_KEY node "$EXTRACTED/tests/test-runalith-plugin.js"
 
 # Publish only after every package check passes. The hard link is atomic and fails if

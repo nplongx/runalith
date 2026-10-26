@@ -6,12 +6,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtimeManifestPath = ['plugin/manifest.json', 'manifest.json'].map(file => path.join(root, file)).find(file => fs.existsSync(file));
+if (!runtimeManifestPath) throw new Error('runtime manifest is missing');
+const runtimePath = path.join(root, JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8')).server.entry_point);
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cos-shutdown-backpressure-'));
 const dataDir = path.join(temp, 'private-data');
 const workspace = path.join(temp, 'workspace');
 fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 fs.mkdirSync(workspace, { recursive: true, mode: 0o700 });
-const child = spawn(process.execPath, [path.join(root, 'server/index.js')], {
+const child = spawn(process.execPath, [runtimePath], {
   cwd: root,
   env: {
     ...process.env,

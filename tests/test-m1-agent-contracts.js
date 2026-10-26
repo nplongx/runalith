@@ -13,6 +13,10 @@ for (const role of roles) {
   assert.equal(contract.executor, 'ChatOnSteroids');
   assert.ok(contract.capability);
   for (const field of ['inputs', 'outputs', 'permissions', 'allowedTools', 'completionCriteria']) assert.ok(Array.isArray(contract[field]));
+  assert.equal(contract.actionIntentContract.schemaVersion, 1);
+  assert.ok(contract.actionIntentContract.operations.length >= 1);
+  assert.ok(Object.isFrozen(contract.actionIntentContract));
+  assert.ok(Object.isFrozen(contract.actionIntentContract.operations));
   assert.equal(validateAgentContract(contract), true);
   assert.equal(getRoleContract(role).id, contract.id);
 }
@@ -26,6 +30,8 @@ assert.ok(Object.isFrozen(engineer));
 assert.ok(Object.isFrozen(engineer.permissions));
 assert.ok(engineer.permissions.includes('workspace.write'));
 assert.ok(engineer.completionCriteria.includes('approved_scope_implemented'));
+assert.ok(engineer.actionIntentContract.operations.includes('implement'));
+assert.ok(!engineer.actionIntentContract.operations.includes('investigate'));
 
 console.log('M1 AGENT CONTRACTS PASS');
 

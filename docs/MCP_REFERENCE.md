@@ -2,10 +2,10 @@
 
 This page is generated from the shipped stdio MCP server by the documentation generator. It describes registered tool names and input schemas returned by `tools/list`; it does not claim that every tool is safe in every workflow state. Follow the linked guides for lifecycle preconditions, permissions, evidence rules, and limitations.
 
-- Source: `server/index.js` and its runtime schema definitions.
+- Source: `server/index-v1.0.9-rc.11.js` and its runtime schema definitions.
 - Server identity reported by the checked-out source: `runalith-agent-orchestrator`.
-- Source package version reported at generation time: `1.0.9-rc.5`. This is source-runtime metadata, not proof of which bundle is installed in a client.
-- Registered tools: **50**.
+- Source package version reported at generation time: `1.0.9-rc.11`. This is source-runtime metadata, not proof of which bundle is installed in a client.
+- Registered tools: **74**.
 
 ## Choosing the right operation
 
@@ -23,6 +23,30 @@ This page is generated from the shipped stdio MCP server by the documentation ge
 | [`workflow_coordinator_role`](#workflow_coordinator_role) | Read the immutable built-in System Workflow Coordinator role used by the host assistant. It is not a custom role and cannot be created or modified through custom-role tools. | None |
 | [`workflow_coordinator_step`](#workflow_coordinator_step) | Use as the normal high-level lifecycle interface after a proposal exists: it waits for explicit human approval, advances an already-approved workflow, prepares tasks, executes only approved deterministic local steps, and returns the next specialist task or synthesis contract. Submit task_result/synthesis to persist actual work. Do not use it to approve a proposal or bypass gates; use low-level tools for explicit state inspection or a documented recovery path. | `job_id` |
 | [`orchestrator_health`](#orchestrator_health) | Read-only local health check for plugin/storage and local execution readiness. Use before diagnosing local setup problems; it never probes remote services and does not prove an individual workflow's evidence or success gates. | None |
+| [`adaptive_goal_graph_search`](#adaptive_goal_graph_search) | Run bounded, read-only Adaptive Goal Graph nominal-success beam search and project complete candidates into review-only Plan Graph drafts. Returns deterministic expansion/pruning/lineage audit, explicit relation semantics, unverified evidence ledger, and unknown metrics as null. Candidates remain unverified; all execution and approval gates stay disabled. | `graph` |
+| [`adaptive_goal_phase2_shadow_search`](#adaptive_goal_phase2_shadow_search) | Opt-in source-only Phase 2 learned-discriminator beam search. Set AGG_PHASE2_SHADOW_TOOL_ENABLED=1 to expose this tool in tools/list. Uses a caller-supplied self-hash-validated model and returns non-persisted Plan Graph shadow drafts. Model hash is not trusted provenance; metrics are not independently recomputed without examples. Never persists, approves, pins an execution plan, dispatches, or executes. | `graph`, `model` |
+| [`adaptive_goal_phase3_mcts_shadow_search`](#adaptive_goal_phase3_mcts_shadow_search) | Opt-in source-only Phase 3 bounded UCT/MCTS over Idea Graph nominal transitions, guided by the caller-supplied Phase 2 discriminator. Set AGG_PHASE3_MCTS_TOOL_ENABLED=1 only for authorized shadow testing. Returns non-persisted review-only paths; the model self-hash is not trusted provenance, MCTS is non-exhaustive, and no result proves success/safety. Never persists, approves, dispatches, or executes. | `graph`, `model` |
+| [`adaptive_goal_recovery_resolve`](#adaptive_goal_recovery_resolve) | Read-only, outcome-aware recovery recommendation for explicit recovers_to conditions. Requires the observed outcome and declared available prerequisite/evidence nodes; result remains not independently evidence-verified and never authorizes dispatch or execution. | `graph`, `context` |
+| [`adaptive_goal_knowledge_node_save`](#adaptive_goal_knowledge_node_save) | Append or revise an Idea Graph node using a stable cross-goal identity, immutable revision history, canonical content/evidence-reference hash, required provenance, and expected-revision compare-and-swap. Caller-created knowledge always remains unverified and cannot become execution-ready through this tool. | `goal_id`, `stable_key`, `node_type`, `content`, `provenance` |
+| [`adaptive_goal_knowledge_capture_workflow_outcome`](#adaptive_goal_knowledge_capture_workflow_outcome) | Opt-in source-only Phase 4 capture for authorized local testing. Set AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED=1 to expose the tool in tools/list. Captures bounded task/result/artifact metadata from a terminal local workflow and an optional caller-authored unverified lesson; rejects active jobs and malformed/oversized traces. Never verifies knowledge, authorizes execution, or dispatches. | `goal_id`, `job_id` |
+| [`adaptive_goal_knowledge_edge_add`](#adaptive_goal_knowledge_edge_add) | Append a typed Idea Graph relation with provenance and stable edge identity. recovers_to edges require explicit condition and expected-outcome contracts; recovery relations are excluded from ordinary search by default. This tool never verifies claims or grants execution authority. | `goal_id`, `from_id`, `to_id`, `edge_type`, `provenance` |
+| [`adaptive_goal_knowledge_search`](#adaptive_goal_knowledge_search) | Search the shared append-only Idea Graph across goals, including goal/hypothesis/idea/capability/experiment/evidence/condition nodes and cross-goal reuse memberships. This listing does not itself verify claims, current artifact lineage, or independence; use adaptive_goal_knowledge_snapshot_get and adaptive_goal_knowledge_graph_search to check a verifier-signed current snapshot. | None |
+| [`adaptive_goal_knowledge_snapshot_get`](#adaptive_goal_knowledge_snapshot_get) | Read a complete canonical Goal/Idea Graph snapshot: current node revisions/content/provenance, immutable memberships and their provenance, edges/provenance, source references, integrity issues and exact snapshot hash. Resolves evidence through the live durable artifact/source verifiers and returns an explicit signed-attestation request. Hashes prove integrity, not claim truth; without a trusted verifier signature the graph is not eligible for planning. | `goal_id` |
+| [`adaptive_goal_trust_configuration_status`](#adaptive_goal_trust_configuration_status) | Read-only for workflow, graph and approval state; records an observed valid trust configuration version/fingerprint in a separate append-only local ledger to prevent downgrade. Reports config version/fingerprint, public-root fingerprints, validity/revocation and administrator change metadata without exposing PEMs. Flags shared provider IDs or roots across source-verifier and reviewer domains. Configure through the host-supported administrator environment mechanism, never through MCP arguments. | None |
+| [`adaptive_goal_knowledge_snapshot_attest`](#adaptive_goal_knowledge_snapshot_attest) | Persist an externally signed Ed25519 verification for the exact current Goal/Idea Graph snapshot. Requires the configured independent verifier provider/public trust root, current node/revision/edge/membership hashes, and freshly resolved successful producer/result/attempt/completion lineage. Claim truth and evidence independence are accepted only from the trusted signature; payloads from callers cannot self-promote. Uses a transactional append-only ledger with nonce/idempotency checks; never approves or dispatches. | `attestation` |
+| [`adaptive_goal_knowledge_graph_search`](#adaptive_goal_knowledge_graph_search) | Run bounded search using only a freshly revalidated, trusted-attested persisted Goal/Idea Graph, not a caller-supplied graph. Requires the exact snapshot hash and persisted start/goal member IDs. Returns candidates and Plan Graph drafts bound to the current verifier attestation; any changed revision, membership, edge, source bytes, artifact lineage, nonce, signature, or expiry blocks planning. | `goal_id`, `start_node_id`, `goal_node_id`, `expected_snapshot_hash` |
+| [`adaptive_goal_knowledge_node_get`](#adaptive_goal_knowledge_node_get) | Read the current or a specific immutable Idea Graph node revision, including its stable identity, cross-goal memberships, evidence refs, content hash, provenance hash, and unverified status. | `node_id` |
+| [`adaptive_goal_knowledge_node_history`](#adaptive_goal_knowledge_node_history) | Read append-only revision history for a shared Idea Graph node. Each revision preserves its own canonical content/evidence refs/hash/provenance and remains unverified. | `node_id` |
+| [`adaptive_goal_knowledge_recovery_resolve`](#adaptive_goal_knowledge_recovery_resolve) | Read-only outcome-aware recovery check for a persisted Idea Graph recovers_to edge. Requires explicit matching outcome plus active durable artifact evidence whose hash, producer, result, and completion lineage verifies and whose structured content declares the same outcome. Returns review-only routes; never executes, approves, or dispatches. | `goal_id`, `source_node_id`, `observed_outcome`, `evidence_refs` |
+| [`adaptive_goal_plan_compatibility_check`](#adaptive_goal_plan_compatibility_check) | Read-only compatibility assessment for an unverified AGG Plan Graph draft against a compiled supported workflow template using explicit step-to-task bindings. Reports dependency/template blockers only; never creates a workflow proposal, persists a plan, approves, authorizes, dispatches, or executes. | `draft`, `workflow_id`, `task_bindings` |
+| [`adaptive_goal_plan_proposal_create`](#adaptive_goal_plan_proposal_create) | Create a review-only Plan Graph proposal from a freshly revalidated candidate using explicit step-to-task bindings. Legacy graph arguments remain caller-supplied shadow inputs and cannot authorize downstream Execution Graph creation. Verified mode omits graph and supplies knowledge_goal_id/start/goal node IDs plus exact knowledge_snapshot_hash; the runtime rebuilds the graph from its append-only store, verifies the current external attestation and durable evidence lineage, and binds its attestation/snapshot hashes into the draft, fingerprint and durable proposal. Creates a PROPOSED review wrapper only; human approval still does not grant AGG action authority. | `candidate_plan_id`, `workflow_id`, `task_bindings` |
+| [`adaptive_goal_plan_proposal_get`](#adaptive_goal_plan_proposal_get) | Read back and revalidate the exact AGG proposal snapshot (source graph, candidate-derived Plan Graph draft, draft/mapping hashes, and structural template compatibility). Read-only; it does not alter workflow state, approve, dispatch, or execute. | `job_id` |
+| [`adaptive_goal_execution_readiness_check`](#adaptive_goal_execution_readiness_check) | Read-only assessment of explicit AGG action-to-task mappings against immutable role capability/input/output artifact contracts, compiled dependency ancestry, and durable artifact/evidence lineage. It distinguishes contract readiness from source-evidence readiness and never creates an Execution Graph or executable contract, grants permissions, approves, dispatches, or executes. | `draft`, `workflow_id`, `task_bindings` |
+| [`adaptive_goal_execution_graph_proposal_create`](#adaptive_goal_execution_graph_proposal_create) | Create a persisted, review-only Execution Graph proposal from a stored Plan Graph proposal after revalidating its candidate, exact draft/bindings, role/capability contracts, DAG ancestry, active durable artifact/event lineage, producer completion, schema versions and hashes. Requires readiness to pass; otherwise returns stable blockers without writing a job. A successful result creates only a PROPOSED standard-engineering review wrapper, never executable contracts, task rows, approval, dispatch or execution. | `plan_proposal_job_id`, `task_bindings` |
+| [`adaptive_goal_execution_graph_proposal_get`](#adaptive_goal_execution_graph_proposal_get) | Read back and revalidate a stored Execution Graph proposal against its source Plan Graph proposal and current durable artifact evidence. Reports stale hashes, changed workflow contracts or invalidated evidence as stable blockers. Read-only; never pins plans, approves, dispatches or executes. | `job_id` |
+| [`adaptive_goal_execution_plan_candidate_create`](#adaptive_goal_execution_plan_candidate_create) | Validate and persist a review-only execution-plan candidate using the existing workflow compiler, validateExecutionPlan and exact preflight plan hash. The versioned semantic policy checks each role capability, canonical operation, target binding, artifact output type, exact role completion criteria and canonical description; arbitrary/free-form instructions and unresolved targets are rejected. Reviewer identity is not inferred from caller-supplied reviewerId: the candidate remains blocked until a trusted Ed25519 identity provider attestation is durably recorded and verified against the configured public trust root and exact candidate/semantic/role-contract/immutable-plan fingerprints. Candidate creation writes only a bounded candidate event; it never approves, pins workflow_plans, creates tasks, dispatches, grants execution authorization or generates commands/arguments. | `job_id`, `reviewed_action_intents` |
+| [`adaptive_goal_execution_plan_candidate_get`](#adaptive_goal_execution_plan_candidate_get) | Read-only rebuild and revalidation of the persisted review-only candidate, exact action-intent semantics, typed input/evidence/ancestor provenance, role/artifact contracts, current source evidence, compiler and plan hashes. Reports tampering/staleness and trust-root-verified reviewer status. Without a valid, unexpired, replay-free identity-provider attestation bound to the exact candidate and immutable-plan fingerprints, the reviewer identity blocker remains and approval/dispatch/task preparation are denied. This tool does not refresh snapshots, approve, pin plans, create tasks or dispatch. | `job_id` |
+| [`adaptive_goal_sandbox_action_execute`](#adaptive_goal_sandbox_action_execute) | Experimental/test-only executor for one hard-coded, no-network fixture action. Requires a current trust-root-verified reviewer attestation, explicit workflow approval, exact immutable compiler plan, dispatched active workflow, completed task prerequisites, and current typed artifact/result/completion lineage. Executes no caller-supplied command, script, or path. Refuses production mode, missing/tampered evidence, unsupported action, unresolved prior claims, and replay; repeated requests can only read the exact already-verified receipt without re-executing. This tool never grants approval or production execution authority. | `job_id`, `task_id` |
 | [`workflow_catalog`](#workflow_catalog) | Read-only discovery of supported local workflow templates, exact workflow IDs/versions and intended execution modes. Use first when choosing a template; then workflow_create and workflow_preflight. This does not create, approve, or run a workflow. | None |
 | [`workflow_recommend_resources`](#workflow_recommend_resources) | Proactive, read-only discovery for a task goal. Use before creating a substantial workflow even when the user did not name roles, policies, skills, or reusable workflows. Ranks saved custom workflows, custom roles/attached skills, saved policies, and built-in role hints using deterministic Vietnamese/English lexical matching. Prefer compatible high-confidence existing resources over near-duplicates, but inspect contracts and policy scope; lexical scores are hints, not semantic proof. Does not attach policies, bind roles, mutate storage, approve, or execute. | `task` |
 | [`workflow_policy_catalog`](#workflow_policy_catalog) | Read-only discovery of policy predicate types and their real runtime enforcement points. Use before drafting a policy; do not invent predicates or treat a catalog entry as proof a policy is attached/enforced for a particular run. | None |
@@ -235,6 +259,6016 @@ This tool accepts no named input properties.
   "type": "object",
   "properties": {},
   "additionalProperties": false
+}
+```
+
+</details>
+
+### `adaptive_goal_graph_search`
+
+Run bounded, read-only Adaptive Goal Graph nominal-success beam search and project complete candidates into review-only Plan Graph drafts. Returns deterministic expansion/pruning/lineage audit, explicit relation semantics, unverified evidence ledger, and unknown metrics as null. Candidates remain unverified; all execution and approval gates stay disabled.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `graph` | `object` | Yes | — | no additional properties; required fields: `schemaVersion`, `startNodeId`, `goalNodeId`, `nodes`, `edges` |
+| `knowledge_goal_id` | `string` | No | — | minLength: `1`; maxLength: `200` |
+| `knowledge_node_ids` | `array` | No | — | maxItems: `499`; unique items; items: string |
+| `knowledge_bindings` | `array` | No | — | maxItems: `1000`; items: object |
+| `options` | `object` | No | — | no additional properties |
+| `plan_projection_options` | `object` | No | — | no additional properties |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "startNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "goalNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "idea",
+                  "hypothesis",
+                  "candidate",
+                  "experiment",
+                  "capability",
+                  "evidence",
+                  "condition",
+                  "task"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "estimatedCost": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedRisk": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedSuccessConfidence": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "reusePotential": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "informationValue": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "metricProvenance": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "estimatedCost": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedRisk": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedSuccessConfidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "reusePotential": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "informationValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "next_step",
+                  "requires_all",
+                  "depends_on",
+                  "supports",
+                  "alternative_to",
+                  "enables",
+                  "tested_by",
+                  "contradicts",
+                  "recovers_to"
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "onOutcome": {
+                    "type": "string",
+                    "enum": [
+                      "failed",
+                      "blocked",
+                      "verification_failed",
+                      "evidence_missing",
+                      "contradicted"
+                    ]
+                  },
+                  "requiresEvidenceNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  },
+                  "requiresAllNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  }
+                },
+                "required": [
+                  "onOutcome",
+                  "requiresEvidenceNodeIds",
+                  "requiresAllNodeIds"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "startNodeId",
+        "goalNodeId",
+        "nodes",
+        "edges"
+      ]
+    },
+    "knowledge_goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "knowledge_node_ids": {
+      "type": "array",
+      "maxItems": 499,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80,
+        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+      }
+    },
+    "knowledge_bindings": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from_node_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "to_node_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "edge_type": {
+            "type": "string",
+            "enum": [
+              "next_step",
+              "requires_all",
+              "depends_on",
+              "supports",
+              "alternative_to",
+              "enables",
+              "tested_by",
+              "contradicts"
+            ]
+          }
+        },
+        "required": [
+          "from_node_id",
+          "to_node_id",
+          "edge_type"
+        ]
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "beamWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "maxExpansions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "maxAuditEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "initiallyAvailableIds": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        }
+      }
+    },
+    "plan_projection_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dependencyMode": {
+          "type": "string",
+          "enum": [
+            "sequential_path",
+            "source_edges_only"
+          ]
+        }
+      }
+    }
+  },
+  "required": [
+    "graph"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_phase2_shadow_search`
+
+Opt-in source-only Phase 2 learned-discriminator beam search. Set AGG_PHASE2_SHADOW_TOOL_ENABLED=1 to expose this tool in tools/list. Uses a caller-supplied self-hash-validated model and returns non-persisted Plan Graph shadow drafts. Model hash is not trusted provenance; metrics are not independently recomputed without examples. Never persists, approves, pins an execution plan, dispatches, or executes.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `graph` | `object` | Yes | — | no additional properties; required fields: `schemaVersion`, `startNodeId`, `goalNodeId`, `nodes`, `edges` |
+| `model` | `object` | Yes | — | required fields: `schemaVersion`, `featureSchemaVersion`, `modelType`, `modelSha256` |
+| `options` | `object` | No | — | no additional properties |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "startNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "goalNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "idea",
+                  "hypothesis",
+                  "candidate",
+                  "experiment",
+                  "capability",
+                  "evidence",
+                  "condition",
+                  "task"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "estimatedCost": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedRisk": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedSuccessConfidence": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "reusePotential": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "informationValue": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "metricProvenance": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "estimatedCost": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedRisk": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedSuccessConfidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "reusePotential": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "informationValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "next_step",
+                  "requires_all",
+                  "depends_on",
+                  "supports",
+                  "alternative_to",
+                  "enables",
+                  "tested_by",
+                  "contradicts",
+                  "recovers_to"
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "onOutcome": {
+                    "type": "string",
+                    "enum": [
+                      "failed",
+                      "blocked",
+                      "verification_failed",
+                      "evidence_missing",
+                      "contradicted"
+                    ]
+                  },
+                  "requiresEvidenceNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  },
+                  "requiresAllNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  }
+                },
+                "required": [
+                  "onOutcome",
+                  "requiresEvidenceNodeIds",
+                  "requiresAllNodeIds"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "startNodeId",
+        "goalNodeId",
+        "nodes",
+        "edges"
+      ]
+    },
+    "model": {
+      "type": "object",
+      "maxProperties": 20,
+      "additionalProperties": true,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            2
+          ]
+        },
+        "featureSchemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "modelType": {
+          "type": "string",
+          "enum": [
+            "standardized-logistic-regression"
+          ]
+        },
+        "modelSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "featureSchemaVersion",
+        "modelType",
+        "modelSha256"
+      ]
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 40
+        },
+        "beamWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "maxExpansions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        },
+        "maxAuditEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "initiallyAvailableIds": {
+          "type": "array",
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "graph",
+    "model"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_phase3_mcts_shadow_search`
+
+Opt-in source-only Phase 3 bounded UCT/MCTS over Idea Graph nominal transitions, guided by the caller-supplied Phase 2 discriminator. Set AGG_PHASE3_MCTS_TOOL_ENABLED=1 only for authorized shadow testing. Returns non-persisted review-only paths; the model self-hash is not trusted provenance, MCTS is non-exhaustive, and no result proves success/safety. Never persists, approves, dispatches, or executes.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `graph` | `object` | Yes | — | no additional properties; required fields: `schemaVersion`, `startNodeId`, `goalNodeId`, `nodes`, `edges` |
+| `model` | `object` | Yes | — | required fields: `schemaVersion`, `featureSchemaVersion`, `modelType`, `modelSha256` |
+| `options` | `object` | No | — | no additional properties |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "startNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "goalNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "idea",
+                  "hypothesis",
+                  "candidate",
+                  "experiment",
+                  "capability",
+                  "evidence",
+                  "condition",
+                  "task"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "estimatedCost": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedRisk": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedSuccessConfidence": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "reusePotential": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "informationValue": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "metricProvenance": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "estimatedCost": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedRisk": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedSuccessConfidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "reusePotential": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "informationValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "next_step",
+                  "requires_all",
+                  "depends_on",
+                  "supports",
+                  "alternative_to",
+                  "enables",
+                  "tested_by",
+                  "contradicts",
+                  "recovers_to"
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "onOutcome": {
+                    "type": "string",
+                    "enum": [
+                      "failed",
+                      "blocked",
+                      "verification_failed",
+                      "evidence_missing",
+                      "contradicted"
+                    ]
+                  },
+                  "requiresEvidenceNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  },
+                  "requiresAllNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  }
+                },
+                "required": [
+                  "onOutcome",
+                  "requiresEvidenceNodeIds",
+                  "requiresAllNodeIds"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "startNodeId",
+        "goalNodeId",
+        "nodes",
+        "edges"
+      ]
+    },
+    "model": {
+      "type": "object",
+      "maxProperties": 20,
+      "additionalProperties": true,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            2
+          ]
+        },
+        "featureSchemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "modelType": {
+          "type": "string",
+          "enum": [
+            "standardized-logistic-regression"
+          ]
+        },
+        "modelSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "featureSchemaVersion",
+        "modelType",
+        "modelSha256"
+      ]
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxSimulations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 40
+        },
+        "maxExpansions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        },
+        "maxWorkUnits": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 250000
+        },
+        "maxAuditEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "candidateLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "maxTreeNodes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        },
+        "maxTerminalPaths": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "explorationConstant": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "initiallyAvailableIds": {
+          "type": "array",
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "graph",
+    "model"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_recovery_resolve`
+
+Read-only, outcome-aware recovery recommendation for explicit recovers_to conditions. Requires the observed outcome and declared available prerequisite/evidence nodes; result remains not independently evidence-verified and never authorizes dispatch or execution.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `graph` | `object` | Yes | — | no additional properties; required fields: `schemaVersion`, `startNodeId`, `goalNodeId`, `nodes`, `edges` |
+| `context` | `object` | Yes | — | no additional properties; required fields: `sourceNodeId`, `outcome`, `availableNodeIds`, `availableEvidenceNodeIds` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "startNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "goalNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "idea",
+                  "hypothesis",
+                  "candidate",
+                  "experiment",
+                  "capability",
+                  "evidence",
+                  "condition",
+                  "task"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "estimatedCost": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedRisk": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedSuccessConfidence": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "reusePotential": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "informationValue": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "metricProvenance": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "estimatedCost": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedRisk": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedSuccessConfidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "reusePotential": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "informationValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "next_step",
+                  "requires_all",
+                  "depends_on",
+                  "supports",
+                  "alternative_to",
+                  "enables",
+                  "tested_by",
+                  "contradicts",
+                  "recovers_to"
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "onOutcome": {
+                    "type": "string",
+                    "enum": [
+                      "failed",
+                      "blocked",
+                      "verification_failed",
+                      "evidence_missing",
+                      "contradicted"
+                    ]
+                  },
+                  "requiresEvidenceNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  },
+                  "requiresAllNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  }
+                },
+                "required": [
+                  "onOutcome",
+                  "requiresEvidenceNodeIds",
+                  "requiresAllNodeIds"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "startNodeId",
+        "goalNodeId",
+        "nodes",
+        "edges"
+      ]
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "failed",
+            "blocked",
+            "verification_failed",
+            "evidence_missing",
+            "contradicted"
+          ]
+        },
+        "availableNodeIds": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        },
+        "availableEvidenceNodeIds": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        }
+      },
+      "required": [
+        "sourceNodeId",
+        "outcome",
+        "availableNodeIds",
+        "availableEvidenceNodeIds"
+      ]
+    }
+  },
+  "required": [
+    "graph",
+    "context"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_node_save`
+
+Append or revise an Idea Graph node using a stable cross-goal identity, immutable revision history, canonical content/evidence-reference hash, required provenance, and expected-revision compare-and-swap. Caller-created knowledge always remains unverified and cannot become execution-ready through this tool.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `goal_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `stable_key` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `node_type` | `string` | Yes | — | enum: `goal`, `hypothesis`, `idea`, `capability`, `experiment`, `evidence`, `condition` |
+| `content` | `object` | Yes | — | — |
+| `provenance` | `object` | Yes | — | no additional properties; required fields: `source`, `actor` |
+| `expected_revision` | `integer` | No | — | minimum: `0` |
+| `evidence_refs` | `array` | No | — | maxItems: `64`; items: string |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "stable_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "node_type": {
+      "type": "string",
+      "enum": [
+        "goal",
+        "hypothesis",
+        "idea",
+        "capability",
+        "experiment",
+        "evidence",
+        "condition"
+      ]
+    },
+    "content": {
+      "type": "object",
+      "additionalProperties": true,
+      "maxProperties": 256
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "actor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "source",
+        "actor"
+      ]
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2048
+      }
+    }
+  },
+  "required": [
+    "goal_id",
+    "stable_key",
+    "node_type",
+    "content",
+    "provenance"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_capture_workflow_outcome`
+
+Opt-in source-only Phase 4 capture for authorized local testing. Set AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED=1 to expose the tool in tools/list. Captures bounded task/result/artifact metadata from a terminal local workflow and an optional caller-authored unverified lesson; rejects active jobs and malformed/oversized traces. Never verifies knowledge, authorizes execution, or dispatches.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `goal_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `lesson` | `string` | No | — | minLength: `1`; maxLength: `2000` |
+| `expected_revision` | `integer` | No | — | minimum: `0` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "lesson": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "expected_revision": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "goal_id",
+    "job_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_edge_add`
+
+Append a typed Idea Graph relation with provenance and stable edge identity. recovers_to edges require explicit condition and expected-outcome contracts; recovery relations are excluded from ordinary search by default. This tool never verifies claims or grants execution authority.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `goal_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `from_id` | `string` | Yes | — | minLength: `1`; maxLength: `128` |
+| `to_id` | `string` | Yes | — | minLength: `1`; maxLength: `128` |
+| `edge_type` | `string` | Yes | — | enum: `supports`, `tested_by`, `enables`, `contradicts`, `alternative_to`, `recovers_to`, `depends_on`, `requires_all` |
+| `provenance` | `object` | Yes | — | no additional properties; required fields: `source`, `actor` |
+| `condition` | `object` | No | — | no additional properties; required fields: `when`, `predicate` |
+| `outcome` | `object` | No | — | no additional properties; required fields: `state`, `effects`, `evidenceRefs` |
+| `evidence_refs` | `array` | No | — | maxItems: `64`; items: string |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "from_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "to_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "edge_type": {
+      "type": "string",
+      "enum": [
+        "supports",
+        "tested_by",
+        "enables",
+        "contradicts",
+        "alternative_to",
+        "recovers_to",
+        "depends_on",
+        "requires_all"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "actor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "source",
+        "actor"
+      ]
+    },
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "when": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "predicate": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "when",
+        "predicate"
+      ]
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240
+        },
+        "effects": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        }
+      },
+      "required": [
+        "state",
+        "effects",
+        "evidenceRefs"
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2048
+      }
+    }
+  },
+  "required": [
+    "goal_id",
+    "from_id",
+    "to_id",
+    "edge_type",
+    "provenance"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_search`
+
+Search the shared append-only Idea Graph across goals, including goal/hypothesis/idea/capability/experiment/evidence/condition nodes and cross-goal reuse memberships. This listing does not itself verify claims, current artifact lineage, or independence; use adaptive_goal_knowledge_snapshot_get and adaptive_goal_knowledge_graph_search to check a verifier-signed current snapshot.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `goal_id` | `string` | No | — | minLength: `1`; maxLength: `200` |
+| `node_type` | `string` | No | — | enum: `goal`, `hypothesis`, `idea`, `capability`, `experiment`, `evidence`, `condition` |
+| `query` | `string` | No | — | minLength: `1`; maxLength: `512` |
+| `include_unverified` | `boolean` | No | — | — |
+| `include_recovery_edges` | `boolean` | No | — | — |
+| `limit` | `integer` | No | — | minimum: `1`; maximum: `500` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "node_type": {
+      "type": "string",
+      "enum": [
+        "goal",
+        "hypothesis",
+        "idea",
+        "capability",
+        "experiment",
+        "evidence",
+        "condition"
+      ]
+    },
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "include_unverified": {
+      "type": "boolean"
+    },
+    "include_recovery_edges": {
+      "type": "boolean"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500
+    }
+  }
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_snapshot_get`
+
+Read a complete canonical Goal/Idea Graph snapshot: current node revisions/content/provenance, immutable memberships and their provenance, edges/provenance, source references, integrity issues and exact snapshot hash. Resolves evidence through the live durable artifact/source verifiers and returns an explicit signed-attestation request. Hashes prove integrity, not claim truth; without a trusted verifier signature the graph is not eligible for planning.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `goal_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "goal_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_trust_configuration_status`
+
+Read-only for workflow, graph and approval state; records an observed valid trust configuration version/fingerprint in a separate append-only local ledger to prevent downgrade. Reports config version/fingerprint, public-root fingerprints, validity/revocation and administrator change metadata without exposing PEMs. Flags shared provider IDs or roots across source-verifier and reviewer domains. Configure through the host-supported administrator environment mechanism, never through MCP arguments.
+
+This tool accepts no named input properties.
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_snapshot_attest`
+
+Persist an externally signed Ed25519 verification for the exact current Goal/Idea Graph snapshot. Requires the configured independent verifier provider/public trust root, current node/revision/edge/membership hashes, and freshly resolved successful producer/result/attempt/completion lineage. Claim truth and evidence independence are accepted only from the trusted signature; payloads from callers cannot self-promote. Uses a transactional append-only ledger with nonce/idempotency checks; never approves or dispatches.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `attestation` | `object` | Yes | — | no additional properties; required fields: `schema_version`, `kind`, `provider_id`, `trust_root_sha256`, `nonce`, `issued_at`, `expires_at`, `scope`, `goal_id`, `snapshot_hash`, `node_ids`, `edge_ids`, `membership_ids`, `evidence_manifest_hash`, `claim_status`, `independence_status`, `signature_algorithm`, `signature` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "adaptive_goal_verified_knowledge_graph_attestation"
+          ]
+        },
+        "provider_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "trust_root_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "nonce": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "agg.goal_idea_graph.verify"
+          ]
+        },
+        "goal_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "snapshot_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "node_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "edge_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2000,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "membership_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 10000,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 400
+          }
+        },
+        "evidence_manifest_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "claim_status": {
+          "type": "string",
+          "enum": [
+            "verified"
+          ]
+        },
+        "independence_status": {
+          "type": "string",
+          "enum": [
+            "verified"
+          ]
+        },
+        "signature_algorithm": {
+          "type": "string",
+          "enum": [
+            "Ed25519"
+          ]
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 80,
+          "maxLength": 512,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "provider_id",
+        "trust_root_sha256",
+        "nonce",
+        "issued_at",
+        "expires_at",
+        "scope",
+        "goal_id",
+        "snapshot_hash",
+        "node_ids",
+        "edge_ids",
+        "membership_ids",
+        "evidence_manifest_hash",
+        "claim_status",
+        "independence_status",
+        "signature_algorithm",
+        "signature"
+      ]
+    }
+  },
+  "required": [
+    "attestation"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_graph_search`
+
+Run bounded search using only a freshly revalidated, trusted-attested persisted Goal/Idea Graph, not a caller-supplied graph. Requires the exact snapshot hash and persisted start/goal member IDs. Returns candidates and Plan Graph drafts bound to the current verifier attestation; any changed revision, membership, edge, source bytes, artifact lineage, nonce, signature, or expiry blocks planning.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `goal_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `start_node_id` | `string` | Yes | — | pattern: `^agk-[a-f0-9]{40}$` |
+| `goal_node_id` | `string` | Yes | — | pattern: `^agk-[a-f0-9]{40}$` |
+| `expected_snapshot_hash` | `string` | Yes | — | pattern: `^[a-f0-9]{64}$` |
+| `options` | `object` | No | — | no additional properties |
+| `plan_projection_options` | `object` | No | — | no additional properties |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "start_node_id": {
+      "type": "string",
+      "pattern": "^agk-[a-f0-9]{40}$"
+    },
+    "goal_node_id": {
+      "type": "string",
+      "pattern": "^agk-[a-f0-9]{40}$"
+    },
+    "expected_snapshot_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "beamWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "maxExpansions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "maxAuditEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "initiallyAvailableIds": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        }
+      }
+    },
+    "plan_projection_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dependencyMode": {
+          "type": "string",
+          "enum": [
+            "sequential_path",
+            "source_edges_only"
+          ]
+        }
+      }
+    }
+  },
+  "required": [
+    "goal_id",
+    "start_node_id",
+    "goal_node_id",
+    "expected_snapshot_hash"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_node_get`
+
+Read the current or a specific immutable Idea Graph node revision, including its stable identity, cross-goal memberships, evidence refs, content hash, provenance hash, and unverified status.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `node_id` | `string` | Yes | — | minLength: `1`; maxLength: `128` |
+| `revision` | `integer` | No | — | minimum: `1` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_node_history`
+
+Read append-only revision history for a shared Idea Graph node. Each revision preserves its own canonical content/evidence refs/hash/provenance and remains unverified.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `node_id` | `string` | Yes | — | minLength: `1`; maxLength: `128` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    }
+  },
+  "required": [
+    "node_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_knowledge_recovery_resolve`
+
+Read-only outcome-aware recovery check for a persisted Idea Graph recovers_to edge. Requires explicit matching outcome plus active durable artifact evidence whose hash, producer, result, and completion lineage verifies and whose structured content declares the same outcome. Returns review-only routes; never executes, approves, or dispatches.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `goal_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `source_node_id` | `string` | Yes | — | minLength: `1`; maxLength: `128` |
+| `observed_outcome` | `string` | Yes | — | enum: `failed`, `blocked`, `verification_failed`, `evidence_missing`, `contradicted` |
+| `evidence_refs` | `array` | Yes | — | minItems: `1`; maxItems: `64`; items: string |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "source_node_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "observed_outcome": {
+      "type": "string",
+      "enum": [
+        "failed",
+        "blocked",
+        "verification_failed",
+        "evidence_missing",
+        "contradicted"
+      ]
+    },
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2048
+      }
+    }
+  },
+  "required": [
+    "goal_id",
+    "source_node_id",
+    "observed_outcome",
+    "evidence_refs"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_plan_compatibility_check`
+
+Read-only compatibility assessment for an unverified AGG Plan Graph draft against a compiled supported workflow template using explicit step-to-task bindings. Reports dependency/template blockers only; never creates a workflow proposal, persists a plan, approves, authorizes, dispatches, or executes.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `draft` | `object` | Yes | — | no additional properties; required fields: `schemaVersion`, `kind`, `status`, `source`, `goal`, `sourcePathNodeIds`, `contextNodes`, `steps`, `gates`, `draftHash` |
+| `workflow_id` | `string` | Yes | — | minLength: `1`; maxLength: `80`; pattern: `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$` |
+| `task_bindings` | `array` | Yes | — | maxItems: `500`; items: object |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "adaptive_goal_plan_graph_draft"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "review_required"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "shadow"
+              ]
+            },
+            "graphHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "candidatePlanId": {
+              "type": "string",
+              "pattern": "^agg-[a-f0-9]{24}$"
+            },
+            "candidateStatus": {
+              "type": "string",
+              "enum": [
+                "proposed"
+              ]
+            },
+            "verification": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "unverified"
+                      ]
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "verified"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified"
+                      ]
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "providerId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "attestationId": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "trustRootSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "snapshotHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "evidenceManifestHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "issuedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "claimVerified": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "independenceVerified": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "verifiedNodeCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "verifiedEdgeCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "verifiedMembershipCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "verified",
+                    "providerId",
+                    "attestationId",
+                    "trustRootSha256",
+                    "snapshotHash",
+                    "evidenceManifestHash",
+                    "issuedAt",
+                    "expiresAt",
+                    "claimVerified",
+                    "independenceVerified",
+                    "verifiedNodeCount",
+                    "verifiedEdgeCount",
+                    "verifiedMembershipCount"
+                  ]
+                }
+              ]
+            },
+            "searchStatus": {
+              "type": "string",
+              "enum": [
+                "proposals_found",
+                "budget_exhausted",
+                "max_depth_reached"
+              ]
+            },
+            "searchExhaustive": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "graphHash",
+            "candidatePlanId",
+            "candidateStatus",
+            "verification",
+            "searchStatus",
+            "searchExhaustive"
+          ]
+        },
+        "goal": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "nodeId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 80
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "nodeId"
+          ]
+        },
+        "sourcePathNodeIds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 80
+          }
+        },
+        "contextNodes": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 80
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "idea",
+                  "hypothesis",
+                  "candidate",
+                  "capability",
+                  "evidence",
+                  "condition"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "supportingEvidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "evidenceAssessment": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "missing",
+                      "placeholder_only",
+                      "declared_unverified"
+                    ]
+                  },
+                  "references": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "classification": {
+                          "type": "string",
+                          "enum": [
+                            "placeholder_not_evidence",
+                            "content_addressed_source_unverified",
+                            "durable_artifact_unverified",
+                            "unresolved_reference"
+                          ]
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reference",
+                        "classification",
+                        "verified"
+                      ]
+                    }
+                  },
+                  "verifiedReferenceCount": {
+                    "type": "integer",
+                    "enum": [
+                      0
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "references",
+                  "verifiedReferenceCount"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "supportingEvidenceRefs"
+            ]
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^agg-step-[a-f0-9]{24}$",
+                "maxLength": 80
+              },
+              "sourceNodeId": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 80
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "task",
+                  "experiment"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "dependencies": {
+                "type": "array",
+                "maxItems": 500,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^agg-step-[a-f0-9]{24}$",
+                  "maxLength": 80
+                }
+              },
+              "estimates": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "cost": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000000000
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "risk": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "successConfidence": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "reusePotential": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "informationValue": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "metricProvenance": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "estimatedCost": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "estimatedRisk": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "estimatedSuccessConfidence": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "reusePotential": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "informationValue": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "estimatedCost",
+                      "estimatedRisk",
+                      "estimatedSuccessConfidence",
+                      "reusePotential",
+                      "informationValue"
+                    ]
+                  }
+                },
+                "required": [
+                  "cost",
+                  "risk",
+                  "successConfidence"
+                ]
+              },
+              "supportingEvidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "evidenceAssessment": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "missing",
+                      "placeholder_only",
+                      "declared_unverified"
+                    ]
+                  },
+                  "references": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "classification": {
+                          "type": "string",
+                          "enum": [
+                            "placeholder_not_evidence",
+                            "content_addressed_source_unverified",
+                            "durable_artifact_unverified",
+                            "unresolved_reference"
+                          ]
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reference",
+                        "classification",
+                        "verified"
+                      ]
+                    }
+                  },
+                  "verifiedReferenceCount": {
+                    "type": "integer",
+                    "enum": [
+                      0
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "references",
+                  "verifiedReferenceCount"
+                ]
+              },
+              "execution": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "enum": [
+                      false
+                    ]
+                  },
+                  "authorization": {
+                    "type": "string",
+                    "enum": [
+                      "none"
+                    ]
+                  },
+                  "executable": {
+                    "enum": [
+                      null
+                    ]
+                  },
+                  "args": {
+                    "enum": [
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "authorization",
+                  "executable",
+                  "args"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "proposed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "sourceNodeId",
+              "kind",
+              "title",
+              "dependencies",
+              "estimates",
+              "supportingEvidenceRefs",
+              "execution",
+              "status"
+            ]
+          }
+        },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "humanReviewRequired": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "workflowApprovalRequired": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "immutableExecutionPlanCreated": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            },
+            "dispatchAllowed": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            },
+            "executionAuthorized": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "humanReviewRequired",
+            "workflowApprovalRequired",
+            "immutableExecutionPlanCreated",
+            "dispatchAllowed",
+            "executionAuthorized"
+          ]
+        },
+        "draftHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "kind",
+        "status",
+        "source",
+        "goal",
+        "sourcePathNodeIds",
+        "contextNodes",
+        "steps",
+        "gates",
+        "draftHash"
+      ]
+    },
+    "workflow_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "task_bindings": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string",
+            "pattern": "^agg-step-[a-f0-9]{24}$",
+            "maxLength": 80
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        },
+        "required": [
+          "step_id",
+          "task_id"
+        ]
+      }
+    }
+  },
+  "required": [
+    "draft",
+    "workflow_id",
+    "task_bindings"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_plan_proposal_create`
+
+Create a review-only Plan Graph proposal from a freshly revalidated candidate using explicit step-to-task bindings. Legacy graph arguments remain caller-supplied shadow inputs and cannot authorize downstream Execution Graph creation. Verified mode omits graph and supplies knowledge_goal_id/start/goal node IDs plus exact knowledge_snapshot_hash; the runtime rebuilds the graph from its append-only store, verifies the current external attestation and durable evidence lineage, and binds its attestation/snapshot hashes into the draft, fingerprint and durable proposal. Creates a PROPOSED review wrapper only; human approval still does not grant AGG action authority.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `graph` | `object` | No | — | no additional properties; required fields: `schemaVersion`, `startNodeId`, `goalNodeId`, `nodes`, `edges` |
+| `knowledge_goal_id` | `string` | No | — | minLength: `1`; maxLength: `200` |
+| `knowledge_start_node_id` | `string` | No | — | pattern: `^agk-[a-f0-9]{40}$` |
+| `knowledge_goal_node_id` | `string` | No | — | pattern: `^agk-[a-f0-9]{40}$` |
+| `knowledge_snapshot_hash` | `string` | No | — | pattern: `^[a-f0-9]{64}$` |
+| `candidate_plan_id` | `string` | Yes | — | maxLength: `80`; pattern: `^agg-[a-f0-9]{24}$` |
+| `options` | `object` | No | — | no additional properties |
+| `plan_projection_options` | `object` | No | — | no additional properties |
+| `workflow_id` | `string` | Yes | — | enum: `standard-engineering`, `hybrid-engineering`, `engineering`, `production` |
+| `task_bindings` | `array` | Yes | — | maxItems: `500`; items: object |
+| `workspace` | `string` | No | — | minLength: `1`; maxLength: `2000` |
+| `title` | `string` | No | — | minLength: `1`; maxLength: `140` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "graph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "startNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "goalNodeId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "idea",
+                  "hypothesis",
+                  "candidate",
+                  "experiment",
+                  "capability",
+                  "evidence",
+                  "condition",
+                  "task"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "estimatedCost": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1000000000
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedRisk": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "estimatedSuccessConfidence": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "reusePotential": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "informationValue": {
+                "oneOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  {
+                    "enum": [
+                      null
+                    ]
+                  }
+                ]
+              },
+              "metricProvenance": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "estimatedCost": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedRisk": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "estimatedSuccessConfidence": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "reusePotential": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "informationValue": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "maxLength": 240
+                      },
+                      "sourceRefs": {
+                        "type": "array",
+                        "maxItems": 16,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        }
+                      },
+                      "confidence": {
+                        "oneOf": [
+                          {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          {
+                            "enum": [
+                              null
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "next_step",
+                  "requires_all",
+                  "depends_on",
+                  "supports",
+                  "alternative_to",
+                  "enables",
+                  "tested_by",
+                  "contradicts",
+                  "recovers_to"
+                ]
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "onOutcome": {
+                    "type": "string",
+                    "enum": [
+                      "failed",
+                      "blocked",
+                      "verification_failed",
+                      "evidence_missing",
+                      "contradicted"
+                    ]
+                  },
+                  "requiresEvidenceNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  },
+                  "requiresAllNodeIds": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80,
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    }
+                  }
+                },
+                "required": [
+                  "onOutcome",
+                  "requiresEvidenceNodeIds",
+                  "requiresAllNodeIds"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "type"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "startNodeId",
+        "goalNodeId",
+        "nodes",
+        "edges"
+      ]
+    },
+    "knowledge_goal_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "knowledge_start_node_id": {
+      "type": "string",
+      "pattern": "^agk-[a-f0-9]{40}$"
+    },
+    "knowledge_goal_node_id": {
+      "type": "string",
+      "pattern": "^agk-[a-f0-9]{40}$"
+    },
+    "knowledge_snapshot_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "candidate_plan_id": {
+      "type": "string",
+      "pattern": "^agg-[a-f0-9]{24}$",
+      "maxLength": 80
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "beamWidth": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "maxExpansions": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "maxAuditEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000
+        },
+        "initiallyAvailableIds": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        }
+      }
+    },
+    "plan_projection_options": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "dependencyMode": {
+          "type": "string",
+          "enum": [
+            "sequential_path",
+            "source_edges_only"
+          ]
+        }
+      }
+    },
+    "workflow_id": {
+      "type": "string",
+      "enum": [
+        "standard-engineering",
+        "hybrid-engineering",
+        "engineering",
+        "production"
+      ]
+    },
+    "task_bindings": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string",
+            "pattern": "^agg-step-[a-f0-9]{24}$",
+            "maxLength": 80
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          }
+        },
+        "required": [
+          "step_id",
+          "task_id"
+        ]
+      }
+    },
+    "workspace": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 140
+    }
+  },
+  "oneOf": [
+    {
+      "required": [
+        "graph"
+      ]
+    },
+    {
+      "required": [
+        "knowledge_goal_id",
+        "knowledge_start_node_id",
+        "knowledge_goal_node_id",
+        "knowledge_snapshot_hash"
+      ]
+    }
+  ],
+  "required": [
+    "candidate_plan_id",
+    "workflow_id",
+    "task_bindings"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_plan_proposal_get`
+
+Read back and revalidate the exact AGG proposal snapshot (source graph, candidate-derived Plan Graph draft, draft/mapping hashes, and structural template compatibility). Read-only; it does not alter workflow state, approve, dispatch, or execute.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "job_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_execution_readiness_check`
+
+Read-only assessment of explicit AGG action-to-task mappings against immutable role capability/input/output artifact contracts, compiled dependency ancestry, and durable artifact/evidence lineage. It distinguishes contract readiness from source-evidence readiness and never creates an Execution Graph or executable contract, grants permissions, approves, dispatches, or executes.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `draft` | `object` | Yes | — | no additional properties; required fields: `schemaVersion`, `kind`, `status`, `source`, `goal`, `sourcePathNodeIds`, `contextNodes`, `steps`, `gates`, `draftHash` |
+| `workflow_id` | `string` | Yes | — | enum: `standard-engineering`, `hybrid-engineering`, `engineering`, `production` |
+| `task_bindings` | `array` | Yes | — | maxItems: `500`; items: object |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "adaptive_goal_plan_graph_draft"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "review_required"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "shadow"
+              ]
+            },
+            "graphHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "candidatePlanId": {
+              "type": "string",
+              "pattern": "^agg-[a-f0-9]{24}$"
+            },
+            "candidateStatus": {
+              "type": "string",
+              "enum": [
+                "proposed"
+              ]
+            },
+            "verification": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "unverified"
+                      ]
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "verified"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "verified"
+                      ]
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "providerId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "attestationId": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "trustRootSha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "snapshotHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "evidenceManifestHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "issuedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "claimVerified": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "independenceVerified": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "verifiedNodeCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "verifiedEdgeCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "verifiedMembershipCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "verified",
+                    "providerId",
+                    "attestationId",
+                    "trustRootSha256",
+                    "snapshotHash",
+                    "evidenceManifestHash",
+                    "issuedAt",
+                    "expiresAt",
+                    "claimVerified",
+                    "independenceVerified",
+                    "verifiedNodeCount",
+                    "verifiedEdgeCount",
+                    "verifiedMembershipCount"
+                  ]
+                }
+              ]
+            },
+            "searchStatus": {
+              "type": "string",
+              "enum": [
+                "proposals_found",
+                "budget_exhausted",
+                "max_depth_reached"
+              ]
+            },
+            "searchExhaustive": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mode",
+            "graphHash",
+            "candidatePlanId",
+            "candidateStatus",
+            "verification",
+            "searchStatus",
+            "searchExhaustive"
+          ]
+        },
+        "goal": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "nodeId": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "maxLength": 80
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "nodeId"
+          ]
+        },
+        "sourcePathNodeIds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 500,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 80
+          }
+        },
+        "contextNodes": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 80
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "goal",
+                  "idea",
+                  "hypothesis",
+                  "candidate",
+                  "capability",
+                  "evidence",
+                  "condition"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "supportingEvidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "evidenceAssessment": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "missing",
+                      "placeholder_only",
+                      "declared_unverified"
+                    ]
+                  },
+                  "references": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "classification": {
+                          "type": "string",
+                          "enum": [
+                            "placeholder_not_evidence",
+                            "content_addressed_source_unverified",
+                            "durable_artifact_unverified",
+                            "unresolved_reference"
+                          ]
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reference",
+                        "classification",
+                        "verified"
+                      ]
+                    }
+                  },
+                  "verifiedReferenceCount": {
+                    "type": "integer",
+                    "enum": [
+                      0
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "references",
+                  "verifiedReferenceCount"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "supportingEvidenceRefs"
+            ]
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 500,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^agg-step-[a-f0-9]{24}$",
+                "maxLength": 80
+              },
+              "sourceNodeId": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 80
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "task",
+                  "experiment"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "dependencies": {
+                "type": "array",
+                "maxItems": 500,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^agg-step-[a-f0-9]{24}$",
+                  "maxLength": 80
+                }
+              },
+              "estimates": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "cost": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1000000000
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "risk": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "successConfidence": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "reusePotential": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "informationValue": {
+                    "oneOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "enum": [
+                          null
+                        ]
+                      }
+                    ]
+                  },
+                  "metricProvenance": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "estimatedCost": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "estimatedRisk": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "estimatedSuccessConfidence": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "reusePotential": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      },
+                      "informationValue": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": [
+                              "unknown",
+                              "caller_estimate_unverified"
+                            ]
+                          },
+                          "method": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "maxLength": 240
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "sourceRefs": {
+                            "type": "array",
+                            "maxItems": 16,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 512
+                            }
+                          },
+                          "confidence": {
+                            "oneOf": [
+                              {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                              },
+                              {
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            ]
+                          },
+                          "provenanceVerified": {
+                            "type": "boolean",
+                            "enum": [
+                              false
+                            ]
+                          }
+                        },
+                        "required": [
+                          "classification",
+                          "method",
+                          "sourceRefs",
+                          "confidence",
+                          "provenanceVerified"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "estimatedCost",
+                      "estimatedRisk",
+                      "estimatedSuccessConfidence",
+                      "reusePotential",
+                      "informationValue"
+                    ]
+                  }
+                },
+                "required": [
+                  "cost",
+                  "risk",
+                  "successConfidence"
+                ]
+              },
+              "supportingEvidenceRefs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                }
+              },
+              "evidenceAssessment": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "missing",
+                      "placeholder_only",
+                      "declared_unverified"
+                    ]
+                  },
+                  "references": {
+                    "type": "array",
+                    "maxItems": 64,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "reference": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 512
+                        },
+                        "classification": {
+                          "type": "string",
+                          "enum": [
+                            "placeholder_not_evidence",
+                            "content_addressed_source_unverified",
+                            "durable_artifact_unverified",
+                            "unresolved_reference"
+                          ]
+                        },
+                        "verified": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        }
+                      },
+                      "required": [
+                        "reference",
+                        "classification",
+                        "verified"
+                      ]
+                    }
+                  },
+                  "verifiedReferenceCount": {
+                    "type": "integer",
+                    "enum": [
+                      0
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "references",
+                  "verifiedReferenceCount"
+                ]
+              },
+              "execution": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean",
+                    "enum": [
+                      false
+                    ]
+                  },
+                  "authorization": {
+                    "type": "string",
+                    "enum": [
+                      "none"
+                    ]
+                  },
+                  "executable": {
+                    "enum": [
+                      null
+                    ]
+                  },
+                  "args": {
+                    "enum": [
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "enabled",
+                  "authorization",
+                  "executable",
+                  "args"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "proposed"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "sourceNodeId",
+              "kind",
+              "title",
+              "dependencies",
+              "estimates",
+              "supportingEvidenceRefs",
+              "execution",
+              "status"
+            ]
+          }
+        },
+        "gates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "humanReviewRequired": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "workflowApprovalRequired": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "immutableExecutionPlanCreated": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            },
+            "dispatchAllowed": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            },
+            "executionAuthorized": {
+              "type": "boolean",
+              "enum": [
+                false
+              ]
+            }
+          },
+          "required": [
+            "humanReviewRequired",
+            "workflowApprovalRequired",
+            "immutableExecutionPlanCreated",
+            "dispatchAllowed",
+            "executionAuthorized"
+          ]
+        },
+        "draftHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "kind",
+        "status",
+        "source",
+        "goal",
+        "sourcePathNodeIds",
+        "contextNodes",
+        "steps",
+        "gates",
+        "draftHash"
+      ]
+    },
+    "workflow_id": {
+      "type": "string",
+      "enum": [
+        "standard-engineering",
+        "hybrid-engineering",
+        "engineering",
+        "production"
+      ]
+    },
+    "task_bindings": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string",
+            "pattern": "^agg-step-[a-f0-9]{24}$",
+            "maxLength": 80
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "product.requirements",
+              "research.collect",
+              "architecture.design",
+              "code.modify",
+              "security.audit",
+              "code.verify",
+              "infrastructure.verify",
+              "documentation.write",
+              "change.review",
+              "synthesis.approve"
+            ]
+          }
+        },
+        "required": [
+          "step_id",
+          "task_id",
+          "capability"
+        ]
+      }
+    }
+  },
+  "required": [
+    "draft",
+    "workflow_id",
+    "task_bindings"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_execution_graph_proposal_create`
+
+Create a persisted, review-only Execution Graph proposal from a stored Plan Graph proposal after revalidating its candidate, exact draft/bindings, role/capability contracts, DAG ancestry, active durable artifact/event lineage, producer completion, schema versions and hashes. Requires readiness to pass; otherwise returns stable blockers without writing a job. A successful result creates only a PROPOSED standard-engineering review wrapper, never executable contracts, task rows, approval, dispatch or execution.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `plan_proposal_job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `task_bindings` | `array` | Yes | — | maxItems: `500`; items: object |
+| `title` | `string` | No | — | minLength: `1`; maxLength: `180` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "plan_proposal_job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "task_bindings": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "step_id": {
+            "type": "string",
+            "pattern": "^agg-step-[a-f0-9]{24}$",
+            "maxLength": 80
+          },
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+          },
+          "capability": {
+            "type": "string",
+            "enum": [
+              "product.requirements",
+              "research.collect",
+              "architecture.design",
+              "code.modify",
+              "security.audit",
+              "code.verify",
+              "infrastructure.verify",
+              "documentation.write",
+              "change.review",
+              "synthesis.approve"
+            ]
+          }
+        },
+        "required": [
+          "step_id",
+          "task_id",
+          "capability"
+        ]
+      }
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    }
+  },
+  "required": [
+    "plan_proposal_job_id",
+    "task_bindings"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_execution_graph_proposal_get`
+
+Read back and revalidate a stored Execution Graph proposal against its source Plan Graph proposal and current durable artifact evidence. Reports stale hashes, changed workflow contracts or invalidated evidence as stable blockers. Read-only; never pins plans, approves, dispatches or executes.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "job_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_execution_plan_candidate_create`
+
+Validate and persist a review-only execution-plan candidate using the existing workflow compiler, validateExecutionPlan and exact preflight plan hash. The versioned semantic policy checks each role capability, canonical operation, target binding, artifact output type, exact role completion criteria and canonical description; arbitrary/free-form instructions and unresolved targets are rejected. Reviewer identity is not inferred from caller-supplied reviewerId: the candidate remains blocked until a trusted Ed25519 identity provider attestation is durably recorded and verified against the configured public trust root and exact candidate/semantic/role-contract/immutable-plan fingerprints. Candidate creation writes only a bounded candidate event; it never approves, pins workflow_plans, creates tasks, dispatches, grants execution authorization or generates commands/arguments.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `reviewed_action_intents` | `object` | Yes | — | no additional properties; required fields: `schemaVersion`, `kind`, `source`, `review`, `actions` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "reviewed_action_intents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "kind": {
+          "type": "string",
+          "const": "adaptive_goal_reviewed_action_intents"
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "executionGraphFingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "executionGraphProposalHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "sourcePlanProposalJobId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "sourceGraphHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "planGraphDraftHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "sourceCandidateId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "executionGraphFingerprint",
+            "executionGraphProposalHash",
+            "sourcePlanProposalJobId",
+            "sourceGraphHash",
+            "planGraphDraftHash",
+            "sourceCandidateId"
+          ]
+        },
+        "review": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "decision": {
+              "type": "string",
+              "const": "reviewed_for_candidate_only"
+            },
+            "reviewerId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._@:-]*$"
+            },
+            "reviewedAt": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 32
+            },
+            "acknowledgment": {
+              "type": "string",
+              "const": "I_REVIEWED_ACTION_INTENTS_AND_INPUT_BINDINGS_FOR_CANDIDATE_REVIEW_ONLY"
+            }
+          },
+          "required": [
+            "decision",
+            "reviewerId",
+            "reviewedAt",
+            "acknowledgment"
+          ]
+        },
+        "actions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "stepId": {
+                "type": "string",
+                "pattern": "^agg-step-[a-f0-9]{24}$"
+              },
+              "taskId": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "product-owner",
+                  "researcher",
+                  "architect",
+                  "engineer",
+                  "security",
+                  "qa",
+                  "platform",
+                  "writer",
+                  "reviewer",
+                  "cto"
+                ]
+              },
+              "capability": {
+                "type": "string",
+                "enum": [
+                  "product.requirements",
+                  "research.collect",
+                  "architecture.design",
+                  "code.modify",
+                  "security.audit",
+                  "code.verify",
+                  "infrastructure.verify",
+                  "documentation.write",
+                  "change.review",
+                  "synthesis.approve"
+                ]
+              },
+              "roleContractId": {
+                "type": "string",
+                "enum": [
+                  "agent.product-owner",
+                  "agent.researcher",
+                  "agent.architect",
+                  "agent.engineer",
+                  "agent.security",
+                  "agent.qa",
+                  "agent.platform",
+                  "agent.writer",
+                  "agent.reviewer",
+                  "agent.cto"
+                ]
+              },
+              "roleContractVersion": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "actionIntent": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "analyze",
+                      "design",
+                      "document",
+                      "implement",
+                      "investigate",
+                      "prepare",
+                      "review",
+                      "verify",
+                      "other"
+                    ]
+                  },
+                  "target": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "artifact",
+                          "codebase",
+                          "component",
+                          "requirement",
+                          "work_item",
+                          "other"
+                        ]
+                      },
+                      "reference": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "reference"
+                    ]
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1200
+                  },
+                  "successCriteria": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 300
+                    }
+                  }
+                },
+                "required": [
+                  "operation",
+                  "target",
+                  "description",
+                  "successCriteria"
+                ]
+              },
+              "taskInputs": {
+                "type": "array",
+                "maxItems": 64,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "inputType": {
+                      "type": "string",
+                      "enum": [
+                        "requirements",
+                        "research",
+                        "architecture",
+                        "implementation",
+                        "security-review",
+                        "qa-report",
+                        "platform-review",
+                        "documentation",
+                        "review"
+                      ]
+                    },
+                    "source": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "evidence"
+                            },
+                            "reference": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1024
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "reference"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "ancestor_output"
+                            },
+                            "stepId": {
+                              "type": "string",
+                              "pattern": "^agg-step-[a-f0-9]{24}$"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "stepId"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "inputType",
+                    "source"
+                  ]
+                }
+              },
+              "dependencyStepIds": {
+                "type": "array",
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^agg-step-[a-f0-9]{24}$"
+                }
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "maxItems": 512,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                }
+              }
+            },
+            "required": [
+              "stepId",
+              "taskId",
+              "role",
+              "capability",
+              "roleContractId",
+              "roleContractVersion",
+              "actionIntent",
+              "taskInputs",
+              "dependencyStepIds",
+              "evidenceRefs"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "kind",
+        "source",
+        "review",
+        "actions"
+      ]
+    }
+  },
+  "required": [
+    "job_id",
+    "reviewed_action_intents"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_execution_plan_candidate_get`
+
+Read-only rebuild and revalidation of the persisted review-only candidate, exact action-intent semantics, typed input/evidence/ancestor provenance, role/artifact contracts, current source evidence, compiler and plan hashes. Reports tampering/staleness and trust-root-verified reviewer status. Without a valid, unexpired, replay-free identity-provider attestation bound to the exact candidate and immutable-plan fingerprints, the reviewer identity blocker remains and approval/dispatch/task preparation are denied. This tool does not refresh snapshots, approve, pin plans, create tasks or dispatch.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "job_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_sandbox_action_execute`
+
+Experimental/test-only executor for one hard-coded, no-network fixture action. Requires a current trust-root-verified reviewer attestation, explicit workflow approval, exact immutable compiler plan, dispatched active workflow, completed task prerequisites, and current typed artifact/result/completion lineage. Executes no caller-supplied command, script, or path. Refuses production mode, missing/tampered evidence, unsupported action, unresolved prior claims, and replay; repeated requests can only read the exact already-verified receipt without re-executing. This tool never grants approval or production execution authority.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `task_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  },
+  "required": [
+    "job_id",
+    "task_id"
+  ]
 }
 ```
 

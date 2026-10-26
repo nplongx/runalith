@@ -72,6 +72,7 @@ benchmarks/plugin-workflow-benchmark/phase2-pnpm-lock-before-reconcile*.yaml
 # Runtime exports and temporary artifacts
 .openclaw/
 /tmp/
+/artifacts/
 *.tmp
 
 # Diagram verification receipts and generated interactive HTML are local render
@@ -100,3 +101,7 @@ docs/diagrams/rendered/*.delivery-pending.json
 patch_*.py
 update-server.cjs
 benchmarks/plugin-workflow-benchmark/phase2-strict-readiness-trace-lineage-20261013T151000Z.log*
+
+# Python bytecode / generated interpreter caches
+__pycache__/
+*.py[cod]

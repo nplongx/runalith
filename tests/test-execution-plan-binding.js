@@ -48,6 +48,26 @@ const task = store.createChildTask(job.job_id, {
 });
 assert.equal(task.metadata_json && JSON.parse(task.metadata_json).workflow_plan_task_id, planned.id);
 const manager = new ExecutionManager(store, { tmuxBin: tmuxStub, timeoutMs: 3000, executionTmpDir: execTmp });
+function createDurableTaskBatch(task, { timeoutMs = 3000, cwd = workspace } = {}) {
+  const metadata = JSON.parse(task.metadata_json || '{}');
+  const quote = value => `'${String(value).replace(/'/g, `'\\''`)}'`;
+  const command = [metadata.executable, ...(metadata.args || [])].map(quote).join(' ');
+  return store.createExecutionBatch(task.job_id, {
+    parentTaskId: task.parent_task_id || null,
+    role: task.role,
+    items: [{ taskId: task.task_id, command, cwd, timeout_ms: timeoutMs }]
+  });
+}
+
+async function executeTaskThroughDurableBatch(executionManager, task, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 3000;
+  const cwd = options.cwd ?? workspace;
+  const batch = createDurableTaskBatch(task, { timeoutMs, cwd });
+  const result = await executionManager.executeBatch(batch.batch_id, { timeoutMs, cwd, env: options.env });
+  const item = result.items?.find(entry => entry.task_id === task.task_id) ??
+    store.listExecutionBatchItems(batch.batch_id).find(entry => entry.task_id === task.task_id);
+  return { batch, result, item };
+}
 const originalTmuxArgs = manager._tmuxExecutionArgs.bind(manager);
 manager._tmuxExecutionArgs = (tmuxName, ...args) => {
   assert.equal(store.db.isTransaction, false,
@@ -106,10 +126,11 @@ try {
   process.env.NODE_OPTIONS = `--require=${preloadModule}`;
   process.env.BASH_ENV = bashPreloadFile;
   process.env.PATH = fakeBin;
-  const isolatedResult = await manager.executeAuthorizedTask(envTask.task_id, {
+  const isolatedRun = await executeTaskThroughDurableBatch(manager, envTask, {
     timeoutMs: Math.min(3000, Number(planned.execution.timeout_ms)), cwd: workspace
   });
-  assert.equal(isolatedResult.exitCode, 0, 'the exact approved command should still execute');
+  assert.equal(isolatedRun.result.status, 'COMPLETED', 'the approved deterministic task must execute only via a durable batch claim');
+  assert.equal(isolatedRun.item.exit_code, 0, 'the exact approved command should still execute');
   assert.equal(fs.existsSync(preloadSentinel), false,
     'approved execution must not run a preload inherited from the adapter process');
   assert.equal(fs.existsSync(bashPreloadSentinel), false,
@@ -150,9 +171,11 @@ console.log('IMMUTABLE PLAN REJECTS AMBIENT NODE_OPTIONS PRELOAD: PASS');
   const startsBefore = fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean).length;
   manager._tmuxExecutionArgs = () => { throw new Error('injected local tmux argv construction failure'); };
   try {
-    await assert.rejects(() => manager.executeAuthorizedTask(argvFailureTask.task_id, {
+    const argvFailureRun = await executeTaskThroughDurableBatch(manager, argvFailureTask, {
       timeoutMs: Math.min(3000, Number(planned.execution.timeout_ms)), cwd: workspace
-    }), /injected local tmux argv construction failure/);
+    });
+    assert.equal(argvFailureRun.result.status, 'FAILED');
+    assert.match(argvFailureRun.item.error || argvFailureRun.item.stderr, /injected local tmux argv construction failure/);
   } finally {
     manager._tmuxExecutionArgs = authorizingArgsBuilder;
   }
@@ -257,19 +280,21 @@ console.log('EXECUTION PLAN ROW HASH ALTERATION REJECTION: PASS');
   });
   const approvalRow = store.getLatestApproval(spawnRaceJob.job_id);
   const startsBefore = fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean).length;
-  const originalPrepare = store.prepareExecution.bind(store);
-  store.prepareExecution = (...args) => {
+  const originalPrepare = store.prepareExecutionForBatchClaim.bind(store);
+  store.prepareExecutionForBatchClaim = (...args) => {
     const prepared = originalPrepare(...args);
     store.db.prepare('UPDATE approvals SET decision=? WHERE approval_id=?').run('rejected', approvalRow.approval_id);
     return prepared;
   };
   try {
-    await assert.rejects(() => manager.executeAuthorizedTask(spawnTask.task_id, {
+    const spawnRaceRun = await executeTaskThroughDurableBatch(manager, spawnTask, {
       timeoutMs: Math.min(3000, Number(spawnArchitect.execution.timeout_ms)), cwd: workspace
-    }), /approval is not current|approval.*revoked|not approved/i,
-    'approval revoked after durable prepare must fail before OS spawn');
+    });
+    assert.equal(spawnRaceRun.result.status, 'FAILED');
+    assert.match(spawnRaceRun.item.error || spawnRaceRun.item.stderr, /approval is not current|approval.*revoked|not approved/i,
+      'approval revoked after durable batch preparation must fail before OS spawn');
   } finally {
-    store.prepareExecution = originalPrepare;
+    store.prepareExecutionForBatchClaim = originalPrepare;
     store.db.prepare('UPDATE approvals SET decision=? WHERE approval_id=?').run('approved', approvalRow.approval_id);
   }
   const startsAfter = fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean).length;
@@ -296,18 +321,20 @@ console.log('EXECUTION PLAN ROW HASH ALTERATION REJECTION: PASS');
   });
   const startsBefore = fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean).length;
   const changedPath = path.join(workspace, `post-prepare-cwd-mutation-${process.pid}.txt`);
-  const originalPrepare = store.prepareExecution.bind(store);
-  store.prepareExecution = (...args) => {
+  const originalPrepare = store.prepareExecutionForBatchClaim.bind(store);
+  store.prepareExecutionForBatchClaim = (...args) => {
     const prepared = originalPrepare(...args);
     fs.writeFileSync(changedPath, 'cwd changed after durable preparation\n', { flag: 'wx', mode: 0o600 });
     return prepared;
   };
   try {
-    await assert.rejects(() => manager.executeAuthorizedTask(cwdTask.task_id, {
+    const cwdRaceRun = await executeTaskThroughDurableBatch(manager, cwdTask, {
       timeoutMs: Math.min(3000, Number(child.execution.timeout_ms)), cwd: workspace
-    }), /OS-boundary identity changed|cwd|identity/i);
+    });
+    assert.equal(cwdRaceRun.result.status, 'FAILED');
+    assert.match(cwdRaceRun.item.error || cwdRaceRun.item.stderr, /OS-boundary identity changed|cwd|identity/i);
   } finally {
-    store.prepareExecution = originalPrepare;
+    store.prepareExecutionForBatchClaim = originalPrepare;
     fs.rmSync(changedPath, { force: true });
   }
   const startsAfter = fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean).length;
@@ -332,18 +359,20 @@ console.log('EXECUTION PLAN ROW HASH ALTERATION REJECTION: PASS');
   });
   const startsBefore = fs.readFileSync(spawnLog, 'utf8').split(/\r?\n/).filter(Boolean).length;
   const originalTmux = fs.readFileSync(tmuxStub);
-  const originalPrepare = store.prepareExecution.bind(store);
-  store.prepareExecution = (...args) => {
+  const originalPrepare = store.prepareExecutionForBatchClaim.bind(store);
+  store.prepareExecutionForBatchClaim = (...args) => {
     const prepared = originalPrepare(...args);
     fs.appendFileSync(tmuxStub, '\n# changed after execution boundary was durably captured\n');
     return prepared;
   };
   try {
-    await assert.rejects(() => manager.executeAuthorizedTask(tmuxTask.task_id, {
+    const tmuxRaceRun = await executeTaskThroughDurableBatch(manager, tmuxTask, {
       timeoutMs: Math.min(3000, Number(child.execution.timeout_ms)), cwd: workspace
-    }), /OS-boundary identity changed|executable changed|identity/i);
+    });
+    assert.equal(tmuxRaceRun.result.status, 'FAILED');
+    assert.match(tmuxRaceRun.item.error || tmuxRaceRun.item.stderr, /OS-boundary identity changed|executable changed|identity/i);
   } finally {
-    store.prepareExecution = originalPrepare;
+    store.prepareExecutionForBatchClaim = originalPrepare;
     fs.writeFileSync(tmuxStub, originalTmux, { mode: 0o700 });
     fs.chmodSync(tmuxStub, 0o700);
   }
@@ -375,10 +404,11 @@ console.log('EXECUTION PLAN ROW HASH ALTERATION REJECTION: PASS');
     return result;
   };
   try {
-    const result = await manager.executeAuthorizedTask(raceTask.task_id, {
+    const pinnedRun = await executeTaskThroughDurableBatch(manager, raceTask, {
       timeoutMs: Math.min(3000, Number(planned.execution.timeout_ms)), cwd: workspace
     });
-    assert.equal(result.exitCode, 0, 'the content-pinned original tmux fixture must complete the approved command');
+    assert.equal(pinnedRun.result.status, 'COMPLETED', 'the content-pinned original tmux fixture must complete the approved command');
+    assert.equal(pinnedRun.item.exit_code, 0);
     assert.equal(fs.existsSync(marker), false,
       'replacing the source pathname after final identity verification must not change the executable bytes used');
     const boundary = JSON.parse(store.getTask(raceTask.task_id).metadata_json).execution_boundary_identity;
@@ -420,10 +450,12 @@ console.log('EXECUTION PLAN ROW HASH ALTERATION REJECTION: PASS');
     return result;
   };
   try {
-    await assert.rejects(() => manager.executeAuthorizedTask(raceTask.task_id, {
+    const pinnedReplacementRun = await executeTaskThroughDurableBatch(manager, raceTask, {
       timeoutMs: Math.min(3000, Number(planned.execution.timeout_ms)), cwd: workspace
-    }), /pinned execution-control executable (filesystem identity|bytes) changed/,
-    'a replacement of the pinned control executable after final recheck must fail before OS spawn');
+    });
+    assert.equal(pinnedReplacementRun.result.status, 'FAILED');
+    assert.match(pinnedReplacementRun.item.error || pinnedReplacementRun.item.stderr, /pinned execution-control executable (filesystem identity|bytes) changed/,
+      'a replacement of the pinned control executable after final recheck must fail before OS spawn');
     assert.equal(fs.existsSync(marker), false, 'the substituted pinned tmux image must never execute');
     assert.equal(store.getTask(raceTask.task_id).execution_status, 'failed');
   } finally {
@@ -448,16 +480,19 @@ console.log('EXECUTION PLAN ROW HASH ALTERATION REJECTION: PASS');
     metadata: { ...planned.execution, workflow_plan_task_id: planned.id }
   });
   const ambiguousManager = new ExecutionManager(store, { tmuxBin: ambiguousTmux, timeoutMs: 3000, executionTmpDir: execTmp });
-  await assert.rejects(() => ambiguousManager.executeAuthorizedTask(ambiguousTask.task_id, {
+  const ambiguousBatch = createDurableTaskBatch(ambiguousTask, {
+    timeoutMs: Math.min(3000, Number(planned.execution.timeout_ms)), cwd: workspace
+  });
+  await assert.rejects(() => ambiguousManager.executeBatch(ambiguousBatch.batch_id, {
     timeoutMs: Math.min(3000, Number(planned.execution.timeout_ms)), cwd: workspace
   }), /OS process creation outcome is ambiguous/);
   assert.equal(fs.readFileSync(ambiguousMarker, 'utf8').trim(), 'accepted',
     'fixture models a server-side session acceptance before the client reports failure');
   assert.equal(store.getTask(ambiguousTask.task_id).execution_status, 'running',
     'uncertain process creation must remain running/reconciliation-only rather than being falsely terminalized failed');
-  await assert.rejects(() => ambiguousManager.executeAuthorizedTask(ambiguousTask.task_id, {
+  await assert.rejects(() => ambiguousManager.executeBatch(ambiguousBatch.batch_id, {
     timeoutMs: Math.min(3000, Number(planned.execution.timeout_ms)), cwd: workspace
-  }), /task already executing/);
+  }), /execution batch already has active item attempts|task already executing/);
   assert.equal(fs.readFileSync(ambiguousMarker, 'utf8').trim(), 'accepted', 'a retry must not replay an uncertain spawn');
   console.log('OS SPAWN AMBIGUOUS RESPONSE / DURABLE RUNNING STATE / NO AUTOMATIC REPLAY PASS');
 }

@@ -19,6 +19,8 @@ import { assertProviderDispatchIntent } from './provider-dispatch-identity.js';
 import { getWorkflowPolicySnapshotsForJob, initializeWorkflowPolicyStore } from './workflow/policy-contract.js';
 import { normalizeSuccessContract } from './workflow/success-contract.js';
 import { resolveRoleProfileBindings } from './workflow/role-profiles.js';
+import { verifyAdaptiveGoalExecutionPlanCandidateHash } from './adaptive-goal-execution-plan-candidate.js';
+import { assertAdaptiveGoalReviewerAttestation } from './adaptive-goal-reviewer-identity.js';
 
 const DATA_DIR = process.env.WORKFLOW_DATA_DIR || '/home/long/work/chatgpt-adapter/data';
 const configuredDbPath = path.resolve(process.env.WORKFLOW_DB || path.join(DATA_DIR, 'workflow.db'));
@@ -505,6 +507,101 @@ function now() { return new Date().toISOString(); }
 function id(prefix) { return prefix + '_' + crypto.randomUUID(); }
 function hash(value) { return crypto.createHash('sha256').update(String(value)).digest('hex'); }
 function eventId(jobId, type, dedupeKey = '') { return hash(`${jobId}|${type}|${dedupeKey}`); }
+
+function actionIntentBindingsFromCandidate(store, jobId, requestedBindings = undefined) {
+  const rows = store.db.prepare(`SELECT event_id,job_id,type,payload_json FROM events
+    WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created' ORDER BY created_at ASC,rowid ASC`).all(jobId);
+  if (rows.length === 0) {
+    if (Array.isArray(requestedBindings) && requestedBindings.length) throw new Error('action-intent bindings were supplied without a persisted reviewed AGG candidate');
+    return [];
+  }
+  if (rows.length !== 1) throw new Error('multiple reviewed AGG execution-plan candidates exist; refusing to select action-intent bindings');
+  const row = rows[0];
+  const payload = parseStrictJson(row.payload_json, 'persisted AGG execution-plan candidate');
+  const candidate = payload?.candidate;
+  if (row.job_id !== jobId || row.type !== 'adaptive_goal.execution_plan_candidate_created' ||
+      row.payload_json !== JSON.stringify(payload) || payload?.schema_version !== 2 ||
+      Object.keys(payload).sort().join(',') !== 'candidate,candidate_hash,fingerprint,reviewed_action_intents,schema_version' ||
+      typeof payload.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(payload.fingerprint) ||
+      payload.candidate_hash !== candidate?.candidateHash || candidate?.fingerprint !== payload.fingerprint ||
+      !verifyAdaptiveGoalExecutionPlanCandidateHash(candidate) || candidate.executionPlan?.job_id !== jobId ||
+      candidate.compiler?.compilerPlanHash !== candidate.executionPlan?.plan_hash ||
+      row.event_id !== eventId(jobId, row.type, payload.fingerprint)) {
+    throw new Error('persisted AGG action-intent candidate failed canonical event, plan-hash, or candidate-hash validation');
+  }
+  validateExecutionPlan(candidate.executionPlan);
+  const bindings = candidate.executionPlan.children.filter(task => Object.hasOwn(task.execution || {}, 'action_intent'))
+    .map(task => ({ taskId: task.id, role: task.role,
+      roleContractId: task.execution.action_intent.role_contract_id,
+      roleContractVersion: task.execution.action_intent.role_contract_version,
+      actionIntent: task.execution.action_intent
+    })).sort((a, b) => a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0);
+  if (hash(canonicalJson(bindings)) !== candidate.hashes?.compilerActionIntentBindingHash) {
+    throw new Error('persisted AGG action-intent candidate compiler-binding hash mismatch');
+  }
+  if (requestedBindings !== undefined && canonicalJson(requestedBindings) !== canonicalJson(bindings)) {
+    throw new Error('requested action-intent bindings do not exactly match the persisted reviewed candidate');
+  }
+  assertActionIntentEvidenceCurrent(store, bindings);
+  if (bindings.length) assertAdaptiveGoalReviewerAttestation(store, jobId, candidate, { now: Date.now() });
+  return bindings;
+}
+
+function assertActionIntentEvidenceCurrent(store, bindings) {
+  for (const binding of bindings) for (const input of binding.actionIntent.task_input_bindings || []) {
+    const source = input.source;
+    if (source?.kind !== 'evidence') continue;
+    const artifact = store.getArtifact(source.artifact_id);
+    if (!artifact || artifact.job_id !== source.source_job_id || artifact.status !== 'active' ||
+        artifact.type !== input.input_type || source.input_type !== input.input_type ||
+        artifact.schema_version !== source.schema_version || artifact.content_hash !== source.content_hash ||
+        artifact.producer_role !== source.producer_role || artifact.task_id !== source.producer_task_id) {
+      throw new Error(`AGG action-intent source evidence is stale or mismatched: ${source.reference || source.artifact_id}`);
+    }
+    validateArtifact(artifact);
+    const raw = store.db.prepare('SELECT uri,metadata_json FROM artifacts WHERE artifact_id=?').get(artifact.artifact_id);
+    if (raw?.uri !== `artifact://${artifact.artifact_id}` || raw?.metadata_json !== JSON.stringify({ schema_version: artifact.schema_version })) {
+      throw new Error(`AGG action-intent source artifact metadata is not canonical: ${artifact.artifact_id}`);
+    }
+    const creationRows = store.db.prepare("SELECT event_id,job_id,type,payload_json FROM events WHERE job_id=? AND type='artifact.created' AND json_extract(payload_json,'$.artifactId')=? ORDER BY created_at ASC,rowid ASC")
+      .all(artifact.job_id, artifact.artifact_id);
+    const creationPayload = { artifactId: artifact.artifact_id, taskId: artifact.task_id, type: artifact.type,
+      status: artifact.status, supersedes: artifact.supersedes, contentHash: artifact.content_hash };
+    if (creationRows.length !== 1 || creationRows[0].event_id !== source.artifact_created_event_id ||
+        creationRows[0].event_id !== eventId(artifact.job_id, 'artifact.created', artifact.artifact_id) ||
+        creationRows[0].job_id !== artifact.job_id || creationRows[0].type !== 'artifact.created' ||
+        creationRows[0].payload_json !== JSON.stringify(creationPayload)) {
+      throw new Error(`AGG action-intent source artifact creation lineage changed: ${artifact.artifact_id}`);
+    }
+    const task = store.getTask(source.producer_task_id);
+    const result = store.db.prepare('SELECT result_id,task_id,outcome FROM results WHERE result_id=?').get(source.producer_result_id);
+    if (!task || task.job_id !== artifact.job_id || task.status !== 'completed' || task.role !== source.producer_role ||
+        !result || result.task_id !== task.task_id || result.outcome !== 'success' || source.producer_result_outcome !== 'success' ||
+        !Array.isArray(artifact.evidence) || !artifact.evidence.includes(result.result_id)) {
+      throw new Error(`AGG action-intent source producer result is no longer successful/current: ${artifact.artifact_id}`);
+    }
+    const completion = store.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(source.producer_completion_event_id);
+    if (!completion || completion.job_id !== artifact.job_id || completion.type !== source.producer_completion_event_type ||
+        !['task.completed', 'task.local_completed'].includes(completion.type) ||
+        completion.event_id !== eventId(artifact.job_id, completion.type,
+          completion.type === 'task.local_completed' ? result.result_id : `${task.task_id}|success|${result.result_id}`)) {
+      throw new Error(`AGG action-intent source producer completion event is invalid: ${artifact.artifact_id}`);
+    }
+    const completionPayload = parseStrictJson(completion.payload_json, 'AGG action-intent producer completion event');
+    if (completionPayload.taskId !== task.task_id || completionPayload.resultId !== result.result_id ||
+        completion.payload_json !== JSON.stringify(completionPayload) ||
+        (completion.type === 'task.local_completed'
+          ? (Object.keys(completionPayload).sort().join(',') !== 'attemptId,executor,resultId,taskId' || completionPayload.executor !== 'chat-on-steroids-plugin')
+          : (Object.keys(completionPayload).sort().join(',') !== 'attemptId,failureClass,outcome,resultId,runId,sessionKey,taskId' ||
+            completionPayload.outcome !== 'success' || completionPayload.failureClass !== null))) {
+      throw new Error(`AGG action-intent source producer completion payload is invalid: ${artifact.artifact_id}`);
+    }
+    if (Buffer.byteLength(canonicalJson(artifact.content), 'utf8') > 64 * 1024) {
+      throw new Error(`AGG action-intent source artifact exceeds the 64 KiB host-task context limit: ${artifact.artifact_id}`);
+    }
+  }
+}
+
 export function conversationKeyFromMessages(messages) {
   const first = (messages || []).find(m => {
     if (m?.role !== 'user') return false;
@@ -949,7 +1046,7 @@ export class WorkflowStore {
     }
     return { ...plan, plan_hash: row.plan_hash, compiled_at: row.compiled_at, approved_at: row.approved_at };
   }
-  compileExecutionPlan(jobId, { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = undefined, roleProfiles = null, requiredOperations = null, workspaceWriteScopes = null, batchExecutionPolicy = undefined } = {}) {
+  compileExecutionPlan(jobId, { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = undefined, roleProfiles = null, requiredOperations = null, workspaceWriteScopes = null, batchExecutionPolicy = undefined, actionIntentBindings = undefined } = {}) {
     const job = this.getJob(jobId);
     if (!job) throw new Error('job not found: ' + jobId);
     const existing = this.getExecutionPlan(jobId);
@@ -963,6 +1060,7 @@ export class WorkflowStore {
     // fail the immutable-plan comparison. Explicit [] remains meaningful for
     // callers that deliberately compiled a proposal with no overlays.
     const pinnedRoleProfiles = roleProfiles ?? resolveRoleProfileBindings(this.db, proposalPayload.role_profile_bindings || []);
+    const pinnedActionIntentBindings = actionIntentBindingsFromCandidate(this, jobId, actionIntentBindings);
     const plan = compileWorkflowPlan(job, {
       workspace,
       customWorkflow,
@@ -972,6 +1070,7 @@ export class WorkflowStore {
       requiredOperations: requiredOperations ?? proposalPayload.required_operations ?? [],
       workspaceWriteScopes: workspaceWriteScopes ?? proposalPayload.workspace_write_scopes ?? [],
       workflowVersion: existing?.workflow_id === 'standard-engineering' ? existing.workflow_version : null,
+      actionIntentBindings: pinnedActionIntentBindings,
       batchExecutionPolicy: batchExecutionPolicy !== undefined
         ? batchExecutionPolicy
         : existing ? (Object.hasOwn(existing, 'batch_execution_policy') ? existing.batch_execution_policy : null) : undefined,
@@ -1917,18 +2016,36 @@ export class WorkflowStore {
     // Every successful result therefore needs the same stable quarantine reason,
     // even when output_commit is absent, null or empty. A failed execution with
     // no commit claim can still reconcile as an ordinary execution failure.
-    if (hasNonEmptyOutputCommitClaim || successfulResultNeedsIndependentCommit || hasWorkerProvenanceMarker) {
+    if (hasWorkerProvenanceMarker) {
       return { status: 'REJECTED', reason: 'output_commit_attestation_required',
-        output_commit_provenance: hasWorkerProvenanceMarker ? evidenceVerification.output_commit_provenance : null };
+        output_commit_provenance: evidenceVerification.output_commit_provenance };
     }
-    try { validateDurableExecutionResult(wireResult); }
-    catch (error) { return { status: 'REJECTED', reason: 'invalid_execution_result_schema', error: error.message }; }
     if (!evidenceVerification || evidenceVerification.valid !== true || evidenceVerification.skipped === true ||
         !Array.isArray(evidenceVerification.errors) || evidenceVerification.errors.length !== 0 ||
         !/^[a-f0-9]{64}$/i.test(String(evidenceVerification.evidence_hash || '')) ||
         Object.keys(evidenceVerification).sort().join(',') !== 'errors,evidence_hash,valid') {
       return { status: 'REJECTED', reason: 'execution_evidence_not_verified' };
     }
+    // Preserve the stronger identity diagnosis before the output-commit
+    // quarantine: a correctly shaped evidence marker cannot turn a result for
+    // the wrong job/task/lease into a generic commit-attestation failure.
+    // The full native gate below repeats these checks before reconciliation.
+    if (wireResult.native_specialist) {
+      const nativeTask = this.getTask(wireResult.task_id);
+      const nativeLease = this.getTaskLease(wireResult.lease_id);
+      if (!nativeTask || nativeTask.job_id !== wireResult.job_id || !nativeLease ||
+          nativeLease.job_id !== wireResult.job_id || nativeLease.task_id !== wireResult.task_id ||
+          nativeLease.attempt !== wireResult.attempt || nativeLease.state !== 'ACTIVE' ||
+          !Number.isSafeInteger(nativeLease.owner_epoch) || nativeLease.owner_epoch < 1 ||
+          nativeLease.owner_epoch !== wireResult.owner_epoch) {
+        return { status: 'REJECTED', reason: 'native_specialist_execution_identity_mismatch' };
+      }
+    }
+    if (hasNonEmptyOutputCommitClaim || successfulResultNeedsIndependentCommit) {
+      return { status: 'REJECTED', reason: 'output_commit_attestation_required', output_commit_provenance: null };
+    }
+    try { validateDurableExecutionResult(wireResult); }
+    catch (error) { return { status: 'REJECTED', reason: 'invalid_execution_result_schema', error: error.message }; }
     const requiredIdentity = ['job_id', 'task_id', 'lease_id', 'provider_run_id'];
     if (!result || typeof result !== 'object' || Array.isArray(result) ||
         requiredIdentity.some(field => typeof result[field] !== 'string' || !result[field].trim()) ||
@@ -6603,7 +6720,7 @@ export class WorkflowStore {
     return this.getSlackJobView(jobId);
   }
   getSlackJobView(jobId) { return this.db.prepare('SELECT * FROM slack_job_views WHERE job_id=?').get(jobId) || null; }
-  approve(jobId, rawText, actor = 'chat-on-steroids-user', { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = undefined, roleProfiles = [] } = {}) {
+  approve(jobId, rawText, actor = 'chat-on-steroids-user', { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = undefined, roleProfiles = [], actionIntentBindings = undefined } = {}) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const job = this.getJob(jobId);
@@ -6631,7 +6748,10 @@ export class WorkflowStore {
       const runtime = this.getWorkflowRuntimeState(jobId);
       if (runtime?.phase === 'PROPOSED') this.transitionWorkflowPhase(jobId, 'APPROVED', { event: 'workflow.approved', payload: { actor } });
       this.recordEvent(jobId, 'approval.approved', { actor, rawText, proposalHash: proposal.proposalHash }, hash(`${rawText}|${proposal.proposalHash}`));
-      if (isSupportedWorkflow(this.getJob(jobId))) this.compileExecutionPlan(jobId, { workspace, customWorkflow, successContract: successContract ?? proposal.payload.success_contract, roleProfiles });
+      if (isSupportedWorkflow(this.getJob(jobId))) this.compileExecutionPlan(jobId, {
+        workspace, customWorkflow, successContract: successContract ?? proposal.payload.success_contract,
+        roleProfiles, actionIntentBindings
+      });
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -6649,6 +6769,15 @@ export class WorkflowStore {
         throw new Error(`dispatch requires an active approved Job; state=${jobBeforeDispatch.state} status=${jobBeforeDispatch.status}`);
       }
       if (isSupportedWorkflow(jobBeforeDispatch)) this.assertApprovalCurrent(jobId);
+      const dispatchPlan = this.getExecutionPlan(jobId);
+      if (dispatchPlan?.children?.some(task => Object.hasOwn(task.execution || {}, 'action_intent'))) {
+        // Independent low-level gate: server preflight is not an authorization
+        // boundary for callers that reach WorkflowStore directly.
+        actionIntentBindingsFromCandidate(this, jobId);
+        if (dispatchPlan.plan_hash !== this.getExecutionPlan(jobId)?.plan_hash) {
+          throw new Error('AGG action-intent immutable plan changed at dispatch boundary');
+        }
+      }
       const task = this.ensureTask(jobId, { role, description }); const ts = now();
       const plan = this.getExecutionPlan(jobId);
       if (plan?.synthesis && String(role).toLowerCase() === 'cto') {

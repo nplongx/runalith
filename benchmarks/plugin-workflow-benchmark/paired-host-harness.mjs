@@ -98,7 +98,7 @@ function runHost(condition) {
     protocol: 'cos-paired-host-v1', run_id: runId, condition,
     probe_only: probeOnly, case_id: testCase.case_id ?? 'HOST-PROBE-001',
     prompt: testCase.prompt, prompt_sha256: promptHash,
-    tools_profile: condition === 'plugin' ? 'frozen-plugin-bundle' : 'basic-tools-only',
+    tools_profile: condition === 'plugin' ? (config.plugin_tools_profile ?? 'frozen-plugin-bundle') : 'basic-tools-only',
     workspace, data_directory: dataDir, execution_tmp_directory: executionTmp,
     fixture_path: fixturePath, fixture_sha256: fixtureHash,
     expected_model_match: true,

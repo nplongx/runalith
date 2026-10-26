@@ -7,6 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { getSpecialistRoleGuidance, SPECIALIST_GUIDANCE_ROLES } from '../src/runtime/workflow/specialist-role-guidance.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const runtimeManifestPath = ['plugin/manifest.json', 'manifest.json'].map(file => path.join(root, file)).find(file => fs.existsSync(file));
+// This test also runs from a disposable workspace copied by the orchestration
+// harness. Such a fixture intentionally has only the historical server/index.js
+// and no package manifest; released-source/package runs use the manifest path.
+const runtimePath = runtimeManifestPath
+  ? path.join(root, JSON.parse(fs.readFileSync(runtimeManifestPath, 'utf8')).server.entry_point)
+  : path.join(root, 'server/index.js');
+if (!fs.existsSync(runtimePath)) throw new Error('runtime entry point is missing');
 const expectedRoles = ['product-owner', 'researcher', 'architect', 'engineer', 'security', 'qa', 'platform', 'writer', 'reviewer'];
 assert.deepEqual([...SPECIALIST_GUIDANCE_ROLES].sort(), [...expectedRoles].sort());
 for (const role of expectedRoles) {
@@ -48,7 +56,7 @@ let initialization;
 let recommendation;
 let liveness;
 try {
-  const run = spawnSync(process.execPath, [path.join(root, 'server/index.js')], { cwd: root, env, input: payload, encoding: 'utf8', timeout: 15000 });
+const run = spawnSync(process.execPath, [runtimePath], { cwd: root, env, input: payload, encoding: 'utf8', timeout: 15000 });
   assert.equal(run.status, 0, `MCP catalog probe failed: ${run.stderr}`);
   const replies = run.stdout.split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
   initialization = replies.find(item => item.id === 1)?.result;

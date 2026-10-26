@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { getJobLivenessDiagnostics } from '../src/runtime/job-liveness.js';
+import './test-reconcile-active-workflows-v2.mjs';
 
 const db = new DatabaseSync(':memory:');
 db.exec(`
