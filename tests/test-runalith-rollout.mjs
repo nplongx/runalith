@@ -16,7 +16,15 @@ import {
   listRuntimeProcesses,
   simulateRolloutInRoot,
   smokeCandidate,
+  writeExclusiveJsonReport,
+  verifyPhase2CustodyForPreflight,
+  verifyReleaseEvidenceForPreflight,
   validateExternalAntiRollbackAnchorReport,
+  validateExternalCheckpointHostPolicy,
+  computeExternalStoreContinuityEvidenceSha256,
+  verifyExternalStoreAttestation,
+  validateHostPinnedReleasePolicyScope,
+  validatePhase2CustodyPolicy,
   workflowDbSummary
 } from '../scripts/runalith-rollout.mjs';
 
@@ -27,6 +35,11 @@ let workflowDbPath;
 const temporaryRollbacks = [];
 
 function hash(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+function canonicalTestJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalTestJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalTestJson(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
 
 function fakeRuntimeSource(version) {
   return `import readline from 'node:readline';
@@ -197,6 +210,36 @@ test('candidate package verification and extracted runtime health are bound to e
   assert.equal(inspectBundle(candidatePath, { requireCurrentSource: false }).sha256, before.sha256);
 });
 
+test('preflight diagnostic report publication is exclusive and unsupported options fail closed', () => {
+  const destination = path.join(testRoot, `preflight-report-${crypto.randomUUID()}.json`);
+  const report = { status: 'BLOCKED', readOnly: true, liveMutationPerformed: false, canActivateNow: false };
+  const published = writeExclusiveJsonReport(destination, report);
+  assert.equal(published.path, destination);
+  assert.equal(published.sha256, hash(fs.readFileSync(destination)));
+  assert.deepEqual(JSON.parse(fs.readFileSync(destination, 'utf8')), report);
+  assert.equal((fs.statSync(destination).mode & 0o777), 0o600);
+  assert.throws(() => writeExclusiveJsonReport(destination, { status: 'READY' }), /refusing to overwrite/);
+
+  const realParent = path.join(testRoot, `report-parent-${crypto.randomUUID()}`);
+  const aliasParent = path.join(testRoot, `report-parent-alias-${crypto.randomUUID()}`);
+  fs.mkdirSync(realParent, { mode: 0o700 });
+  fs.symlinkSync(realParent, aliasParent, 'dir');
+  assert.throws(() => writeExclusiveJsonReport(path.join(aliasParent, 'report.json'), report), /canonical directory/);
+
+  const unsupported = spawnSync(process.execPath, [path.join(ROOT, 'scripts/runalith-rollout.mjs'), 'preflight',
+    '--candidate', 'not-read.mcpb', '--out', path.join(testRoot, 'must-not-exist.json')], { encoding: 'utf8' });
+  assert.notEqual(unsupported.status, 0);
+  assert.match(unsupported.stderr + unsupported.stdout, /unsupported option --out for command preflight/);
+  assert.equal(fs.existsSync(path.join(testRoot, 'must-not-exist.json')), false);
+
+  // Parsing the explicit state-changing flag must not itself invoke the host
+  // adapter. Omitting the required candidate fails before host inspection.
+  const checkpointWithoutCandidate = spawnSync(process.execPath, [path.join(ROOT, 'scripts/runalith-rollout.mjs'),
+    'preflight', '--advance-external-checkpoint'], { encoding: 'utf8' });
+  assert.notEqual(checkpointWithoutCandidate.status, 0);
+  assert.match(checkpointWithoutCandidate.stderr + checkpointWithoutCandidate.stdout, /preflight requires --candidate/);
+});
+
 test('simulation has idempotent activation and rolls back at each tested failure boundary', () => {
   const successfulRoot = makePrivateRoot();
   const success = simulateRolloutInRoot({ bundlePath: candidatePath, root: successfulRoot, smoke: () => ({ passed: true }) });
@@ -287,6 +330,8 @@ test('host identity plus active execution blockers keep live activation fail-clo
   assert.ok(blocked.blockers.includes('ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN'));
   assert.ok(blocked.blockers.includes('RUNNING_TASKS_MUST_DRAIN'));
   assert.ok(blocked.blockers.includes('ACTIVE_TASK_LEASES_MUST_DRAIN'));
+  assert.ok(blocked.blockers.includes('PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED'),
+    'candidate smoke, exact host identity, and local graph/trust readiness do not authenticate the frozen 71-path authority');
   assert.ok(blocked.blockers.includes('PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED'));
 
   const db = new DatabaseSync(workflowDbPath);
@@ -330,6 +375,8 @@ test('host identity plus active execution blockers keep live activation fail-clo
   const selfAssertedAnchorGate = evaluateRolloutGate({ candidate: testCandidate, rollback: testRollback, host: anchoredTestHost });
   assert.equal(selfAssertedAnchorGate.status, 'BLOCKED', JSON.stringify(selfAssertedAnchorGate, null, 2));
   assert.equal(selfAssertedAnchorGate.canActivateNow, false);
+  assert.ok(selfAssertedAnchorGate.blockers.includes('PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED'),
+    'a self-asserted host checkpoint must not clear Phase 2 path authority');
   assert.ok(selfAssertedAnchorGate.blockers.includes('PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED'));
 
   const trustEnvironmentBytes = fs.readFileSync(installed.trustEnvironmentPath);
@@ -349,6 +396,220 @@ test('host identity plus active execution blockers keep live activation fail-clo
     rollback: { verified: true, version: '1.0.9-rc.5' }, host: unknownOwnerHost });
   assert.equal(ownerGate.status, 'BLOCKED');
   assert.ok(ownerGate.blockers.includes('HOST_PROCESS_OWNER_NOT_VERIFIED'));
+});
+
+test('rollout gate requires release evidence verified from exact signed bytes, not caller-authored booleans', () => {
+  const candidate = { verified: true, version: '1.0.9-rc.12', sha256: 'a'.repeat(64) };
+  const rollback = { verified: true, version: '1.0.9-rc.11', sha256: 'b'.repeat(64) };
+  const host = { registryReadable: true, plugin: { id: 'fixture' },
+    installedGeneration: { manifestVersion: '1.0.9-rc.11' },
+    database: { readable: true, executingJobs: 0, runningTasks: 0, activeLeases: 0 },
+    trustConfiguration: { available: true } };
+  const missing = evaluateRolloutGate({ candidate, rollback, host });
+  assert.ok(missing.blockers.includes('INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED'));
+  assert.equal(missing.canActivateNow, false);
+
+  const callerAuthoredEvidence = { cryptographicEvidenceVerified: true, productionAuthorityEstablished: false,
+    candidate: { sha256: candidate.sha256 }, rollback: { sha256: rollback.sha256, version: rollback.version },
+    baseline: { version: host.installedGeneration.manifestVersion, sha256: rollback.sha256 } };
+  const forged = evaluateRolloutGate({ candidate, rollback, host, releaseEvidence: callerAuthoredEvidence });
+  assert.ok(forged.blockers.includes('INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED'),
+    'self-asserted result fields must not substitute for the local verifier’s unforgeable in-process result identity');
+  assert.ok(forged.blockers.includes('PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED'),
+    'a caller-authored release result must not implicitly authorize the frozen path list');
+  assert.equal(forged.canActivateNow, false);
+});
+
+test('Phase 2 frozen-path gate requires owner evidence and a host-provisioned trust policy', () => {
+  const candidateBundle = { path: '/not-read/candidate.mcpb', sha256: 'a'.repeat(64), version: '1.0.9-rc.16' };
+  const missing = verifyPhase2CustodyForPreflight({ args: {}, candidateBundle });
+  assert.equal(missing.verified, false);
+  assert.deepEqual(missing.blockers, ['PHASE2_CUSTODY_EVIDENCE_NOT_PROVIDED']);
+  assert.deepEqual(missing.missingArguments, ['phase2Manifest', 'phase2Receipt']);
+  assert.equal(missing.requiredHostPolicyPath, '/etc/runalith/phase2-custody-trust.json');
+
+  const partial = verifyPhase2CustodyForPreflight({ args: { phase2Manifest: '/tmp/owner-manifest.json' }, candidateBundle });
+  assert.equal(partial.verified, false);
+  assert.deepEqual(partial.blockers, ['PHASE2_CUSTODY_ARGUMENT_SET_INCOMPLETE']);
+  assert.deepEqual(partial.missingArguments, ['phase2Receipt']);
+
+  const host = { registryReadable: true, plugin: { id: 'fixture' },
+    installedGeneration: { manifestVersion: '1.0.9-rc.11' },
+    database: { readable: true, executingJobs: 0, runningTasks: 0, activeLeases: 0 },
+    trustConfiguration: { available: true } };
+  const candidate = { verified: true, version: '1.0.9-rc.16', sha256: candidateBundle.sha256 };
+  const rollback = { verified: true, version: '1.0.9-rc.11', sha256: 'b'.repeat(64) };
+  const forged = { ...missing, verified: true, status: 'HOST_PINNED_PHASE2_PATH_CONTRACT_VERIFIED',
+    authorityKeyProvisioningAuthenticated: true, manifestPathCount: 71, candidateSha256: candidate.sha256,
+    sourceCommit: 'c'.repeat(40), sourceTreeOid: 'd'.repeat(40),
+    hostPolicy: { sha256: 'e'.repeat(64), ownerUid: 0, mode: 0o600,
+      sourceCommit: 'c'.repeat(40), sourceTreeOid: 'd'.repeat(40) } };
+  const decision = evaluateRolloutGate({ candidate, rollback, host, phase2CustodyEvidence: forged });
+  assert.ok(decision.blockers.includes('PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED'),
+    'caller-authored fields cannot impersonate the local verifier result object');
+  assert.equal(decision.canActivateNow, false);
+});
+
+test('Phase 2 host custody policy is versioned and enforces key validity, revocation, and disjoint roots', () => {
+  const now = Date.parse('2026-10-27T12:30:00.000Z');
+  const key = () => {
+    const pair = crypto.generateKeyPairSync('ed25519');
+    const pem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    return { pem, fingerprint: hash(pair.publicKey.export({ type: 'spki', format: 'der' })) };
+  };
+  const authority = key();
+  const builder = key();
+  const valid = {
+    schema_version: 1, contract: 'runalith-phase2-host-custody-policy/v1', policy_version: 7,
+    updated_at: '2026-10-27T12:00:00.000Z', updated_by: 'security-admin', change_reference: 'CHG-TEST-7',
+    authority_id: 'phase2-owner', builder_identity: 'controlled-builder', repository: 'https://github.com/nplongx/runalith',
+    source_commit: 'c'.repeat(40), source_tree_oid: 'd'.repeat(40),
+    authority_key_id: 'phase2-authority-7', authority_public_key_pem: authority.pem,
+    authority_key_sha256: authority.fingerprint, authority_key_not_before: '2026-10-01T00:00:00.000Z',
+    authority_key_not_after: null, authority_key_revoked_at: null,
+    builder_key_id: 'phase2-builder-7', builder_public_key_pem: builder.pem,
+    builder_key_sha256: builder.fingerprint, builder_key_not_before: '2026-10-01T00:00:00.000Z',
+    builder_key_not_after: null, builder_key_revoked_at: null
+  };
+  const verified = validatePhase2CustodyPolicy(valid, { now, expectedRepository: valid.repository });
+  assert.equal(verified.policy_version, 7);
+  assert.equal(verified.authorityKeySha256, authority.fingerprint);
+  assert.equal(verified.builderKeySha256, builder.fingerprint);
+
+  assert.throws(() => validatePhase2CustodyPolicy({ ...valid, policy_version: 0 }, { now }), /HOST_POLICY_SCHEMA_INVALID/);
+  assert.throws(() => validatePhase2CustodyPolicy({ ...valid, change_reference: '' }, { now }), /HOST_POLICY_SCHEMA_INVALID/);
+  assert.throws(() => validatePhase2CustodyPolicy({ ...valid, repository: 'https://example.invalid/other/repo' },
+    { now, expectedRepository: valid.repository }), /HOST_POLICY_SCHEMA_INVALID/);
+  assert.throws(() => validatePhase2CustodyPolicy({ ...valid,
+    authority_key_not_after: '2026-10-27T12:00:00.000Z' }, { now }), /HOST_POLICY_KEY_UNAVAILABLE/);
+  assert.throws(() => validatePhase2CustodyPolicy({ ...valid,
+    builder_key_revoked_at: '2026-10-27T12:29:00.000Z' }, { now }), /HOST_POLICY_KEY_UNAVAILABLE/);
+  assert.throws(() => validatePhase2CustodyPolicy({ ...valid,
+    builder_key_sha256: authority.fingerprint }, { now }), /HOST_POLICY_KEY_PIN_INVALID/);
+  assert.throws(() => validatePhase2CustodyPolicy({ ...valid, unreviewed: true }, { now }), /HOST_POLICY_SCHEMA_INVALID/);
+});
+
+test('external checkpoint host policy pins a distinct authority/store root and rejects local endpoints, expiry and revocation', () => {
+  const now = Date.parse('2026-10-27T12:45:00.000Z');
+  const makeKey = () => {
+    const pair = crypto.generateKeyPairSync('ed25519');
+    return { pem: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      fingerprint: hash(pair.publicKey.export({ type: 'spki', format: 'der' })), privateKey: pair.privateKey };
+  };
+  const authority = makeKey();
+  const store = makeKey();
+  const policy = {
+    schema_version: 1, contract: 'runalith-external-checkpoint-host-policy/v1', policy_version: 3,
+    updated_at: '2026-10-27T12:00:00.000Z', updated_by: 'platform-security-admin', change_reference: 'CHG-ANCHOR-3',
+    authority_id: 'checkpoint-authority', authority_key_id: 'checkpoint-root-3',
+    authority_public_key_pem: authority.pem, authority_key_sha256: authority.fingerprint,
+    authority_key_not_before: '2026-10-01T00:00:00.000Z', authority_key_not_after: null, authority_key_revoked_at: null,
+    store_attestation_key_id: 'external-store-root-3', store_attestation_public_key_pem: store.pem,
+    store_attestation_key_sha256: store.fingerprint,
+    store_attestation_key_not_before: '2026-10-01T00:00:00.000Z', store_attestation_key_not_after: null,
+    store_attestation_key_revoked_at: null,
+    adapter_path: '/usr/local/libexec/runalith/external-checkpoint-adapter', adapter_sha256: 'a'.repeat(64),
+    external_store_id: 'security-store-prod-a', external_service_uri: 'https://checkpoint.security.example/v1',
+    max_store_attestation_age_seconds: 3600
+  };
+  const validated = validateExternalCheckpointHostPolicy(policy, { now });
+  assert.equal(validated.policy_version, 3);
+  assert.equal(validated.authorityKeySha256 || validated.authority_key_sha256, authority.fingerprint);
+  assert.equal(validated.storeAttestationPublicKey.asymmetricKeyType, 'ed25519');
+
+  const continuity = { source: 'host_monotonic_store', authorityId: policy.authority_id,
+    highWaterSequence: 12, lastCheckpointDigest: 'b'.repeat(64) };
+  const attestationPayload = {
+    schema_version: 1, contract: 'runalith-external-monotonic-store-attestation/v1',
+    authority_id: policy.authority_id, store_id: policy.external_store_id, service_uri: policy.external_service_uri,
+    backend: 'managed_remote_transactional_store', independent_of_plugin_host: true,
+    monotonicity_protection: true, restore_rollback_protection: true,
+    issued_at: '2026-10-27T12:44:00.000Z', valid_until: '2026-10-27T13:00:00.000Z',
+    evidence_sha256: computeExternalStoreContinuityEvidenceSha256({ authorityId: policy.authority_id,
+      storeId: policy.external_store_id, serviceUri: policy.external_service_uri, continuity })
+  };
+  const attestation = { ...attestationPayload,
+    signature_base64: crypto.sign(null, Buffer.from(canonicalTestJson(attestationPayload)), store.privateKey).toString('base64') };
+  assert.equal(verifyExternalStoreAttestation(attestation, validated, { now, continuity }).storeId, policy.external_store_id,
+    'a store signature must attest to the exact high-water and previous-digest record used by the checkpoint verifier');
+  assert.throws(() => verifyExternalStoreAttestation(attestation, validated, { now,
+    continuity: { ...continuity, lastCheckpointDigest: 'c'.repeat(64) } }),
+  /EXTERNAL_CHECKPOINT_STORE_ATTESTATION_BINDING_MISMATCH/);
+  assert.throws(() => verifyExternalStoreAttestation({ ...attestation, evidence_sha256: 'd'.repeat(64) }, validated,
+    { now, continuity }), /EXTERNAL_CHECKPOINT_STORE_ATTESTATION_BINDING_MISMATCH/);
+
+  assert.throws(() => validateExternalCheckpointHostPolicy({ ...policy, external_service_uri: 'http://checkpoint.security.example/v1' }, { now }),
+    /HOST_CHECKPOINT_POLICY_SERVICE_INVALID/);
+  assert.throws(() => validateExternalCheckpointHostPolicy({ ...policy, external_service_uri: 'https://127.0.0.1/v1' }, { now }),
+    /HOST_CHECKPOINT_POLICY_SERVICE_INVALID/);
+  assert.throws(() => validateExternalCheckpointHostPolicy({ ...policy,
+    store_attestation_key_sha256: authority.fingerprint, store_attestation_public_key_pem: authority.pem }, { now }),
+  /HOST_CHECKPOINT_POLICY_STORE_KEY_PIN_INVALID/);
+  assert.throws(() => validateExternalCheckpointHostPolicy({ ...policy,
+    authority_key_revoked_at: '2026-10-27T12:44:00.000Z' }, { now }), /HOST_CHECKPOINT_POLICY_KEY_UNAVAILABLE/);
+  assert.throws(() => validateExternalCheckpointHostPolicy({ ...policy,
+    store_attestation_key_not_after: '2026-10-27T12:44:00.000Z' }, { now }), /HOST_CHECKPOINT_POLICY_STORE_KEY_UNAVAILABLE/);
+  assert.throws(() => validateExternalCheckpointHostPolicy({ ...policy,
+    adapter_path: '/tmp/untrusted-checkpoint-adapter' }, { now }), /HOST_CHECKPOINT_POLICY_SCHEMA_INVALID/);
+  assert.throws(() => validateExternalCheckpointHostPolicy({ ...policy, unreviewed: true }, { now }), /HOST_POLICY_SCHEMA_INVALID/);
+});
+
+test('caller-authored anchor reports never open the external checkpoint gate', () => {
+  const candidateSha256 = 'a'.repeat(64);
+  const rollbackSha256 = 'b'.repeat(64);
+  const forged = { verified: true, status: 'VERIFIED', source: 'host_monotonic_checkpoint_service',
+    authorityId: 'caller-claimed-authority', checkpointSequence: 9,
+    checkpointDigest: 'c'.repeat(64), previousCheckpointDigest: 'd'.repeat(64),
+    ledgerStateSha256: 'e'.repeat(64), trustDomainStateSha256: 'f'.repeat(64),
+    signatureVerified: true, independentOfLocalLedger: true, candidateSha256, rollbackSha256,
+    observedAt: new Date().toISOString(), productionAuthorityEstablished: true,
+    externalStoreAttestationVerified: true, commitReceiptVerified: true, checkpointStateAdvanced: true, nonceConsumed: true };
+  assert.equal(validateExternalAntiRollbackAnchorReport(forged, { candidateSha256, rollbackSha256 }).verified, false);
+});
+
+test('release-evidence preflight rejects missing and partial argument sets before opening any evidence path', () => {
+  const candidateBundle = { path: '/not-read/candidate.mcpb', sha256: 'a'.repeat(64), version: '1.0.9-rc.12' };
+  const rollback = { path: '/not-read/rollback.mcpb', sha256: 'b'.repeat(64), version: '1.0.9-rc.11', verified: true };
+  const host = { installedGeneration: { manifestVersion: '1.0.9-rc.11' } };
+  const missing = verifyReleaseEvidenceForPreflight({ args: {}, candidateBundle, rollback, host });
+  assert.equal(missing.cryptographicEvidenceVerified, false);
+  assert.deepEqual(missing.evidenceBlockers, ['RELEASE_EVIDENCE_NOT_PROVIDED']);
+  assert.deepEqual(missing.missingArguments, ['releasePolicy', 'provenance', 'verification', 'approval', 'releaseNonce']);
+
+  const partial = verifyReleaseEvidenceForPreflight({ args: { releasePolicy: '/not-read/policy.json', approval: '/not-read/approval.json' }, candidateBundle, rollback, host });
+  assert.equal(partial.cryptographicEvidenceVerified, false);
+  assert.deepEqual(partial.evidenceBlockers, ['RELEASE_EVIDENCE_ARGUMENT_SET_INCOMPLETE']);
+  assert.deepEqual(partial.missingArguments, ['provenance', 'verification', 'releaseNonce']);
+
+  const callerSelectedPolicy = verifyReleaseEvidenceForPreflight({ args: {
+    releasePolicy: '/tmp/self-selected-policy.json', provenance: '/tmp/provenance.json',
+    verification: '/tmp/verification.json', approval: '/tmp/approval.json', releaseNonce: 'a'.repeat(32)
+  }, candidateBundle, rollback, host });
+  assert.equal(callerSelectedPolicy.cryptographicEvidenceVerified, false);
+  assert.ok(callerSelectedPolicy.evidenceBlockers.includes('HOST_POLICY_PATH_NOT_AUTHORIZED'),
+    'when all evidence arguments are supplied, caller-created signer roots must not be accepted as release policy');
+});
+
+test('production release policy scope is pinned to the canonical repository, package subject, build type and production environment', () => {
+  const valid = {
+    schema_version: 1, contract: 'runalith-release-policy/v1', policy_version: 9,
+    source_repository: 'https://github.com/nplongx/runalith', subject_name: 'runalith.mcpb',
+    expected_build_type: 'https://runalith.dev/build/mcpb/v1', target_environment: 'production'
+  };
+  const result = validateHostPinnedReleasePolicyScope(valid);
+  assert.equal(result.canonicalScopeVerified, true);
+  assert.equal(result.policyVersion, 9);
+
+  for (const [field, value] of [
+    ['source_repository', 'https://github.com/attacker/other-repo'],
+    ['subject_name', 'other-package.mcpb'],
+    ['expected_build_type', 'https://example.invalid/unreviewed-build/v1'],
+    ['target_environment', 'staging'],
+    ['policy_version', 0]
+  ]) {
+    assert.throws(() => validateHostPinnedReleasePolicyScope({ ...valid, [field]: value }),
+      error => error.code === 'RELEASE_POLICY_SCOPE_NOT_CANONICAL', `${field} substitution must fail closed`);
+  }
 });
 
 test('active-runtime trust preflight rejects malformed, legacy-only, colliding, revoked and expired trust inputs without leaking PEM', () => {

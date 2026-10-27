@@ -28,12 +28,33 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   function readConfigFile(inputPath) {
     const configPath = path.resolve(inputPath);
-    const stat = fs.lstatSync(configPath);
+    const stat = fs.lstatSync(configPath, { bigint: true });
     if (!stat.isFile() || stat.isSymbolicLink() || fs.realpathSync(configPath) !== configPath) {
       throw new Error('configuration path and every parent component must resolve to a canonical regular non-symlink file');
     }
-    if (stat.size < 2 || stat.size > 128 * 1024) throw new Error('configuration file must be between 2 bytes and 128 KiB');
-    return { configPath, contents: fs.readFileSync(configPath, 'utf8') };
+    // Pin the opened inode, refuse a final-component symlink, and compare the
+    // descriptor and pathname before/after reading. realpath+lstat followed by
+    // readFile(path) alone leaves a swap window for operator-supplied configs.
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+    const descriptor = fs.openSync(configPath, flags);
+    try {
+      const before = fs.fstatSync(descriptor, { bigint: true });
+      if (!before.isFile() || before.dev !== stat.dev || before.ino !== stat.ino || before.size < 2n || before.size > 128n * 1024n) {
+        throw new Error('configuration file must be a regular file between 2 bytes and 128 KiB');
+      }
+      const bytes = fs.readFileSync(descriptor);
+      const after = fs.fstatSync(descriptor, { bigint: true });
+      const pathAfter = fs.lstatSync(configPath, { bigint: true });
+      const stable = before.dev === after.dev && before.ino === after.ino && before.size === after.size &&
+        before.mtimeNs === after.mtimeNs && before.ctimeNs === after.ctimeNs &&
+        bytes.length === Number(after.size) && pathAfter.isFile() && !pathAfter.isSymbolicLink() &&
+        pathAfter.dev === after.dev && pathAfter.ino === after.ino && pathAfter.size === after.size &&
+        pathAfter.mtimeNs === after.mtimeNs && pathAfter.ctimeNs === after.ctimeNs && fs.realpathSync(configPath) === configPath;
+      if (!stable) throw new Error('configuration path or bytes changed during secure read; retry validation from a stable canonical file');
+      return { configPath, contents: bytes.toString('utf8') };
+    } finally {
+      fs.closeSync(descriptor);
+    }
   }
   if (args.requirePeerConfig && !args.peerConfig) {
     console.log(JSON.stringify({ result: 'BLOCKED', code: 'AGG_TRUST_CONFIG_PAIR_REQUIRED',

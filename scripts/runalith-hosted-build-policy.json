@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "contract": "runalith-hosted-build-policy/v1",
+  "policy_version": 1,
+  "source_repository": "https://github.com/nplongx/runalith",
+  "target_environment": "not-for-production",
+  "subject_suffix": ".mcpb",
+  "builder_workflow": ".github/workflows/runalith-provenance-builder.yml",
+  "verifier_workflow": ".github/workflows/runalith-provenance-verifier.yml",
+  "oidc_issuer": "https://token.actions.githubusercontent.com",
+  "build_type": "https://actions.github.io/buildtypes/workflow/v1",
+  "provenance_predicate": "https://slsa.dev/provenance/v1",
+  "verification_predicate": "https://runalith.dev/attestations/hosted-candidate-verification/v1",
+  "required_tests": [
+    "npm test",
+    "hosted-builder-contract-tests",
+    "docs:check",
+    "site:check",
+    "package-reproducibility",
+    "candidate:zip-integrity",
+    "candidate:source-alignment",
+    "candidate:extracted-runtime",
+    "candidate:independent-rebuild",
+    "candidate:independent-source-alignment",
+    "builder:signature-verification"
+  ],
+  "max_attestation_age_hours": 24,
+  "production_release_approval_required": true,
+  "host_trust_provisioning_required": true,
+  "external_monotonic_checkpoint_required": true,
+  "rollback_must_match_observed_baseline_bytes": true
+}

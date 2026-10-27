@@ -10,6 +10,10 @@ import { fileURLToPath } from 'node:url';
 import { isSafePortableArchivePath, validateZipEntryTypes } from '../benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs';
 import { assertAdaptiveGoalTrustDomainsDisjoint, adaptiveGoalTrustConfigurationStatus,
   loadAdaptiveGoalTrustConfiguration } from '../src/runtime/adaptive-goal-trust-configuration.js';
+import { parseStrictJson } from '../src/runtime/strict-json.js';
+import { canonicalExternalCheckpointPayload, verifyExternalTrustCheckpointResponse } from './lib/external-trust-checkpoint-contract.mjs';
+import { verifyPhase2CustodyEvidence } from './lib/phase2-custody-evidence.mjs';
+import { parseRunalithReleaseEvidenceJson, verifyRunalithReleaseEvidence } from './lib/runalith-release-trust-contract.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APP_ROOT_DEFAULT = path.join(os.homedir(), '.config', 'chat-on-steroids');
@@ -20,8 +24,54 @@ const MAX_ARCHIVE_ENTRIES = 2000;
 const MAX_UNPACKED_BYTES = 256 * 1024 * 1024;
 const MAX_PATH_BYTES = 1024;
 const SHA256_HEX = /^[a-f0-9]{64}$/;
+const VERIFIED_RELEASE_EVIDENCE_RESULTS = new WeakSet();
+const VERIFIED_PHASE2_CUSTODY_RESULTS = new WeakSet();
+const HOST_POLICY_DIRECTORY = '/etc/runalith';
+const HOST_RELEASE_POLICY_PATH = path.join(HOST_POLICY_DIRECTORY, 'release-policy.json');
+const HOST_PHASE2_CUSTODY_POLICY_PATH = path.join(HOST_POLICY_DIRECTORY, 'phase2-custody-trust.json');
+const HOST_EXTERNAL_CHECKPOINT_POLICY_PATH = path.join(HOST_POLICY_DIRECTORY, 'external-checkpoint-trust.json');
+const HOST_EXTERNAL_CHECKPOINT_ADAPTER_PATH = '/usr/local/libexec/runalith/external-checkpoint-adapter';
+const PHASE2_CUSTODY_POLICY_CONTRACT = 'runalith-phase2-host-custody-policy/v1';
+const PHASE2_CUSTODY_EXPECTED_REPOSITORY = 'https://github.com/nplongx/runalith';
+const RELEASE_POLICY_EXPECTED_REPOSITORY = 'https://github.com/nplongx/runalith';
+const RELEASE_POLICY_EXPECTED_SUBJECT = 'runalith.mcpb';
+const RELEASE_POLICY_EXPECTED_BUILD_TYPE = 'https://runalith.dev/build/mcpb/v1';
+const RELEASE_POLICY_EXPECTED_ENVIRONMENT = 'production';
+const EXTERNAL_CHECKPOINT_POLICY_CONTRACT = 'runalith-external-checkpoint-host-policy/v1';
+const EXTERNAL_CHECKPOINT_OBSERVATION_CONTRACT = 'runalith-external-checkpoint-adapter-observation/v1';
+const EXTERNAL_CHECKPOINT_COMMIT_CONTRACT = 'runalith-external-checkpoint-adapter-commit/v1';
+const EXTERNAL_STORE_ATTESTATION_CONTRACT = 'runalith-external-monotonic-store-attestation/v1';
+const EXTERNAL_STORE_CONTINUITY_EVIDENCE_CONTRACT = 'runalith-external-store-continuity-evidence/v1';
+const EXTERNAL_CHECKPOINT_COMMIT_RECEIPT_CONTRACT = 'runalith-external-checkpoint-commit-receipt/v1';
+const PHASE2_CUSTODY_POLICY_KEYS = ['schema_version', 'contract', 'policy_version', 'updated_at', 'updated_by',
+  'change_reference', 'authority_id', 'builder_identity', 'repository', 'source_commit', 'source_tree_oid',
+  'authority_key_id', 'authority_public_key_pem', 'authority_key_sha256', 'authority_key_not_before',
+  'authority_key_not_after', 'authority_key_revoked_at', 'builder_key_id', 'builder_public_key_pem',
+  'builder_key_sha256', 'builder_key_not_before', 'builder_key_not_after', 'builder_key_revoked_at'];
+const EXTERNAL_CHECKPOINT_POLICY_KEYS = ['schema_version', 'contract', 'policy_version', 'updated_at', 'updated_by',
+  'change_reference', 'authority_id', 'authority_key_id', 'authority_public_key_pem', 'authority_key_sha256', 'authority_key_not_before',
+  'authority_key_not_after', 'authority_key_revoked_at', 'store_attestation_key_id', 'store_attestation_public_key_pem',
+  'store_attestation_key_sha256', 'store_attestation_key_not_before', 'store_attestation_key_not_after',
+  'store_attestation_key_revoked_at', 'adapter_path', 'adapter_sha256', 'external_store_id',
+  'external_service_uri', 'max_store_attestation_age_seconds'];
+const EXTERNAL_STORE_ATTESTATION_KEYS = ['schema_version', 'contract', 'authority_id', 'store_id', 'service_uri',
+  'backend', 'independent_of_plugin_host', 'monotonicity_protection', 'restore_rollback_protection', 'issued_at',
+  'valid_until', 'evidence_sha256', 'signature_base64'];
+const EXTERNAL_CHECKPOINT_COMMIT_RECEIPT_KEYS = ['schema_version', 'contract', 'authority_id', 'request_nonce',
+  'candidate_sha256', 'rollback_sha256', 'checkpoint_sequence', 'checkpoint_digest', 'previous_checkpoint_digest',
+  'commit_status', 'committed_at', 'signature_base64'];
+const VERIFIED_EXTERNAL_CHECKPOINT_RESULTS = new WeakSet();
 
 function sha256(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
+function deepFreezeResult(value, seen = new Set()) {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor && Object.hasOwn(descriptor, 'value')) deepFreezeResult(descriptor.value, seen);
+  }
+  return Object.freeze(value);
+}
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: options.timeout ?? 30_000,
     maxBuffer: options.maxBuffer ?? 32 * 1024 * 1024, ...options });
@@ -62,6 +112,494 @@ function readRegularFile(filePath, maxBytes = MAX_BUNDLE_BYTES) {
     }
     return Buffer.concat(chunks, count);
   } finally { fs.closeSync(fd); }
+}
+
+function policyError(code, message) {
+  return Object.assign(new Error(`${code}: ${message}`), { code });
+}
+
+/**
+ * Trust policy files are a host-administration boundary, not caller input.
+ * The CLI may name an evidence file, but cannot select a different trust root:
+ * policies must live at the fixed /etc/runalith path, be root-owned, and not be
+ * writable by group/other. This is deliberately Linux-host-specific.
+ */
+function readHostProvisionedPolicy(expectedPath, requestedPath = expectedPath, label = 'host policy') {
+  if (path.resolve(requestedPath) !== expectedPath || !path.isAbsolute(expectedPath)) {
+    throw policyError('HOST_POLICY_PATH_NOT_AUTHORIZED', `${label} must be provisioned at ${expectedPath}`);
+  }
+  let directoryBefore;
+  let fileBefore;
+  try {
+    directoryBefore = fs.lstatSync(HOST_POLICY_DIRECTORY, { bigint: true });
+    fileBefore = fs.lstatSync(expectedPath, { bigint: true });
+  } catch {
+    throw policyError('HOST_POLICY_NOT_CONFIGURED', `${label} is not provisioned at ${expectedPath}`);
+  }
+  if (!directoryBefore.isDirectory() || directoryBefore.isSymbolicLink() || directoryBefore.uid !== 0n ||
+      (directoryBefore.mode & 0o022n) !== 0n || fs.realpathSync(HOST_POLICY_DIRECTORY) !== HOST_POLICY_DIRECTORY) {
+    throw policyError('HOST_POLICY_DIRECTORY_UNTRUSTED', `${HOST_POLICY_DIRECTORY} must be a canonical root-owned directory not writable by group/other`);
+  }
+  if (!fileBefore.isFile() || fileBefore.isSymbolicLink() || fileBefore.uid !== 0n ||
+      (fileBefore.mode & 0o022n) !== 0n || fileBefore.size < 2n || fileBefore.size > 128n * 1024n ||
+      fs.realpathSync(expectedPath) !== expectedPath) {
+    throw policyError('HOST_POLICY_FILE_UNTRUSTED', `${label} must be a canonical root-owned regular file, 2–131072 bytes, not writable by group/other`);
+  }
+  let bytes;
+  try { bytes = readRegularFile(expectedPath, 128 * 1024); }
+  catch (error) { throw policyError('HOST_POLICY_READ_UNSAFE', `${label} could not be read stably: ${String(error?.message || error)}`); }
+  const directoryAfter = fs.lstatSync(HOST_POLICY_DIRECTORY, { bigint: true });
+  const fileAfter = fs.lstatSync(expectedPath, { bigint: true });
+  if (directoryAfter.dev !== directoryBefore.dev || directoryAfter.ino !== directoryBefore.ino ||
+      directoryAfter.uid !== 0n || (directoryAfter.mode & 0o022n) !== 0n ||
+      fileAfter.dev !== fileBefore.dev || fileAfter.ino !== fileBefore.ino || fileAfter.uid !== 0n ||
+      fileAfter.size !== fileBefore.size || fileAfter.mtimeNs !== fileBefore.mtimeNs ||
+      fileAfter.ctimeNs !== fileBefore.ctimeNs || (fileAfter.mode & 0o022n) !== 0n) {
+    throw policyError('HOST_POLICY_CHANGED_DURING_READ', `${label} ownership, mode, inode, or contents changed during verification`);
+  }
+  return { bytes, path: expectedPath, sha256: sha256(bytes), ownerUid: Number(fileAfter.uid), mode: Number(fileAfter.mode & 0o777n) };
+}
+
+function exactObjectKeys(value, expected, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.getPrototypeOf(value) !== Object.prototype ||
+      Object.keys(value).sort().join('\0') !== [...expected].sort().join('\0')) {
+    throw policyError('HOST_POLICY_SCHEMA_INVALID', `${label} must contain exactly: ${[...expected].sort().join(', ')}`);
+  }
+}
+
+function publicKeySha256(pem, label) {
+  let key;
+  try { key = crypto.createPublicKey(pem); }
+  catch { throw policyError('HOST_POLICY_PUBLIC_KEY_INVALID', `${label} is not a parseable public key`); }
+  if (key.asymmetricKeyType !== 'ed25519') throw policyError('HOST_POLICY_PUBLIC_KEY_INVALID', `${label} must use Ed25519`);
+  return sha256(key.export({ type: 'spki', format: 'der' }));
+}
+
+function canonicalPolicyTimestamp(value, label, { nullable = false } = {}) {
+  if (nullable && value === null) return null;
+  if (typeof value !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value)) {
+    throw policyError('HOST_POLICY_TIMESTAMP_INVALID', `${label} must be a canonical UTC timestamp${nullable ? ' or null' : ''}`);
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value) {
+    throw policyError('HOST_POLICY_TIMESTAMP_INVALID', `${label} is not a canonical UTC timestamp`);
+  }
+  return parsed;
+}
+
+/** Pure schema/key-window validation. It does not authenticate where a policy came from. */
+export function validatePhase2CustodyPolicy(policy, { now = Date.now(), expectedRepository = null } = {}) {
+  if (!Number.isSafeInteger(now)) throw policyError('HOST_POLICY_CLOCK_INVALID', 'policy verification clock must be an integer timestamp');
+  exactObjectKeys(policy, PHASE2_CUSTODY_POLICY_KEYS, 'Phase 2 custody trust policy');
+  const gitOid = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/;
+  const keyId = /^[a-z][a-z0-9._-]{0,79}$/;
+  if (policy.schema_version !== 1 || policy.contract !== PHASE2_CUSTODY_POLICY_CONTRACT ||
+      !Number.isSafeInteger(policy.policy_version) || policy.policy_version < 1 ||
+      typeof policy.updated_by !== 'string' || !policy.updated_by.trim() || policy.updated_by.length > 200 ||
+      typeof policy.change_reference !== 'string' || !policy.change_reference.trim() || policy.change_reference.length > 300 ||
+      typeof policy.authority_id !== 'string' || !policy.authority_id.trim() || policy.authority_id.length > 200 ||
+      typeof policy.builder_identity !== 'string' || !policy.builder_identity.trim() || policy.builder_identity.length > 300 ||
+      typeof policy.repository !== 'string' || policy.repository !== PHASE2_CUSTODY_EXPECTED_REPOSITORY ||
+      (expectedRepository && policy.repository !== expectedRepository) ||
+      !gitOid.test(policy.source_commit || '') || !gitOid.test(policy.source_tree_oid || '') ||
+      !keyId.test(policy.authority_key_id || '') || !keyId.test(policy.builder_key_id || '') ||
+      policy.authority_key_id === policy.builder_key_id ||
+      typeof policy.authority_public_key_pem !== 'string' || typeof policy.builder_public_key_pem !== 'string' ||
+      !SHA256_HEX.test(policy.authority_key_sha256 || '') || !SHA256_HEX.test(policy.builder_key_sha256 || '')) {
+    throw policyError('HOST_POLICY_SCHEMA_INVALID', 'Phase 2 policy version/administration metadata, repository, frozen source, key IDs or key pins are invalid');
+  }
+  const updatedAt = canonicalPolicyTimestamp(policy.updated_at, 'updated_at');
+  if (updatedAt > now + 60_000) throw policyError('HOST_POLICY_FUTURE_DATED', 'policy updated_at is more than one minute in the future');
+  const authorityNotBefore = canonicalPolicyTimestamp(policy.authority_key_not_before, 'authority_key_not_before');
+  const authorityNotAfter = canonicalPolicyTimestamp(policy.authority_key_not_after, 'authority_key_not_after', { nullable: true });
+  const authorityRevokedAt = canonicalPolicyTimestamp(policy.authority_key_revoked_at, 'authority_key_revoked_at', { nullable: true });
+  const builderNotBefore = canonicalPolicyTimestamp(policy.builder_key_not_before, 'builder_key_not_before');
+  const builderNotAfter = canonicalPolicyTimestamp(policy.builder_key_not_after, 'builder_key_not_after', { nullable: true });
+  const builderRevokedAt = canonicalPolicyTimestamp(policy.builder_key_revoked_at, 'builder_key_revoked_at', { nullable: true });
+  for (const [label, notBefore, notAfter, revokedAt] of [
+    ['authority', authorityNotBefore, authorityNotAfter, authorityRevokedAt],
+    ['builder', builderNotBefore, builderNotAfter, builderRevokedAt]
+  ]) {
+    if (notAfter !== null && notAfter <= notBefore) throw policyError('HOST_POLICY_KEY_WINDOW_INVALID', `${label} key not_after must be later than not_before`);
+    if (revokedAt !== null || notBefore > now || (notAfter !== null && now >= notAfter)) {
+      throw policyError('HOST_POLICY_KEY_UNAVAILABLE', `${label} key is revoked or outside its validity window`);
+    }
+  }
+  const authorityFingerprint = publicKeySha256(policy.authority_public_key_pem, 'authority_public_key_pem');
+  const builderFingerprint = publicKeySha256(policy.builder_public_key_pem, 'builder_public_key_pem');
+  if (authorityFingerprint !== policy.authority_key_sha256 || builderFingerprint !== policy.builder_key_sha256 ||
+      authorityFingerprint === builderFingerprint) {
+    throw policyError('HOST_POLICY_KEY_PIN_INVALID', 'Phase 2 authority/builder key fingerprints must match and use distinct Ed25519 roots');
+  }
+  return { ...policy, authorityKeySha256: authorityFingerprint, builderKeySha256: builderFingerprint,
+    updatedAt, authorityKeyNotBefore: authorityNotBefore, authorityKeyNotAfter: authorityNotAfter,
+    authorityKeyRevokedAt: authorityRevokedAt, builderKeyNotBefore: builderNotBefore,
+    builderKeyNotAfter: builderNotAfter, builderKeyRevokedAt: builderRevokedAt };
+}
+
+/**
+ * Enforce the production package's canonical release scope before opening
+ * candidate or DSSE evidence paths. The root-owned policy selects signer keys
+ * and required checks, but cannot retarget this CLI to another repository,
+ * subject, build type or lower-trust environment.
+ */
+export function validateHostPinnedReleasePolicyScope(policy) {
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy) ||
+      policy.source_repository !== RELEASE_POLICY_EXPECTED_REPOSITORY ||
+      policy.subject_name !== RELEASE_POLICY_EXPECTED_SUBJECT ||
+      policy.expected_build_type !== RELEASE_POLICY_EXPECTED_BUILD_TYPE ||
+      policy.target_environment !== RELEASE_POLICY_EXPECTED_ENVIRONMENT ||
+      !Number.isSafeInteger(policy.policy_version) || policy.policy_version < 1) {
+    throw policyError('RELEASE_POLICY_SCOPE_NOT_CANONICAL',
+      `release policy must pin repository=${RELEASE_POLICY_EXPECTED_REPOSITORY}, subject=${RELEASE_POLICY_EXPECTED_SUBJECT}, buildType=${RELEASE_POLICY_EXPECTED_BUILD_TYPE}, environment=${RELEASE_POLICY_EXPECTED_ENVIRONMENT}, and a positive policy_version`);
+  }
+  return { canonicalScopeVerified: true, sourceRepository: RELEASE_POLICY_EXPECTED_REPOSITORY,
+    subjectName: RELEASE_POLICY_EXPECTED_SUBJECT, expectedBuildType: RELEASE_POLICY_EXPECTED_BUILD_TYPE,
+    targetEnvironment: RELEASE_POLICY_EXPECTED_ENVIRONMENT, policyVersion: policy.policy_version };
+}
+
+/** Pure external-checkpoint trust-policy validation. This never grants gate authority. */
+export function validateExternalCheckpointHostPolicy(policy, { now = Date.now() } = {}) {
+  if (!Number.isSafeInteger(now)) throw policyError('HOST_CHECKPOINT_POLICY_CLOCK_INVALID', 'checkpoint policy clock must be an integer timestamp');
+  exactObjectKeys(policy, EXTERNAL_CHECKPOINT_POLICY_KEYS, 'external checkpoint host policy');
+  const keyId = /^[a-z][a-z0-9._-]{0,79}$/;
+  if (policy.schema_version !== 1 || policy.contract !== EXTERNAL_CHECKPOINT_POLICY_CONTRACT ||
+      !Number.isSafeInteger(policy.policy_version) || policy.policy_version < 1 ||
+      typeof policy.updated_by !== 'string' || !policy.updated_by.trim() || policy.updated_by.length > 200 ||
+      typeof policy.change_reference !== 'string' || !policy.change_reference.trim() || policy.change_reference.length > 300 ||
+      typeof policy.authority_id !== 'string' || !policy.authority_id.trim() || policy.authority_id.length > 200 ||
+      !keyId.test(policy.authority_key_id || '') ||
+      typeof policy.authority_public_key_pem !== 'string' || !SHA256_HEX.test(policy.authority_key_sha256 || '') ||
+      !keyId.test(policy.store_attestation_key_id || '') || policy.store_attestation_key_id === policy.authority_key_id ||
+      typeof policy.store_attestation_public_key_pem !== 'string' || !SHA256_HEX.test(policy.store_attestation_key_sha256 || '') ||
+      policy.adapter_path !== HOST_EXTERNAL_CHECKPOINT_ADAPTER_PATH || !SHA256_HEX.test(policy.adapter_sha256 || '') ||
+      typeof policy.external_store_id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{2,199}$/.test(policy.external_store_id) ||
+      typeof policy.external_service_uri !== 'string' || !Number.isSafeInteger(policy.max_store_attestation_age_seconds) ||
+      policy.max_store_attestation_age_seconds < 60 || policy.max_store_attestation_age_seconds > 90 * 24 * 60 * 60) {
+    throw policyError('HOST_CHECKPOINT_POLICY_SCHEMA_INVALID', 'external checkpoint policy version, authority, adapter, store identity or change metadata is invalid');
+  }
+  const updatedAt = canonicalPolicyTimestamp(policy.updated_at, 'updated_at');
+  const keyNotBefore = canonicalPolicyTimestamp(policy.authority_key_not_before, 'authority_key_not_before');
+  const keyNotAfter = canonicalPolicyTimestamp(policy.authority_key_not_after, 'authority_key_not_after', { nullable: true });
+  const keyRevokedAt = canonicalPolicyTimestamp(policy.authority_key_revoked_at, 'authority_key_revoked_at', { nullable: true });
+  const storeKeyNotBefore = canonicalPolicyTimestamp(policy.store_attestation_key_not_before, 'store_attestation_key_not_before');
+  const storeKeyNotAfter = canonicalPolicyTimestamp(policy.store_attestation_key_not_after, 'store_attestation_key_not_after', { nullable: true });
+  const storeKeyRevokedAt = canonicalPolicyTimestamp(policy.store_attestation_key_revoked_at, 'store_attestation_key_revoked_at', { nullable: true });
+  if (updatedAt > now + 60_000) throw policyError('HOST_CHECKPOINT_POLICY_FUTURE_DATED', 'policy updated_at is more than one minute in the future');
+  if (keyNotAfter !== null && keyNotAfter <= keyNotBefore) throw policyError('HOST_CHECKPOINT_POLICY_KEY_WINDOW_INVALID', 'authority key not_after must be later than not_before');
+  if (keyRevokedAt !== null || keyNotBefore > now || (keyNotAfter !== null && now >= keyNotAfter)) {
+    throw policyError('HOST_CHECKPOINT_POLICY_KEY_UNAVAILABLE', 'external checkpoint authority key is revoked or outside its validity window');
+  }
+  if (storeKeyNotAfter !== null && storeKeyNotAfter <= storeKeyNotBefore) {
+    throw policyError('HOST_CHECKPOINT_POLICY_STORE_KEY_WINDOW_INVALID', 'store attestation key not_after must be later than not_before');
+  }
+  if (storeKeyRevokedAt !== null || storeKeyNotBefore > now || (storeKeyNotAfter !== null && now >= storeKeyNotAfter)) {
+    throw policyError('HOST_CHECKPOINT_POLICY_STORE_KEY_UNAVAILABLE', 'external store attestation key is revoked or outside its validity window');
+  }
+  let publicKey;
+  try { publicKey = crypto.createPublicKey(policy.authority_public_key_pem); }
+  catch { throw policyError('HOST_CHECKPOINT_POLICY_KEY_INVALID', 'checkpoint authority public key is invalid'); }
+  if (publicKey.asymmetricKeyType !== 'ed25519' ||
+      sha256(publicKey.export({ type: 'spki', format: 'der' })) !== policy.authority_key_sha256) {
+    throw policyError('HOST_CHECKPOINT_POLICY_KEY_PIN_INVALID', 'checkpoint authority SPKI fingerprint does not match the configured pin');
+  }
+  let storeAttestationPublicKey;
+  try { storeAttestationPublicKey = crypto.createPublicKey(policy.store_attestation_public_key_pem); }
+  catch { throw policyError('HOST_CHECKPOINT_POLICY_STORE_KEY_INVALID', 'store attestation public key is invalid'); }
+  const storeAttestationKeySha256 = sha256(storeAttestationPublicKey.export({ type: 'spki', format: 'der' }));
+  if (storeAttestationPublicKey.asymmetricKeyType !== 'ed25519' || storeAttestationKeySha256 !== policy.store_attestation_key_sha256 ||
+      storeAttestationKeySha256 === policy.authority_key_sha256) {
+    throw policyError('HOST_CHECKPOINT_POLICY_STORE_KEY_PIN_INVALID', 'external store attestation root must match its SPKI pin and be distinct from the checkpoint signing root');
+  }
+  let service;
+  try { service = new URL(policy.external_service_uri); }
+  catch { throw policyError('HOST_CHECKPOINT_POLICY_SERVICE_INVALID', 'external checkpoint service URI is invalid'); }
+  const hostname = service.hostname.toLowerCase();
+  const localHost = !hostname.includes('.') || hostname === 'localhost' || hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') || hostname === '::1' || hostname.startsWith('127.') || hostname.startsWith('10.') ||
+    hostname.startsWith('192.168.') || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) || /^\d+(?:\.\d+){3}$/.test(hostname);
+  if (service.protocol !== 'https:' || service.username || service.password || service.hash ||
+      (service.port && service.port !== '443') || localHost) {
+    throw policyError('HOST_CHECKPOINT_POLICY_SERVICE_INVALID', 'external checkpoint service must use HTTPS to a non-local DNS hostname on port 443');
+  }
+  return { ...policy, updatedAt, authorityKeyNotBefore: keyNotBefore,
+    authorityKeyNotAfter: keyNotAfter, authorityKeyRevokedAt: keyRevokedAt, authorityPublicKey: publicKey,
+    storeAttestationKeyNotBefore: storeKeyNotBefore, storeAttestationKeyNotAfter: storeKeyNotAfter,
+    storeAttestationKeyRevokedAt: storeKeyRevokedAt, storeAttestationPublicKey };
+}
+
+function inspectHostOwnedCheckpointAdapter(adapterPath, expectedSha256) {
+  if (adapterPath !== HOST_EXTERNAL_CHECKPOINT_ADAPTER_PATH) {
+    throw policyError('HOST_CHECKPOINT_ADAPTER_PATH_UNAUTHORIZED', 'checkpoint adapter path is not the fixed host-managed path');
+  }
+  let cursor = path.parse(adapterPath).root;
+  const parts = adapterPath.slice(cursor.length).split(path.sep).filter(Boolean);
+  for (let index = 0; index < parts.length; index++) {
+    cursor = path.join(cursor, parts[index]);
+    let stat;
+    try { stat = fs.lstatSync(cursor, { bigint: true }); }
+    catch { throw policyError('HOST_CHECKPOINT_ADAPTER_NOT_CONFIGURED', 'host-owned external checkpoint adapter is not installed at the required path'); }
+    if (stat.isSymbolicLink() || fs.realpathSync(cursor) !== cursor || stat.uid !== 0n || (stat.mode & 0o022n) !== 0n) {
+      throw policyError('HOST_CHECKPOINT_ADAPTER_UNTRUSTED', 'every adapter path component must be canonical, root-owned, and not writable by group/other');
+    }
+    if (index < parts.length - 1 && !stat.isDirectory()) {
+      throw policyError('HOST_CHECKPOINT_ADAPTER_UNTRUSTED', 'adapter parent component is not a regular directory');
+    }
+    if (index === parts.length - 1 && (!stat.isFile() || (stat.mode & 0o111n) === 0n)) {
+      throw policyError('HOST_CHECKPOINT_ADAPTER_UNTRUSTED', 'adapter must be a root-owned executable regular file');
+    }
+  }
+  const bytes = readRegularFile(adapterPath, 32 * 1024 * 1024);
+  const observedSha256 = sha256(bytes);
+  if (observedSha256 !== expectedSha256) throw policyError('HOST_CHECKPOINT_ADAPTER_HASH_MISMATCH', 'installed adapter bytes do not match the root-provisioned SHA-256 pin');
+  return { path: adapterPath, sha256: observedSha256, ownerUid: 0 };
+}
+
+function runHostCheckpointAdapter(adapterPath, action, payload) {
+  const result = spawnSync(adapterPath, [action], {
+    cwd: '/', input: Buffer.from(`${JSON.stringify(payload)}\n`, 'utf8'), encoding: 'buffer',
+    timeout: 15_000, maxBuffer: 4 * 1024 * 1024,
+    env: { PATH: '/usr/bin:/bin', LANG: 'C', LC_ALL: 'C' }
+  });
+  if (result.error) throw policyError('HOST_CHECKPOINT_ADAPTER_EXECUTION_FAILED', String(result.error.message || result.error));
+  if (result.status !== 0 || result.signal) {
+    throw policyError('HOST_CHECKPOINT_ADAPTER_EXECUTION_FAILED', `host adapter ${action} failed (exit=${result.status}, signal=${result.signal || 'none'}): ${(result.stderr || Buffer.alloc(0)).toString('utf8').slice(0, 1000)}`);
+  }
+  if (!Buffer.isBuffer(result.stdout) || result.stdout.length < 2 || result.stdout.length > 4 * 1024 * 1024) {
+    throw policyError('HOST_CHECKPOINT_ADAPTER_RESPONSE_INVALID', 'host adapter response must be strict JSON between 2 bytes and 4 MiB');
+  }
+  try { return parseStrictJson(result.stdout, `host checkpoint adapter ${action} response`, { maxBytes: 4 * 1024 * 1024 }); }
+  catch (error) { throw policyError('HOST_CHECKPOINT_ADAPTER_RESPONSE_INVALID', String(error?.message || error)); }
+}
+
+function verifySignedExternalRecord(record, publicKey, signatureField, label) {
+  if (!record || typeof record !== 'object' || Array.isArray(record) || typeof record[signatureField] !== 'string' ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(record[signatureField])) {
+    throw policyError('EXTERNAL_CHECKPOINT_SIGNATURE_INVALID', `${label} signature encoding is invalid`);
+  }
+  const signatureBytes = Buffer.from(record[signatureField], 'base64');
+  if (signatureBytes.length !== 64 || signatureBytes.toString('base64') !== record[signatureField]) {
+    throw policyError('EXTERNAL_CHECKPOINT_SIGNATURE_INVALID', `${label} signature must be canonical 64-byte Ed25519 base64`);
+  }
+  const signedPayload = { ...record };
+  delete signedPayload[signatureField];
+  if (!crypto.verify(null, Buffer.from(canonicalExternalCheckpointPayload(signedPayload), 'utf8'), publicKey, signatureBytes)) {
+    throw policyError('EXTERNAL_CHECKPOINT_SIGNATURE_INVALID', `${label} signature verification failed`);
+  }
+  return signedPayload;
+}
+
+export function computeExternalStoreContinuityEvidenceSha256({ authorityId, storeId, serviceUri, continuity } = {}) {
+  if (typeof authorityId !== 'string' || !authorityId.trim() || typeof storeId !== 'string' || !storeId.trim() ||
+      typeof serviceUri !== 'string' || !serviceUri.trim() || !continuity || typeof continuity !== 'object' ||
+      Array.isArray(continuity) || continuity.source !== 'host_monotonic_store' || continuity.authorityId !== authorityId ||
+      !Number.isSafeInteger(continuity.highWaterSequence) || continuity.highWaterSequence < 1 ||
+      !SHA256_HEX.test(continuity.lastCheckpointDigest || '')) {
+    throw policyError('EXTERNAL_CHECKPOINT_CONTINUITY_SOURCE_UNVERIFIED', 'cannot hash malformed external-store continuity evidence');
+  }
+  const payload = {
+    schema_version: 1, contract: EXTERNAL_STORE_CONTINUITY_EVIDENCE_CONTRACT,
+    authority_id: authorityId, store_id: storeId, service_uri: serviceUri,
+    continuity_source: continuity.source, high_water_sequence: continuity.highWaterSequence,
+    last_checkpoint_digest: continuity.lastCheckpointDigest
+  };
+  return sha256(Buffer.from(canonicalExternalCheckpointPayload(payload), 'utf8'));
+}
+
+export function verifyExternalStoreAttestation(attestation, policy, { now = Date.now(), continuity } = {}) {
+  exactObjectKeys(attestation, EXTERNAL_STORE_ATTESTATION_KEYS, 'external monotonic store attestation');
+  if (attestation.schema_version !== 1 || attestation.contract !== EXTERNAL_STORE_ATTESTATION_CONTRACT ||
+      attestation.authority_id !== policy.authority_id || attestation.store_id !== policy.external_store_id ||
+      attestation.service_uri !== policy.external_service_uri ||
+      !['managed_remote_transactional_store', 'managed_cloud_monotonic_store', 'hardware_monotonic_service'].includes(attestation.backend) ||
+      attestation.independent_of_plugin_host !== true || attestation.monotonicity_protection !== true ||
+      attestation.restore_rollback_protection !== true || !SHA256_HEX.test(attestation.evidence_sha256 || '')) {
+    throw policyError('EXTERNAL_CHECKPOINT_STORE_ATTESTATION_INVALID', 'signed store attestation does not declare the pinned external store and required anti-rollback properties');
+  }
+  const issuedAt = canonicalPolicyTimestamp(attestation.issued_at, 'store_attestation.issued_at');
+  const validUntil = canonicalPolicyTimestamp(attestation.valid_until, 'store_attestation.valid_until');
+  if (issuedAt > now + 5_000 || now - issuedAt > policy.max_store_attestation_age_seconds * 1000 || validUntil <= now ||
+      validUntil <= issuedAt || validUntil - issuedAt > policy.max_store_attestation_age_seconds * 1000) {
+    throw policyError('EXTERNAL_CHECKPOINT_STORE_ATTESTATION_STALE', 'store attestation is stale, future-dated, expired, or exceeds the provisioned validity window');
+  }
+  const expectedEvidenceSha256 = computeExternalStoreContinuityEvidenceSha256({ authorityId: policy.authority_id,
+    storeId: policy.external_store_id, serviceUri: policy.external_service_uri, continuity });
+  if (attestation.evidence_sha256 !== expectedEvidenceSha256) {
+    throw policyError('EXTERNAL_CHECKPOINT_STORE_ATTESTATION_BINDING_MISMATCH',
+      'signed store attestation evidence_sha256 must bind the exact authority/store/service/high-water/previous-digest continuity record being used');
+  }
+  verifySignedExternalRecord(attestation, policy.storeAttestationPublicKey, 'signature_base64', 'external monotonic store attestation');
+  return { contract: attestation.contract, storeId: attestation.store_id, serviceUri: attestation.service_uri,
+    backend: attestation.backend, evidenceSha256: attestation.evidence_sha256, issuedAt: attestation.issued_at,
+    validUntil: attestation.valid_until, signedIndependenceClaimsVerified: true };
+}
+
+/**
+ * Explicitly opt-in preflight integration. This consumes a single-use nonce and
+ * advances the external store's high-water checkpoint; the default preflight
+ * path never calls it. The host adapter must perform one external atomic CAS and
+ * return a second authority-signed receipt after the transaction commits.
+ */
+export function verifyExternalAntiRollbackAnchorForPreflight({ candidateSha256, rollbackSha256, now = Date.now() } = {}) {
+  let transitionAttempted = false;
+  try {
+    if (!SHA256_HEX.test(candidateSha256 || '') || !SHA256_HEX.test(rollbackSha256 || '') || !Number.isSafeInteger(now)) {
+      throw policyError('EXTERNAL_CHECKPOINT_RELEASE_BINDING_INVALID', 'candidate/rollback SHA-256 and verifier clock are required');
+    }
+    const provisioned = readHostProvisionedPolicy(HOST_EXTERNAL_CHECKPOINT_POLICY_PATH,
+      HOST_EXTERNAL_CHECKPOINT_POLICY_PATH, 'external checkpoint trust policy');
+    let rawPolicy;
+    try { rawPolicy = parseStrictJson(provisioned.bytes, 'external checkpoint host policy', { maxBytes: 128 * 1024 }); }
+    catch (error) { throw policyError('HOST_CHECKPOINT_POLICY_SCHEMA_INVALID', String(error?.message || error)); }
+    const policy = validateExternalCheckpointHostPolicy(rawPolicy, { now });
+    const adapter = inspectHostOwnedCheckpointAdapter(policy.adapter_path, policy.adapter_sha256);
+    const requestNonce = crypto.randomBytes(32).toString('hex');
+    const requestedAt = new Date(now).toISOString();
+    const observation = runHostCheckpointAdapter(adapter.path, 'observe', {
+      schema_version: 1, contract: EXTERNAL_CHECKPOINT_OBSERVATION_CONTRACT, action: 'observe',
+      authority_id: policy.authority_id, external_store_id: policy.external_store_id,
+      external_service_uri: policy.external_service_uri, request_nonce: requestNonce,
+      candidate_sha256: candidateSha256, rollback_sha256: rollbackSha256, requested_at: requestedAt
+    });
+    exactObjectKeys(observation, ['schema_version', 'contract', 'continuity', 'checkpoint_response', 'store_attestation'], 'external checkpoint adapter observation');
+    if (observation.schema_version !== 1 || observation.contract !== EXTERNAL_CHECKPOINT_OBSERVATION_CONTRACT) {
+      throw policyError('HOST_CHECKPOINT_ADAPTER_RESPONSE_INVALID', 'adapter observation contract/version is unsupported');
+    }
+    exactObjectKeys(observation.continuity, ['source', 'authorityId', 'highWaterSequence', 'lastCheckpointDigest'], 'external checkpoint continuity');
+    if (observation.continuity.source !== 'host_monotonic_store' || observation.continuity.authorityId !== policy.authority_id ||
+        !Number.isSafeInteger(observation.continuity.highWaterSequence) || observation.continuity.highWaterSequence < 1 ||
+        !SHA256_HEX.test(observation.continuity.lastCheckpointDigest || '')) {
+      throw policyError('EXTERNAL_CHECKPOINT_CONTINUITY_SOURCE_UNVERIFIED', 'adapter did not return the expected external monotonic-store continuity record');
+    }
+    const storeAttestation = verifyExternalStoreAttestation(observation.store_attestation, policy,
+      { now, continuity: observation.continuity });
+
+    let commitReceiptVerified = false;
+    const verification = verifyExternalTrustCheckpointResponse(observation.checkpoint_response, {
+      authorityPublicKeyPem: policy.authority_public_key_pem, expectedAuthorityId: policy.authority_id,
+      requestNonce, candidateSha256, rollbackSha256, continuity: observation.continuity, now,
+      commitCheckpointTransition(input) {
+        transitionAttempted = true;
+        const reply = runHostCheckpointAdapter(adapter.path, 'commit', {
+          schema_version: 1, contract: EXTERNAL_CHECKPOINT_COMMIT_CONTRACT, action: 'commit',
+          authority_id: input.authorityId, external_store_id: policy.external_store_id,
+          external_service_uri: policy.external_service_uri, request_nonce: input.requestNonce,
+          candidate_sha256: input.candidateSha256, rollback_sha256: input.rollbackSha256,
+          expected_high_water_sequence: input.expectedHighWaterSequence,
+          expected_previous_checkpoint_digest: input.expectedPreviousCheckpointDigest,
+          checkpoint_sequence: input.checkpointSequence, checkpoint_digest: input.checkpointDigest,
+          previous_checkpoint_digest: input.previousCheckpointDigest
+        });
+        exactObjectKeys(reply, ['schema_version', 'contract', 'commit_receipt'], 'external checkpoint commit response');
+        if (reply.schema_version !== 1 || reply.contract !== EXTERNAL_CHECKPOINT_COMMIT_CONTRACT) {
+          throw policyError('EXTERNAL_CHECKPOINT_COMMIT_RECEIPT_INVALID', 'adapter commit response contract/version is unsupported');
+        }
+        const receipt = reply.commit_receipt;
+        exactObjectKeys(receipt, EXTERNAL_CHECKPOINT_COMMIT_RECEIPT_KEYS, 'external checkpoint commit receipt');
+        if (receipt.schema_version !== 1 || receipt.contract !== EXTERNAL_CHECKPOINT_COMMIT_RECEIPT_CONTRACT ||
+            receipt.authority_id !== input.authorityId || receipt.request_nonce !== input.requestNonce ||
+            receipt.candidate_sha256 !== input.candidateSha256 || receipt.rollback_sha256 !== input.rollbackSha256 ||
+            receipt.checkpoint_sequence !== input.checkpointSequence || receipt.checkpoint_digest !== input.checkpointDigest ||
+            receipt.previous_checkpoint_digest !== input.previousCheckpointDigest || receipt.commit_status !== 'COMMITTED') {
+          throw policyError('EXTERNAL_CHECKPOINT_COMMIT_RECEIPT_INVALID', 'signed commit receipt does not bind the exact CAS transition');
+        }
+        const committedAt = canonicalPolicyTimestamp(receipt.committed_at, 'commit_receipt.committed_at');
+        if (committedAt > now + 5_000 || now - committedAt > 5 * 60_000) {
+          throw policyError('EXTERNAL_CHECKPOINT_COMMIT_RECEIPT_STALE', 'external commit receipt is not fresh');
+        }
+        verifySignedExternalRecord(receipt, policy.authorityPublicKey, 'signature_base64', 'external checkpoint commit receipt');
+        commitReceiptVerified = true;
+        return true;
+      }
+    });
+    if (!verification.verified || !verification.checkpointStateAdvanced || !verification.nonceConsumed || !commitReceiptVerified) {
+      throw policyError('EXTERNAL_CHECKPOINT_VERIFICATION_BLOCKED', (verification.blockers || ['EXTERNAL_CHECKPOINT_NOT_COMMITTED']).join(','));
+    }
+    const response = observation.checkpoint_response;
+    const trusted = deepFreezeResult({
+      verified: true, status: 'VERIFIED', source: 'host_monotonic_checkpoint_service',
+      authorityId: response.authority_id, candidateSha256, rollbackSha256,
+      checkpointSequence: response.checkpoint_sequence, checkpointDigest: response.checkpoint_digest,
+      previousCheckpointDigest: response.previous_checkpoint_digest, ledgerStateSha256: response.ledger_state_sha256,
+      trustDomainStateSha256: response.trust_domain_state_sha256, signatureVerified: true,
+      independentOfLocalLedger: true, continuitySourceAuthenticated: true, authorityKeyProvisioningAuthenticated: true,
+      externalStoreAttestationVerified: true, commitReceiptVerified: true, checkpointStateAdvanced: true,
+      nonceConsumed: true, observedAt: response.observed_at, policyVersion: policy.policy_version,
+      policyPath: provisioned.path, policySha256: provisioned.sha256, adapterPath: adapter.path,
+      adapterSha256: adapter.sha256, externalStoreId: storeAttestation.storeId,
+      externalServiceUri: storeAttestation.serviceUri,
+      storeAttestationSha256: sha256(Buffer.from(JSON.stringify(observation.store_attestation))),
+      productionAuthorityEstablished: true
+    });
+    VERIFIED_EXTERNAL_CHECKPOINT_RESULTS.add(trusted);
+    return { status: 'PASS', verified: trusted, transition: { attempted: true, outcome: 'COMMITTED',
+      nonceConsumed: true, checkpointStateAdvanced: true } };
+  } catch (error) {
+    return { status: 'BLOCKED', verified: null, blockers: [error?.code || 'EXTERNAL_CHECKPOINT_VERIFICATION_FAILED'],
+      message: String(error?.message || error).slice(0, 1000),
+      transition: { attempted: transitionAttempted,
+        outcome: transitionAttempted ? 'UNKNOWN_AFTER_COMMIT_ATTEMPT' : 'BLOCKED_BEFORE_COMMIT',
+        nonceMayHaveBeenConsumed: transitionAttempted } };
+  }
+}
+
+function loadPhase2CustodyPolicy() {
+  const provisioned = readHostProvisionedPolicy(HOST_PHASE2_CUSTODY_POLICY_PATH,
+    HOST_PHASE2_CUSTODY_POLICY_PATH, 'Phase 2 custody trust policy');
+  let policy;
+  try { policy = parseStrictJson(provisioned.bytes, 'host Phase 2 custody trust policy', { maxBytes: 128 * 1024 }); }
+  catch (error) { throw policyError('HOST_POLICY_SCHEMA_INVALID', `Phase 2 custody trust policy is not strict JSON: ${String(error?.message || error)}`); }
+  const validated = validatePhase2CustodyPolicy(policy);
+  return { ...validated, provisionedPolicySha256: provisioned.sha256,
+    provisionedPolicyPath: provisioned.path, provisionedPolicyOwnerUid: provisioned.ownerUid,
+    provisionedPolicyMode: provisioned.mode };
+}
+
+export function verifyPhase2CustodyForPreflight({ args, candidateBundle }) {
+  const manifestPath = args?.phase2Manifest;
+  const receiptPath = args?.phase2Receipt;
+  if (!manifestPath && !receiptPath) {
+    return { contract: 'runalith-phase2-preflight-custody/v1', status: 'BLOCKED',
+      verified: false, authorityKeyProvisioningAuthenticated: false,
+      blockers: ['PHASE2_CUSTODY_EVIDENCE_NOT_PROVIDED'],
+      missingArguments: ['phase2Manifest', 'phase2Receipt'],
+      requiredHostPolicyPath: HOST_PHASE2_CUSTODY_POLICY_PATH };
+  }
+  if (typeof manifestPath !== 'string' || !manifestPath.trim() || typeof receiptPath !== 'string' || !receiptPath.trim()) {
+    return { contract: 'runalith-phase2-preflight-custody/v1', status: 'BLOCKED',
+      verified: false, authorityKeyProvisioningAuthenticated: false,
+      blockers: ['PHASE2_CUSTODY_ARGUMENT_SET_INCOMPLETE'],
+      missingArguments: [manifestPath ? null : 'phase2Manifest', receiptPath ? null : 'phase2Receipt'].filter(Boolean),
+      requiredHostPolicyPath: HOST_PHASE2_CUSTODY_POLICY_PATH };
+  }
+  try {
+    const policy = loadPhase2CustodyPolicy();
+    const result = verifyPhase2CustodyEvidence({ repositoryRoot: ROOT, candidatePath: candidateBundle.path,
+      manifestPath, receiptPath, authorityPublicKeyPem: policy.authority_public_key_pem,
+      builderPublicKeyPem: policy.builder_public_key_pem, expectedAuthorityKeySha256: policy.authority_key_sha256,
+      expectedBuilderKeySha256: policy.builder_key_sha256, expectedAuthorityId: policy.authority_id,
+      expectedBuilderIdentity: policy.builder_identity, expectedRepository: policy.repository });
+    if (result.candidateSha256 !== candidateBundle.sha256 || result.sourceCommit !== policy.source_commit ||
+        result.sourceTreeOid !== policy.source_tree_oid || result.authorityKeySha256 !== policy.authority_key_sha256 ||
+        result.builderKeySha256 !== policy.builder_key_sha256 || result.manifestPathCount !== 71) {
+      throw policyError('PHASE2_CUSTODY_HOST_POLICY_BINDING_MISMATCH', 'signed custody material does not match the host-pinned candidate, source snapshot, and independent key policy');
+    }
+    const bound = deepFreezeResult({ ...result, contract: 'runalith-phase2-preflight-custody/v1',
+      status: 'HOST_PINNED_PHASE2_PATH_CONTRACT_VERIFIED', verified: true,
+      authorityKeyProvisioningAuthenticated: true,
+      hostPolicy: { path: policy.provisionedPolicyPath, sha256: policy.provisionedPolicySha256,
+        ownerUid: policy.provisionedPolicyOwnerUid, mode: policy.provisionedPolicyMode,
+        sourceCommit: policy.source_commit, sourceTreeOid: policy.source_tree_oid } });
+    VERIFIED_PHASE2_CUSTODY_RESULTS.add(bound);
+    return bound;
+  } catch (error) {
+    return { contract: 'runalith-phase2-preflight-custody/v1', status: 'BLOCKED', verified: false,
+      authorityKeyProvisioningAuthenticated: false,
+      blockers: [error?.code || 'PHASE2_CUSTODY_VERIFICATION_FAILED'],
+      message: String(error?.message || error).slice(0, 1000),
+      requiredHostPolicyPath: HOST_PHASE2_CUSTODY_POLICY_PATH };
+  }
 }
 
 export function inspectBundle(bundlePath, { requireCurrentSource = false } = {}) {
@@ -362,13 +900,29 @@ export function inspectHost({ appRoot = APP_ROOT_DEFAULT, workflowDb = null, pro
 }
 
 /**
- * Validate the host checkpoint report's shape and release binding only.
- * Caller-controlled booleans such as `signatureVerified: true` are assertions,
- * not cryptographic evidence. Until a host-owned verifier returns a separately
- * authenticated result from its out-of-band authority and monotonic store, this
- * function MUST NOT return `verified: true` and therefore cannot open rollout.
+ * Validate the host checkpoint report's shape and release binding. Caller-
+ * controlled booleans such as `signatureVerified: true` are assertions, not
+ * evidence. Only the frozen object emitted by verifyExternalAntiRollbackAnchorForPreflight
+ * after the root-pinned adapter, separate store-attestation root, signed checkpoint,
+ * external CAS and signed post-commit receipt all verify can open this sub-gate.
  */
 export function validateExternalAntiRollbackAnchorReport(anchor, { candidateSha256, rollbackSha256, now = Date.now() } = {}) {
+  if (anchor && VERIFIED_EXTERNAL_CHECKPOINT_RESULTS.has(anchor) && anchor.verified === true &&
+      anchor.status === 'VERIFIED' && anchor.candidateSha256 === candidateSha256 &&
+      anchor.rollbackSha256 === rollbackSha256 && anchor.productionAuthorityEstablished === true &&
+      anchor.externalStoreAttestationVerified === true && anchor.commitReceiptVerified === true &&
+      anchor.checkpointStateAdvanced === true && anchor.nonceConsumed === true &&
+      SHA256_HEX.test(anchor.checkpointDigest || '') && SHA256_HEX.test(anchor.previousCheckpointDigest || '') &&
+      SHA256_HEX.test(anchor.ledgerStateSha256 || '') && SHA256_HEX.test(anchor.trustDomainStateSha256 || '')) {
+    const observed = Date.parse(anchor.observedAt || '');
+    if (Number.isFinite(observed) && new Date(observed).toISOString() === anchor.observedAt &&
+        observed <= now + 5_000 && now - observed <= 5 * 60_000) {
+      return { verified: true, shapeValid: true, blockers: [], source: 'authenticated-host-checkpoint-adapter',
+        policySha256: anchor.policySha256, adapterSha256: anchor.adapterSha256,
+        externalStoreId: anchor.externalStoreId, checkpointSequence: anchor.checkpointSequence,
+        checkpointDigest: anchor.checkpointDigest };
+    }
+  }
   const blockers = [];
   if (!anchor || anchor.verified !== true || anchor.status !== 'VERIFIED') blockers.push('EXTERNAL_TRUST_ANCHOR_NOT_VERIFIED');
   if (anchor?.source !== 'host_monotonic_checkpoint_service' || typeof anchor?.authorityId !== 'string' || !anchor.authorityId.trim()) {
@@ -402,10 +956,16 @@ export function validateExternalAntiRollbackAnchorReport(anchor, { candidateSha2
   return { verified: false, shapeValid, blockers: [...new Set(blockers)] };
 }
 
-export function evaluateRolloutGate({ candidate, rollback, host }) {
+export function evaluateRolloutGate({ candidate, rollback, host, releaseEvidence = null, phase2CustodyEvidence = null }) {
   const blockers = [];
   if (!candidate?.verified) blockers.push('CANDIDATE_NOT_VERIFIED');
   if (!rollback?.verified) blockers.push('ROLLBACK_BUNDLE_NOT_VERIFIED');
+  if (!isVerifiedPhase2CustodyEvidenceForBinding(phase2CustodyEvidence, candidate)) {
+    blockers.push('PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED');
+  }
+  if (!isVerifiedReleaseEvidenceForBindings(releaseEvidence, candidate, rollback, host)) {
+    blockers.push('INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED');
+  }
   if (!host?.registryReadable || !host?.plugin || !host?.installedGeneration) blockers.push('HOST_RUNTIME_IDENTITY_UNVERIFIED');
   blockers.push(...(host?.blockers || []));
   if (!host?.database?.readable) blockers.push('WORKFLOW_DB_NOT_READABLE');
@@ -424,6 +984,88 @@ export function evaluateRolloutGate({ candidate, rollback, host }) {
   return { status: blockers.length ? 'BLOCKED' : 'READY_FOR_HOST_MANAGED_ACTIVATION', canActivateNow: blockers.length === 0,
     activationMechanism: 'Chat On Steroids host plugin manager / UI only; this CLI does not edit host registry or manage the plugin process',
     blockers: [...new Set(blockers)] };
+}
+
+function isVerifiedPhase2CustodyEvidenceForBinding(evidence, candidate) {
+  return Boolean(evidence && VERIFIED_PHASE2_CUSTODY_RESULTS.has(evidence) && evidence.verified === true &&
+    evidence.status === 'HOST_PINNED_PHASE2_PATH_CONTRACT_VERIFIED' &&
+    evidence.authorityKeyProvisioningAuthenticated === true && evidence.manifestPathCount === 71 &&
+    evidence.candidateSha256 === candidate?.sha256 && evidence.sourceCommit === evidence.hostPolicy?.sourceCommit &&
+    evidence.sourceTreeOid === evidence.hostPolicy?.sourceTreeOid && SHA256_HEX.test(evidence.hostPolicy?.sha256 || '') &&
+    evidence.hostPolicy?.ownerUid === 0 && (evidence.hostPolicy?.mode & 0o022) === 0);
+}
+
+function isVerifiedReleaseEvidenceForBindings(evidence, candidate, rollback, host) {
+  return Boolean(evidence && VERIFIED_RELEASE_EVIDENCE_RESULTS.has(evidence) &&
+    evidence.cryptographicEvidenceVerified === true && evidence.productionAuthorityEstablished === false &&
+    evidence.candidate?.sha256 === candidate?.sha256 &&
+    evidence.rollback?.sha256 === rollback?.sha256 && evidence.rollback?.version === rollback?.version &&
+    evidence.baseline?.version === host?.installedGeneration?.manifestVersion &&
+    evidence.baseline?.sha256 === rollback?.sha256 && rollback?.version === host?.installedGeneration?.manifestVersion);
+}
+
+export function verifyReleaseEvidenceForPreflight({ args, candidateBundle, rollback, host }) {
+  const required = ['releasePolicy', 'provenance', 'verification', 'approval', 'releaseNonce'];
+  const supplied = required.filter(key => typeof args[key] === 'string' && args[key].trim());
+  const missing = required.filter(key => !supplied.includes(key));
+  if (missing.length) {
+    return { contract: 'runalith-release-evidence-verification/v1', status: 'BLOCKED',
+      cryptographicEvidenceVerified: false, productionReleaseEligible: false, productionAuthorityEstablished: false,
+      evidenceBlockers: [supplied.length ? 'RELEASE_EVIDENCE_ARGUMENT_SET_INCOMPLETE' : 'RELEASE_EVIDENCE_NOT_PROVIDED'],
+      missingArguments: missing,
+      notes: ['A local hash, source-alignment report or test result is not signed builder provenance or release approval.',
+        'Even cryptographically verified evidence does not authenticate host trust provisioning or the external monotonic checkpoint.'] };
+  }
+  if (!rollback?.verified || !host?.installedGeneration) {
+    return { contract: 'runalith-release-evidence-verification/v1', status: 'BLOCKED',
+      cryptographicEvidenceVerified: false, productionReleaseEligible: false, productionAuthorityEstablished: false,
+      evidenceBlockers: ['RELEASE_EVIDENCE_REQUIRES_VERIFIED_ROLLBACK_AND_INSTALLED_BASELINE'],
+      notes: ['Release approval must bind the exact installed baseline and a byte-verified rollback artifact.'] };
+  }
+  try {
+    // Reject caller-selected policy paths and noncanonical release scope before
+    // opening caller-selectable DSSE evidence files. The policy path and scope
+    // are both part of the release trust contract.
+    const provisionedReleasePolicy = readHostProvisionedPolicy(HOST_RELEASE_POLICY_PATH,
+      args.releasePolicy, 'release policy');
+    const policyBytes = provisionedReleasePolicy.bytes;
+    const policy = parseRunalithReleaseEvidenceJson(policyBytes, 'Runalith release policy');
+    const policyScope = validateHostPinnedReleasePolicyScope(policy);
+    const candidateBytes = readRegularFile(candidateBundle.path, MAX_BUNDLE_BYTES);
+    const rollbackBytes = readRegularFile(rollback.path, MAX_BUNDLE_BYTES);
+    const provenanceEnvelopeBytes = readRegularFile(args.provenance, 8 * 1024 * 1024);
+    const verificationEnvelopeBytes = readRegularFile(args.verification, 8 * 1024 * 1024);
+    const approvalEnvelopeBytes = readRegularFile(args.approval, 8 * 1024 * 1024);
+    const provenanceEnvelope = parseRunalithReleaseEvidenceJson(provenanceEnvelopeBytes, 'SLSA provenance envelope');
+    const verificationEnvelope = parseRunalithReleaseEvidenceJson(verificationEnvelopeBytes, 'candidate verification envelope');
+    const approvalEnvelope = parseRunalithReleaseEvidenceJson(approvalEnvelopeBytes, 'release approval envelope');
+    const evidence = verifyRunalithReleaseEvidence({ candidateBytes, policy, policyBytes,
+      provenanceEnvelope, provenanceEnvelopeBytes, verificationEnvelope, verificationEnvelopeBytes,
+      approvalEnvelope, approvalEnvelopeBytes, rollbackBytes, expectedNonce: args.releaseNonce,
+      baselineVersion: host.installedGeneration.manifestVersion, baselineSha256: rollback.sha256,
+      rollbackVersion: rollback.version, rollbackSha256: rollback.sha256 });
+    evidence.hostPolicyProvisioning = { rootOwnedHostFileVerified: true,
+      canonicalScopeVerified: policyScope.canonicalScopeVerified,
+      sourceRepository: policyScope.sourceRepository, subjectName: policyScope.subjectName,
+      expectedBuildType: policyScope.expectedBuildType, targetEnvironment: policyScope.targetEnvironment,
+      policyVersion: policyScope.policyVersion,
+      path: provisionedReleasePolicy.path, sha256: provisionedReleasePolicy.sha256,
+      ownerUid: provisionedReleasePolicy.ownerUid, mode: provisionedReleasePolicy.mode };
+    if (evidence.cryptographicEvidenceVerified === true && evidence.candidate?.sha256 === candidateBundle.sha256 &&
+        evidence.hostPolicyProvisioning.rootOwnedHostFileVerified === true &&
+        evidence.hostPolicyProvisioning.canonicalScopeVerified === true &&
+        evidence.rollback?.sha256 === rollback.sha256 && evidence.rollback?.version === rollback.version &&
+        evidence.baseline?.version === host.installedGeneration.manifestVersion && evidence.baseline?.sha256 === rollback.sha256) {
+      VERIFIED_RELEASE_EVIDENCE_RESULTS.add(evidence);
+    }
+    return evidence;
+  } catch (error) {
+    return { contract: 'runalith-release-evidence-verification/v1', status: 'BLOCKED',
+      cryptographicEvidenceVerified: false, productionReleaseEligible: false, productionAuthorityEstablished: false,
+      evidenceBlockers: [error?.code || 'RELEASE_EVIDENCE_VERIFICATION_FAILED'],
+      notes: [String(error?.message || error).slice(0, 1000),
+        'No local verifier output can establish host trust-policy provisioning or authenticate the external monotonic checkpoint.'] };
+  }
 }
 
 export function compareBundleToDirectory(bundle, directory) {
@@ -465,6 +1107,37 @@ function writeAtomicJson(filePath, value) {
   fs.renameSync(tempPath, filePath);
   const dirFd = fs.openSync(dir, 'r');
   try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+}
+
+/** Publish a diagnostic report to a new canonical path without overwriting it. */
+export function writeExclusiveJsonReport(filePath, value) {
+  const destination = path.resolve(filePath);
+  const parent = path.dirname(destination);
+  const parentStat = fs.lstatSync(parent, { bigint: true });
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || fs.realpathSync(parent) !== parent) {
+    throw new Error('report parent must be an existing canonical directory without symlink aliases');
+  }
+  if (fs.existsSync(destination)) throw new Error(`refusing to overwrite existing report: ${destination}`);
+  const temporary = path.join(parent, `.${path.basename(destination)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`);
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+  let fd;
+  try {
+    fd = fs.openSync(temporary, 'wx', 0o600);
+    fs.writeFileSync(fd, bytes);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    // Hard-link publication is atomic and fails if the destination already exists.
+    fs.linkSync(temporary, destination);
+    fs.unlinkSync(temporary);
+    const dirFd = fs.openSync(parent, 'r');
+    try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+  } catch (error) {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
+    try { fs.unlinkSync(temporary); } catch {}
+    throw error;
+  }
+  return { path: destination, sha256: sha256(bytes), sizeBytes: bytes.length };
 }
 
 function assertPrivateSimulationRoot(root) {
@@ -655,19 +1328,28 @@ export function createInstalledRollbackSnapshot({ outPath, appRoot = APP_ROOT_DE
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
+  if (!command || command === '--help' || command === '-h') return { command, help: true };
+  const allowedOptions = {
+    'backup-installed': new Set(['out', 'appRoot', 'procRoot', 'workflowDb']),
+    preflight: new Set(['candidate', 'expectedSha256', 'rollbackBundle', 'releasePolicy', 'provenance', 'verification',
+      'approval', 'releaseNonce', 'phase2Manifest', 'phase2Receipt', 'advanceExternalCheckpoint',
+      'appRoot', 'workflowDb', 'report']),
+    'verify-installed': new Set(['candidate', 'appRoot', 'workflowDb']),
+    simulate: new Set(['candidate', 'failpoint'])
+  };
+  if (!allowedOptions[command]) throw new Error(`unsupported command ${command}; live activation is intentionally not exposed`);
   const args = {};
   for (let index = 0; index < rest.length; index++) {
     const token = rest[index];
     if (token === '--help' || token === '-h') { args.help = true; continue; }
     if (!token.startsWith('--')) throw new Error(`unexpected positional argument: ${token}`);
     const key = token.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    if (!allowedOptions[command].has(key)) throw new Error(`unsupported option ${token} for command ${command}`);
     if (Object.hasOwn(args, key)) throw new Error(`duplicate option: ${token}`);
-    if (['json', 'skip-smoke'].includes(key)) args[key] = true;
-    else {
-      const value = rest[++index];
-      if (!value || value.startsWith('--')) throw new Error(`missing value for ${token}`);
-      args[key] = value;
-    }
+    if (key === 'advanceExternalCheckpoint') { args[key] = true; continue; }
+    const value = rest[++index];
+    if (!value || value.startsWith('--')) throw new Error(`missing value for ${token}`);
+    args[key] = value;
   }
   return { command, ...args };
 }
@@ -675,10 +1357,10 @@ function parseArgs(argv) {
 function usage() {
   console.log('Runalith release rollout readiness (host mutation intentionally unsupported)\n\n' +
     '  node scripts/runalith-rollout.mjs backup-installed --out /tmp/runalith-rollback.mcpb\n' +
-    '  node scripts/runalith-rollout.mjs preflight --candidate <rc8.mcpb> --rollback-bundle <rollback.mcpb>\n' +
+    '  node scripts/runalith-rollout.mjs preflight --candidate <candidate.mcpb> --rollback-bundle <rollback.mcpb> [--report <new-report.json>] [--phase2-manifest <owner-signed-71-path.json> --phase2-receipt <builder-signed-receipt.json>] [--release-policy /etc/runalith/release-policy.json --provenance <builder.dsse.json> --verification <verifier.dsse.json> --approval <release-approval.dsse.json> --release-nonce <host-issued-once-only-hex>] [--advance-external-checkpoint]\n' +
     '  node scripts/runalith-rollout.mjs verify-installed --candidate <rc8.mcpb>\n' +
     '  node scripts/runalith-rollout.mjs simulate --candidate <rc8.mcpb> [--failpoint after-stage|after-switch|health-check]\n\n' +
-    'preflight and verify-installed are read-only. backup-installed writes only a new non-overwriting .mcpb and manifest under /tmp. simulate uses a private /tmp generation directory. No command edits Chat On Steroids configuration, workflow DB, process state, or plugin installation.');
+    'preflight and verify-installed are read-only by default. Optional --advance-external-checkpoint is deliberately state-changing: it consumes a single-use nonce and advances the host-owned external security store only after signed continuity/CAS receipts verify. It does not install or activate a plugin or write the workflow DB. Phase 2 custody, release and checkpoint policies must be provisioned by the host administrator as root-owned, non-group/world-writable files under /etc/runalith. Production preflight also requires signed builder provenance, independent candidate-verification evidence and release approval bound to exact candidate/baseline/rollback bytes. Local SQLite is not an external monotonic anchor. backup-installed writes only a new non-overwriting .mcpb and manifest under /tmp. simulate uses a private /tmp generation directory. No command edits Chat On Steroids configuration, workflow DB, process state, or plugin installation.');
 }
 
 async function main() {
@@ -708,14 +1390,48 @@ async function main() {
       rollback.installedFileParity = compareBundleToDirectory(inspectBundle(rollback.path), host.installedGeneration.path);
       rollback.verified = rollback.smoke.passed && rollback.installedFileParity.matches;
     }
-    const decision = evaluateRolloutGate({ candidate: { verified: true, version: candidateBundle.version, sha256: candidateBundle.sha256 }, rollback, host });
-    const report = { schemaVersion: 1, command: 'preflight', generatedAt: new Date().toISOString(), readOnly: true,
-      liveMutationPerformed: false, candidate: { verified: true, ...candidateBundle, smoke: candidateSmoke },
-      rollback: rollback || { verified: false, status: 'not-provided' }, host, decision,
+    const phase2CustodyEvidence = verifyPhase2CustodyForPreflight({ args, candidateBundle });
+    const releaseEvidence = verifyReleaseEvidenceForPreflight({ args, candidateBundle, rollback, host });
+    let externalCheckpoint = { status: 'NOT_REQUESTED', transition: { attempted: false, outcome: 'NOT_REQUESTED' },
+      sideEffectContract: 'No external checkpoint state is changed unless --advance-external-checkpoint is explicitly supplied.' };
+    if (args.advanceExternalCheckpoint) {
+      externalCheckpoint = verifyExternalAntiRollbackAnchorForPreflight({
+        candidateSha256: candidateBundle.sha256, rollbackSha256: rollback?.sha256
+      });
+      // Only a verifier-created, in-process result can reach the gate. When the
+      // adapter is missing/untrusted or its result is invalid, attach no trusted
+      // object; preserve the explicit error in the report and fail closed.
+      if (externalCheckpoint.verified && VERIFIED_EXTERNAL_CHECKPOINT_RESULTS.has(externalCheckpoint.verified)) {
+        host.trustConfiguration = { ...(host.trustConfiguration || {}), externalAntiRollbackAnchor: externalCheckpoint.verified };
+      } else {
+        host.trustConfiguration = { ...(host.trustConfiguration || {}), externalAntiRollbackAnchor: null };
+      }
+    }
+    const decision = evaluateRolloutGate({ candidate: { verified: true, version: candidateBundle.version, sha256: candidateBundle.sha256 },
+      rollback, host, releaseEvidence, phase2CustodyEvidence });
+    const externalTransitionCommitted = externalCheckpoint.transition?.outcome === 'COMMITTED';
+    const externalTransitionAmbiguous = externalCheckpoint.transition?.outcome === 'UNKNOWN_AFTER_COMMIT_ATTEMPT';
+    const externalSecurityStoreMutationPerformed = externalTransitionCommitted ? true : externalTransitionAmbiguous ? null : false;
+    const liveMutationPerformed = externalTransitionCommitted || externalTransitionAmbiguous;
+    const report = { schemaVersion: 1, command: 'preflight', generatedAt: new Date().toISOString(),
+      readOnly: args.advanceExternalCheckpoint !== true, liveMutationPerformed,
+      hostLifecycleMutationPerformed: false, workflowDatabaseMutationPerformed: false,
+      externalSecurityStoreMutationPerformed, externalCheckpoint,
+      candidate: { verified: true, ...candidateBundle, smoke: candidateSmoke },
+      rollback: rollback || { verified: false, status: 'not-provided' }, phase2CustodyEvidence, releaseEvidence, host, decision,
       exactActionStillRequired: decision.canActivateNow
         ? 'Use the host plugin UI to import/update this exact MCPB, then re-run verify-installed and query orchestrator_health through the live host-connected MCP client.'
         : 'No activation/restart is authorized by this report. Drain current work through its normal owner, provide a tested rollback bundle, rerun preflight, then use the host UI; do not kill the runtime process.' };
-    console.log(JSON.stringify(report, null, 2));
+    if (args.report) {
+      const published = writeExclusiveJsonReport(args.report, report);
+      console.log(JSON.stringify({ status: decision.status, reportPath: published.path,
+        reportSha256: published.sha256, reportSizeBytes: published.sizeBytes,
+        canActivateNow: decision.canActivateNow, readOnly: report.readOnly,
+        liveMutationPerformed: report.liveMutationPerformed,
+        externalSecurityStoreMutationPerformed: report.externalSecurityStoreMutationPerformed,
+        externalCheckpointTransition: externalCheckpoint.transition,
+        blockers: decision.blockers }, null, 2));
+    } else console.log(JSON.stringify(report, null, 2));
     if (!decision.canActivateNow) process.exitCode = 3;
     return;
   }

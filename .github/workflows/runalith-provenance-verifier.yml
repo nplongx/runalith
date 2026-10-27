@@ -1,0 +1,221 @@
+name: Runalith independent provenance verifier
+
+on:
+  workflow_run:
+    workflows: [Runalith controlled provenance builder]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runalith-provenance-verify-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  independently-verify:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == 'nplongx/runalith' &&
+      github.event.workflow_run.repository.full_name == 'nplongx/runalith'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+    env:
+      BUILDER_SHA: ${{ github.event.workflow_run.head_sha }}
+      BUILDER_RUN_ID: ${{ github.event.workflow_run.id }}
+      EVIDENCE_NAME: runalith-provenance-${{ github.event.workflow_run.head_sha }}
+      EVIDENCE_DIR: ${{ runner.temp }}/runalith-independent-verification
+
+    steps:
+      # The verifier runs code from the protected default branch, not code from
+      # the downloaded builder artifact. The artifact is data only and is never
+      # executed in this job. Branch protection/rulesets must be configured in
+      # GitHub settings; workflow YAML cannot prove that control independently.
+      - name: Checkout protected verifier policy and implementation
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Checkout the attested immutable source revision for independent rebuild
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.BUILDER_SHA }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Download the exact completed builder run evidence bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.EVIDENCE_NAME }}
+          run-id: ${{ env.BUILDER_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: ${{ env.EVIDENCE_DIR }}
+
+      - name: Verify immutable artifact bytes and recorded clean-source alignment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse --show-toplevel)" = "$GITHUB_WORKSPACE"
+          test -f "$EVIDENCE_DIR/candidate.mcpb"
+          test ! -L "$EVIDENCE_DIR/candidate.mcpb"
+          test -f "$EVIDENCE_DIR/candidate.sha256"
+          test -f "$EVIDENCE_DIR/source-alignment.json"
+          test -f "$EVIDENCE_DIR/attestation.json"
+          test "$(find "$EVIDENCE_DIR" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 4
+          unzip -t "$EVIDENCE_DIR/candidate.mcpb"
+          node --input-type=module - "$EVIDENCE_DIR" "$BUILDER_SHA" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          const [directory, commit] = process.argv.slice(2);
+          const candidate = fs.readFileSync(path.join(directory, 'candidate.mcpb'));
+          const digest = crypto.createHash('sha256').update(candidate).digest('hex');
+          const checksumLine = fs.readFileSync(path.join(directory, 'candidate.sha256'), 'utf8').trim().split(/\s+/);
+          const alignment = JSON.parse(fs.readFileSync(path.join(directory, 'source-alignment.json'), 'utf8'));
+          if (checksumLine[0] !== digest || alignment.status !== 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT' ||
+              alignment.sourceProvenanceStatus !== 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT' ||
+              alignment.releaseEligibility !== 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED' ||
+              alignment.bundleSha256 !== digest || alignment.sourceGitHead !== commit ||
+              alignment.sourceGitState?.workingTreeClean !== true || alignment.sourceGitState?.trackedWorkingTreeClean !== true) {
+            throw new Error('candidate/checksum/source-alignment evidence does not bind one clean immutable source revision and the same MCPB bytes');
+          }
+          console.log(JSON.stringify({candidateSha256:digest, candidateSizeBytes:candidate.length,
+            sourceCommit:alignment.sourceGitHead, sourceSnapshotSha256:alignment.sourceSnapshotSha256,
+            entryCount:alignment.archiveEntryCount, toolCount:alignment.manifestToolCount,
+            releaseEligibility:alignment.releaseEligibility}, null, 2));
+          NODE
+
+      - name: Install lockfile-pinned dependencies in isolated verifier checkout
+        working-directory: source
+        run: npm ci
+
+      - name: Independently run source tests and package acceptance checks without write credentials
+        working-directory: source
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BUILDER_SHA"
+          test -z "$(git status --porcelain=v2 --untracked-files=all)"
+          npm test
+          node --test tests/test-hosted-builder-attestation.mjs tests/test-hosted-verification-predicate.mjs \
+            tests/test-runalith-release-trust-contract.mjs tests/test-runalith-hosted-workflows.mjs
+          npm run docs:check
+          npm run site:check
+          npm run test:package-reproducibility
+          npm run test:mcpb-candidate -- "$EVIDENCE_DIR/candidate.mcpb"
+
+      - name: Rebuild the candidate independently and require byte-for-byte reproducibility
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLUGIN_BUNDLE_OUT="$EVIDENCE_DIR/independent-rebuild.mcpb" bash scripts/package-runalith-mcpb.sh
+          test -f "$EVIDENCE_DIR/independent-rebuild.mcpb"
+          test ! -L "$EVIDENCE_DIR/independent-rebuild.mcpb"
+          node --input-type=module - "$EVIDENCE_DIR" "$BUILDER_SHA" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          const [directory, sourceCommit] = process.argv.slice(2);
+          const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+          const original = fs.readFileSync(path.join(directory, 'candidate.mcpb'));
+          const rebuilt = fs.readFileSync(path.join(directory, 'independent-rebuild.mcpb'));
+          const originalSha256 = digest(original);
+          const rebuiltSha256 = digest(rebuilt);
+          if (originalSha256 !== rebuiltSha256 || !original.equals(rebuilt)) {
+            throw new Error(`independent build is not byte-identical: source=${sourceCommit} original=${originalSha256} rebuilt=${rebuiltSha256}`);
+          }
+          const report = { contract: 'runalith-independent-rebuild/v1', status: 'PASS_BYTE_IDENTICAL',
+            sourceCommit, candidateSha256: originalSha256, independentlyRebuiltSha256: rebuiltSha256,
+            candidateBytes: original.length, independentlyRebuiltBytes: rebuilt.length,
+            sourceCheckout: 'exact workflow_run.head_sha', productionReleaseEligible: false };
+          fs.writeFileSync(path.join(directory, 'independent-rebuild.json'), `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+          console.log(JSON.stringify(report, null, 2));
+          NODE
+
+      - name: Independently recompute source-to-bundle alignment using the attested source checkout
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-mcpb-source-alignment.mjs \
+            --source-root "$GITHUB_WORKSPACE/source" \
+            --bundle "$EVIDENCE_DIR/candidate.mcpb" \
+            --output "$EVIDENCE_DIR/independent-source-alignment.json"
+          node --input-type=module - "$EVIDENCE_DIR/independent-source-alignment.json" "$BUILDER_SHA" "$EVIDENCE_DIR/candidate.mcpb" <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          const [reportPath, sourceCommit, candidatePath] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+          const digest = crypto.createHash('sha256').update(fs.readFileSync(candidatePath)).digest('hex');
+          if (report.status !== 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT' ||
+              report.sourceProvenanceStatus !== 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT' ||
+              report.releaseEligibility !== 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED' ||
+              report.sourceGitHead !== sourceCommit || report.bundleSha256 !== digest ||
+              report.sourceGitState?.workingTreeClean !== true || report.sourceGitState?.trackedWorkingTreeClean !== true) {
+            throw new Error('independent source-to-bundle verifier did not prove exact bytes from a clean checkout');
+          }
+          console.log(JSON.stringify({status:report.status, candidateSha256:digest, sourceCommit,
+            sourceSnapshotSha256:report.sourceSnapshotSha256,
+            sourceProvenanceStatus:report.sourceProvenanceStatus,
+            releaseEligibility:report.releaseEligibility}, null, 2));
+          NODE
+
+      - name: Independently verify Sigstore-backed SLSA provenance, signer identity and source binding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh --version
+          node scripts/verify-hosted-builder-provenance.mjs \
+            --candidate "$EVIDENCE_DIR/candidate.mcpb" \
+            --builder-attestation-bundle "$EVIDENCE_DIR/attestation.json" \
+            --source-commit "$BUILDER_SHA" \
+            --out "$EVIDENCE_DIR/hosted-builder-verification.json"
+
+      - name: Create strict candidate-verification predicate bound to policy, source inventory and independent rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -- scripts/runalith-hosted-build-policy.json "$EVIDENCE_DIR/hosted-policy.json"
+          node scripts/create-hosted-candidate-verification-predicate.mjs \
+            --candidate "$EVIDENCE_DIR/candidate.mcpb" \
+            --policy scripts/runalith-hosted-build-policy.json \
+            --builder-verification "$EVIDENCE_DIR/hosted-builder-verification.json" \
+            --builder-attestation-bundle "$EVIDENCE_DIR/attestation.json" \
+            --builder-source-alignment "$EVIDENCE_DIR/source-alignment.json" \
+            --independent-rebuild "$EVIDENCE_DIR/independent-rebuild.json" \
+            --independent-source-alignment "$EVIDENCE_DIR/independent-source-alignment.json" \
+            --out "$EVIDENCE_DIR/candidate-verification-predicate.json"
+
+      - name: Publish verifier-owned decision evidence (not production release approval)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runalith-independent-verification-${{ github.event.workflow_run.head_sha }}
+          if-no-files-found: error
+          retention-days: 90
+          path: ${{ env.EVIDENCE_DIR }}/
+
+      - name: Report the authority boundary
+        run: |
+          echo 'INDEPENDENT_BUILDER_PROVENANCE_VERIFICATION=PASS'
+          echo 'CANDIDATE_VERIFICATION_PREDICATE=READY_FOR_SEPARATE_SIGNATURE'
+          echo 'RELEASE_APPROVAL=BLOCKED'
+          echo 'HOST_TRUST_PROVISIONING=BLOCKED'
+          echo 'EXTERNAL_MONOTONIC_CHECKPOINT=BLOCKED'
+          echo 'PRODUCTION_ROLLOUT=BLOCKED'

@@ -1,0 +1,259 @@
+name: Runalith independent-verifier attestation signer
+
+on:
+  workflow_run:
+    workflows: [Runalith independent provenance verifier]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runalith-verification-sign-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  validate-and-sign:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == 'nplongx/runalith' &&
+      github.event.workflow_run.repository.full_name == 'nplongx/runalith'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      VERIFIER_RUN_ID: ${{ github.event.workflow_run.id }}
+      INPUT_NAME: runalith-independent-verification-${{ github.event.workflow_run.head_sha }}
+      INPUT_DIR: ${{ runner.temp }}/runalith-verifier-evidence
+      POLICY_SHA256: 86a16eba1acf77a4966fc18ab45d450638f474faa0060d2964df2915741e843e
+
+    steps:
+      # This signer deliberately does not checkout source, run npm, unpack the
+      # MCPB, or execute candidate code. It validates downloaded bytes and the
+      # GitHub API + Sigstore bundle independently before requesting an OIDC
+      # signing identity specific to this third workflow.
+      - name: Download the exact successful independent-verifier run evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.INPUT_NAME }}
+          run-id: ${{ env.VERIFIER_RUN_ID }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          path: ${{ env.INPUT_DIR }}
+
+      - name: Independently verify SLSA attestation from API and downloaded bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 10
+          for file in candidate.mcpb candidate.sha256 attestation.json source-alignment.json \
+            hosted-builder-verification.json independent-rebuild.mcpb independent-rebuild.json \
+            independent-source-alignment.json hosted-policy.json candidate-verification-predicate.json; do
+            test -f "$INPUT_DIR/$file"
+            test ! -L "$INPUT_DIR/$file"
+          done
+          gh attestation verify "$INPUT_DIR/candidate.mcpb" \
+            --repo nplongx/runalith \
+            --signer-workflow nplongx/runalith/.github/workflows/runalith-provenance-builder.yml \
+            --signer-digest "$SOURCE_SHA" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --source-digest "$SOURCE_SHA" \
+            --source-ref refs/heads/main \
+            --predicate-type https://slsa.dev/provenance/v1 \
+            --deny-self-hosted-runners --format json > "$INPUT_DIR/signer-api-verification.json"
+          gh attestation verify "$INPUT_DIR/candidate.mcpb" \
+            --bundle "$INPUT_DIR/attestation.json" \
+            --signer-workflow nplongx/runalith/.github/workflows/runalith-provenance-builder.yml \
+            --signer-digest "$SOURCE_SHA" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            --source-digest "$SOURCE_SHA" \
+            --source-ref refs/heads/main \
+            --predicate-type https://slsa.dev/provenance/v1 \
+            --deny-self-hosted-runners --format json > "$INPUT_DIR/signer-bundle-verification.json"
+
+      - name: Validate the full evidence DAG against the pinned verifier policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module - "$INPUT_DIR" "$SOURCE_SHA" "$POLICY_SHA256" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          const [directory, sourceCommit, expectedPolicySha256] = process.argv.slice(2);
+          const read = name => fs.readFileSync(path.join(directory, name));
+          const parse = name => JSON.parse(read(name).toString('utf8'));
+          const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+          const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]`
+            : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`
+              : JSON.stringify(value);
+          const exactKeys = (value, keys, label) => {
+            if (!value || typeof value !== 'object' || Array.isArray(value) ||
+                canonical(Object.keys(value).sort()) !== canonical([...keys].sort())) throw new Error(`${label}: unexpected schema`);
+          };
+          const shaPattern = /^[a-f0-9]{64}$/;
+          const candidate = read('candidate.mcpb');
+          const rebuilt = read('independent-rebuild.mcpb');
+          const digest = hash(candidate);
+          const candidateChecksum = read('candidate.sha256').toString('utf8').trim().split(/\s+/)[0];
+          const predicate = parse('candidate-verification-predicate.json');
+          const policyBytes = read('hosted-policy.json');
+          const policy = JSON.parse(policyBytes.toString('utf8'));
+          const builderReport = parse('hosted-builder-verification.json');
+          const rebuildReport = parse('independent-rebuild.json');
+          const builderAlignmentBytes = read('source-alignment.json');
+          const independentAlignmentBytes = read('independent-source-alignment.json');
+          const builderAlignment = JSON.parse(builderAlignmentBytes.toString('utf8'));
+          const independentAlignment = JSON.parse(independentAlignmentBytes.toString('utf8'));
+          const bundleSha256 = hash(read('attestation.json'));
+          const apiVerification = parse('signer-api-verification.json');
+          const bundleVerification = parse('signer-bundle-verification.json');
+
+          if (hash(policyBytes) !== expectedPolicySha256 || hash(policyBytes) !== predicate.policy_sha256 ||
+              policy.schema_version !== 1 || policy.contract !== 'runalith-hosted-build-policy/v1' ||
+              policy.policy_version !== 1 || policy.source_repository !== 'https://github.com/nplongx/runalith' ||
+              policy.target_environment !== 'not-for-production' || policy.production_release_approval_required !== true ||
+              policy.host_trust_provisioning_required !== true || policy.external_monotonic_checkpoint_required !== true ||
+              policy.rollback_must_match_observed_baseline_bytes !== true) throw new Error('policy digest or pinned policy contract mismatch');
+          if (digest !== candidateChecksum || !candidate.equals(rebuilt) || hash(rebuilt) !== digest ||
+              rebuildReport.status !== 'PASS_BYTE_IDENTICAL' || rebuildReport.contract !== 'runalith-independent-rebuild/v1' ||
+              rebuildReport.sourceCommit !== sourceCommit || rebuildReport.candidateSha256 !== digest ||
+              rebuildReport.independentlyRebuiltSha256 !== digest || rebuildReport.candidateBytes !== candidate.length ||
+              rebuildReport.independentlyRebuiltBytes !== candidate.length) throw new Error('candidate/checksum/independent rebuild bytes do not match');
+
+          const validateSlsa = (entries, label) => {
+            if (!Array.isArray(entries) || entries.length !== 1) throw new Error(`${label}: expected exactly one verified SLSA statement`);
+            const entry = entries[0];
+            const statement = entry?.verificationResult?.statement;
+            const times = entry?.verificationResult?.verifiedTimestamps || [];
+            if (statement?._type !== 'https://in-toto.io/Statement/v1' ||
+                statement?.predicateType !== 'https://slsa.dev/provenance/v1' ||
+                statement?.subject?.length !== 1 || statement.subject[0]?.digest?.sha256 !== digest ||
+                statement.predicate?.buildDefinition?.buildType !== 'https://actions.github.io/buildtypes/workflow/v1' ||
+                statement.predicate?.runDetails?.builder?.id !== 'https://github.com/actions/runner' ||
+                statement.predicate?.buildDefinition?.externalParameters?.workflow?.repository !== 'https://github.com/nplongx/runalith' ||
+                statement.predicate?.buildDefinition?.externalParameters?.workflow?.path !== '.github/workflows/runalith-provenance-builder.yml' ||
+                statement.predicate?.buildDefinition?.externalParameters?.workflow?.ref !== 'refs/heads/main' ||
+                !statement.predicate?.buildDefinition?.resolvedDependencies?.some(item =>
+                  item?.uri === `git+https://github.com/nplongx/runalith@refs/heads/main` && item?.digest?.gitCommit === sourceCommit)) {
+              throw new Error(`${label}: candidate, builder, repository, source revision, workflow or predicate mismatch`);
+            }
+            const fresh = times.filter(item => {
+              const timestamp = typeof item?.timestamp === 'string' ? Date.parse(item.timestamp) : NaN;
+              return Number.isFinite(timestamp) && timestamp <= Date.now() + 5000 && Date.now() - timestamp <= 24 * 60 * 60 * 1000;
+            });
+            if (fresh.length < 1) throw new Error(`${label}: signed transparency timestamp missing/stale`);
+            const statementSha256 = hash(Buffer.from(JSON.stringify(statement), 'utf8'));
+            return { statement, statementSha256, verifiedAt: fresh.map(item => item.timestamp).sort()[0] };
+          };
+          const apiStatement = validateSlsa(apiVerification, 'GitHub API verifier');
+          const bundleStatement = validateSlsa(bundleVerification, 'downloaded Sigstore bundle verifier');
+          if (apiStatement.statementSha256 !== bundleStatement.statementSha256 || apiStatement.verifiedAt !== bundleStatement.verifiedAt) {
+            throw new Error('GitHub API and downloaded Sigstore bundle do not verify the same SLSA statement');
+          }
+          if (builderReport.status !== 'HOSTED_BUILDER_PROVENANCE_VERIFIED' ||
+              builderReport.candidateSha256 !== digest || builderReport.sourceCommit !== sourceCommit ||
+              builderReport.repository !== 'nplongx/runalith' ||
+              builderReport.signerWorkflow !== '.github/workflows/runalith-provenance-builder.yml' ||
+              builderReport.oidcIssuer !== 'https://token.actions.githubusercontent.com' ||
+              builderReport.predicateType !== 'https://slsa.dev/provenance/v1' ||
+              builderReport.buildType !== 'https://actions.github.io/buildtypes/workflow/v1' ||
+              builderReport.expectedBuilderId !== 'https://github.com/actions/runner' ||
+              builderReport.statement?.statementSha256 !== apiStatement.statementSha256 ||
+              builderReport.statement?.verifiedAt !== apiStatement.verifiedAt ||
+              builderReport.statement?.subjectSha256 !== digest ||
+              builderReport.statement?.builderId !== apiStatement.statement.predicate?.runDetails?.builder?.id ||
+              builderReport.builderAttestationBundleSha256 !== bundleSha256 ||
+              builderReport.verifierOutputSha256 !== hash(read('signer-api-verification.json')) ||
+              builderReport.bundleVerifierOutputSha256 !== hash(read('signer-bundle-verification.json')) ||
+              builderReport.productionReleaseEligible !== false) throw new Error('independent builder-verification report does not match fresh cryptographic verification');
+          if (builderAlignment.status !== 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT' ||
+              builderAlignment.sourceProvenanceStatus !== 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT' ||
+              builderAlignment.releaseEligibility !== 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED' ||
+              builderAlignment.sourceGitHead !== sourceCommit || builderAlignment.bundleSha256 !== digest ||
+              builderAlignment.sourceGitState?.workingTreeClean !== true || builderAlignment.sourceGitState?.trackedWorkingTreeClean !== true ||
+              independentAlignment.status !== 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT' ||
+              independentAlignment.sourceProvenanceStatus !== builderAlignment.sourceProvenanceStatus ||
+              independentAlignment.releaseEligibility !== builderAlignment.releaseEligibility ||
+              independentAlignment.sourceGitHead !== sourceCommit || independentAlignment.bundleSha256 !== digest ||
+              independentAlignment.sourceGitState?.workingTreeClean !== true || independentAlignment.sourceGitState?.trackedWorkingTreeClean !== true ||
+              independentAlignment.sourceSnapshotSha256 !== builderAlignment.sourceSnapshotSha256) throw new Error('builder/independent source alignment is not bound to the same clean source snapshot and candidate');
+
+          exactKeys(predicate, ['result','candidate_sha256','source_snapshot_sha256','policy_sha256','entry_inventory_sha256','evidence','source_alignment','tests'], 'candidate-verification predicate');
+          exactKeys(predicate.source_alignment, ['status','candidate_sha256','source_snapshot_sha256','working_tree_clean'], 'candidate source alignment');
+          exactKeys(predicate.evidence, ['builder_attestation_bundle_sha256','builder_verification_report_sha256','builder_source_alignment_sha256','independent_rebuild_report_sha256','independent_source_alignment_sha256'], 'evidence digests');
+          const expectedEvidence = {
+            builder_attestation_bundle_sha256: bundleSha256,
+            builder_verification_report_sha256: hash(read('hosted-builder-verification.json')),
+            builder_source_alignment_sha256: hash(builderAlignmentBytes),
+            independent_rebuild_report_sha256: hash(read('independent-rebuild.json')),
+            independent_source_alignment_sha256: hash(independentAlignmentBytes)
+          };
+          if (canonical(predicate.evidence) !== canonical(expectedEvidence) || predicate.result !== 'PASS' ||
+              predicate.candidate_sha256 !== digest || predicate.source_snapshot_sha256 !== independentAlignment.sourceSnapshotSha256 ||
+              predicate.source_alignment?.status !== 'PASS' || predicate.source_alignment?.candidate_sha256 !== digest ||
+              predicate.source_alignment?.source_snapshot_sha256 !== independentAlignment.sourceSnapshotSha256 ||
+              predicate.source_alignment?.working_tree_clean !== true || !shaPattern.test(predicate.entry_inventory_sha256 || '')) {
+            throw new Error('candidate-verification predicate is not bound to exact evidence bytes/source/policy/candidate');
+          }
+          if (!Array.isArray(independentAlignment.sourceEntries) || independentAlignment.sourceEntries.length !== independentAlignment.archiveEntryCount) {
+            throw new Error('independent entry inventory is absent or truncated');
+          }
+          const paths = new Set();
+          const inventory = independentAlignment.sourceEntries.map(entry => {
+            if (!entry || typeof entry.archivePath !== 'string' || paths.has(entry.archivePath) || !shaPattern.test(entry.sha256 || '') ||
+                !Number.isSafeInteger(entry.sizeBytes) || entry.sizeBytes < 0) throw new Error('source inventory has duplicate paths or malformed digest/size');
+            paths.add(entry.archivePath);
+            return { archivePath: entry.archivePath, sizeBytes: entry.sizeBytes, sha256: entry.sha256 };
+          }).sort((a,b) => a.archivePath.localeCompare(b.archivePath, 'en'));
+          if (hash(Buffer.from(canonical(inventory), 'utf8')) !== predicate.entry_inventory_sha256) throw new Error('entry inventory digest mismatch');
+          if (!Array.isArray(predicate.tests) || canonical(predicate.tests.map(item => item.name)) !== canonical(policy.required_tests) ||
+              !predicate.tests.every(item => Object.keys(item).sort().join(',') === 'candidate_sha256,exit_code,name,status' &&
+                item.status === 'PASS' && item.exit_code === 0 && item.candidate_sha256 === digest)) throw new Error('required test set/exit status is incomplete or changed');
+
+          const result = { status: 'SIGNER_PREFLIGHT_PASS', candidateSha256: digest, sourceCommit,
+            sourceSnapshotSha256: independentAlignment.sourceSnapshotSha256, policySha256: hash(policyBytes),
+            builderAttestationBundleSha256: bundleSha256, candidateVerificationPredicateSha256: hash(read('candidate-verification-predicate.json')),
+            verifiedBuilderStatementSha256: apiStatement.statementSha256, requiredTestCount: predicate.tests.length,
+            productionReleaseEligible: false, releaseApprovalVerified: false, hostTrustProvisioningAuthenticated: false,
+            externalMonotonicCheckpointVerified: false };
+          console.log(JSON.stringify(result, null, 2));
+          NODE
+
+      - name: Sign the candidate-verification statement with the separate signer-workflow identity
+        id: attest-verification
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ env.INPUT_DIR }}/candidate.mcpb
+          predicate-type: https://runalith.dev/attestations/hosted-candidate-verification/v1
+          predicate-path: ${{ env.INPUT_DIR }}/candidate-verification-predicate.json
+
+      - name: Publish independently signed evidence (not a release approval)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runalith-verified-candidate-${{ github.event.workflow_run.head_sha }}
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            ${{ env.INPUT_DIR }}/candidate.mcpb
+            ${{ env.INPUT_DIR }}/hosted-policy.json
+            ${{ env.INPUT_DIR }}/candidate-verification-predicate.json
+            ${{ steps.attest-verification.outputs.bundle-path }}
+
+      - name: State the remaining authority boundary
+        run: |
+          echo 'SLSA_BUILDER_PROVENANCE=INDEPENDENTLY_VERIFIED_BY_API_AND_BUNDLE'
+          echo 'CANDIDATE_VERIFICATION=SIGNED_BY_SEPARATE_WORKFLOW_IDENTITY'
+          echo 'INDEPENDENT_RELEASE_APPROVAL=BLOCKED'
+          echo 'HOST_TRUST_PROVISIONING=BLOCKED'
+          echo 'EXTERNAL_MONOTONIC_CHECKPOINT=BLOCKED'
+          echo 'PRODUCTION_ROLLOUT=BLOCKED'

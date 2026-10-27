@@ -1,0 +1,186 @@
+name: Runalith controlled provenance builder
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runalith-provenance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Build and test without attestation credentials
+    # Protected main and external ruleset are prerequisites, not inferred from
+    # this YAML. This job has no OIDC, attestation-write or release permissions.
+    if: github.ref == 'refs/heads/main' && github.ref_protected
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+    env:
+      CANDIDATE: ${{ runner.temp }}/runalith-${{ github.sha }}.mcpb
+      EVIDENCE_DIR: ${{ runner.temp }}/runalith-build-${{ github.sha }}
+    steps:
+      - name: Checkout exact protected source revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Create private evidence directory and assert source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 -p "$EVIDENCE_DIR"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v2 --untracked-files=all)"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const manifest = JSON.parse(fs.readFileSync('plugin/manifest.json', 'utf8'));
+          if (pkg.version !== manifest.version || pkg.main !== pkg.runtimeEntryPoint || manifest.server?.entry_point !== pkg.runtimeEntryPoint) {
+            throw new Error('package, manifest and versioned runtime entry point do not match');
+          }
+          console.log(JSON.stringify({sourceCommit: process.env.GITHUB_SHA, packageVersion: pkg.version,
+            entryPoint: pkg.runtimeEntryPoint, packageJsonSha256: crypto.createHash('sha256').update(fs.readFileSync('package.json')).digest('hex')}, null, 2));
+          NODE
+      - name: Install lockfile-pinned dependencies
+        run: npm ci
+      - name: Full test suite
+        run: npm test
+      - name: Documentation and site checks
+        run: |
+          npm run docs:check
+          npm run site:check
+      - name: Package reproducibility and frozen inventory regression
+        run: npm run test:package-reproducibility
+      - name: Build, inspect and test exact MCPB in the low-privilege job
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$CANDIDATE"
+          PLUGIN_BUNDLE_OUT="$CANDIDATE" bash scripts/package-runalith-mcpb.sh
+          test -f "$CANDIDATE"
+          test ! -L "$CANDIDATE"
+          unzip -t "$CANDIDATE"
+          sha256sum "$CANDIDATE" > "$EVIDENCE_DIR/candidate.sha256"
+          node scripts/verify-mcpb-source-alignment.mjs \
+            --source-root "$GITHUB_WORKSPACE" \
+            --bundle "$CANDIDATE" \
+            --output "$EVIDENCE_DIR/source-alignment.json"
+          node --input-type=module - "$EVIDENCE_DIR/source-alignment.json" "$CANDIDATE" <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          const [reportPath, bundlePath] = process.argv.slice(2);
+          const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+          const digest = crypto.createHash('sha256').update(fs.readFileSync(bundlePath)).digest('hex');
+          if (report.status !== 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT' ||
+              report.sourceProvenanceStatus !== 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT' ||
+              report.releaseEligibility !== 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED' ||
+              report.bundleSha256 !== digest || report.sourceGitHead !== process.env.GITHUB_SHA ||
+              report.sourceGitState?.workingTreeClean !== true || report.sourceGitState?.trackedWorkingTreeClean !== true) {
+            throw new Error('source-to-bundle alignment does not bind the exact clean checkout and candidate bytes');
+          }
+          console.log(JSON.stringify({bundleSha256:digest, sourceSnapshotSha256:report.sourceSnapshotSha256,
+            sourceProvenanceStatus:report.sourceProvenanceStatus,
+            releaseEligibility:report.releaseEligibility}, null, 2));
+          NODE
+          npm run test:mcpb-candidate -- "$CANDIDATE"
+          cp -- "$CANDIDATE" "$EVIDENCE_DIR/candidate.mcpb"
+          chmod 600 "$EVIDENCE_DIR"/*
+      - name: Publish the build-only evidence bundle (no signing credentials)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runalith-build-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: ${{ env.EVIDENCE_DIR }}/
+
+  attest-exact-build:
+    name: Attest opaque candidate bytes in a separate privileged job
+    needs: build-and-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      BUILDER_SHA: ${{ github.sha }}
+      INPUT_NAME: runalith-build-${{ github.sha }}
+      INPUT_DIR: ${{ runner.temp }}/runalith-pre-attestation-${{ github.sha }}
+      EVIDENCE_DIR: ${{ runner.temp }}/runalith-provenance-${{ github.sha }}
+    steps:
+      # This job deliberately does not checkout source code, run npm, unzip or
+      # execute candidate code. The build/test job has no OIDC/attestation token.
+      - name: Download exact build output as data
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ env.INPUT_NAME }}
+          path: ${{ env.INPUT_DIR }}
+      - name: Re-hash exact candidate and clean-source report without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$INPUT_DIR/candidate.mcpb"
+          test -f "$INPUT_DIR/candidate.sha256"
+          test -f "$INPUT_DIR/source-alignment.json"
+          test "$(find "$INPUT_DIR" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 3
+          mkdir -m 700 -p "$EVIDENCE_DIR"
+          node --input-type=module - "$INPUT_DIR" "$BUILDER_SHA" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          const [directory, commit] = process.argv.slice(2);
+          const bytes = fs.readFileSync(path.join(directory, 'candidate.mcpb'));
+          const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+          const checksum = fs.readFileSync(path.join(directory, 'candidate.sha256'), 'utf8').trim().split(/\s+/)[0];
+          const report = JSON.parse(fs.readFileSync(path.join(directory, 'source-alignment.json'), 'utf8'));
+          if (digest !== checksum || report.status !== 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT' ||
+              report.sourceProvenanceStatus !== 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT' ||
+              report.releaseEligibility !== 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED' ||
+              report.bundleSha256 !== digest || report.sourceGitHead !== commit ||
+              report.sourceGitState?.workingTreeClean !== true || report.sourceGitState?.trackedWorkingTreeClean !== true) {
+            throw new Error('downloaded opaque candidate does not match its exact byte digest and clean-source alignment report');
+          }
+          console.log(JSON.stringify({candidateSha256:digest, sourceCommit:commit, sizeBytes:bytes.length}, null, 2));
+          NODE
+          cp -- "$INPUT_DIR/candidate.mcpb" "$EVIDENCE_DIR/candidate.mcpb"
+          cp -- "$INPUT_DIR/candidate.sha256" "$EVIDENCE_DIR/candidate.sha256"
+          cp -- "$INPUT_DIR/source-alignment.json" "$EVIDENCE_DIR/source-alignment.json"
+          chmod 600 "$EVIDENCE_DIR"/*
+      - name: Create GitHub Sigstore-backed SLSA provenance for the exact bytes
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ env.EVIDENCE_DIR }}/candidate.mcpb
+      - name: Preserve the signed attestation bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -- "${{ steps.attest.outputs.bundle-path }}" "$EVIDENCE_DIR/attestation.json"
+          chmod 600 "$EVIDENCE_DIR/attestation.json"
+      - name: Publish content and attestation evidence (not a release approval)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runalith-provenance-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 30
+          path: ${{ env.EVIDENCE_DIR }}/
+      - name: State the release boundary explicitly
+        run: |
+          echo 'BUILD_AND_ATTESTATION_CREATION=PASS'
+          echo 'INDEPENDENT_VERIFICATION=PENDING_SEPARATE_WORKFLOW'
+          echo 'PRODUCTION_RELEASE_AUTHORITY=BLOCKED'
+          echo 'REASON=release approval, host-owned trust provisioning, independent monotonic checkpoint and exact installed-baseline rollback have not been established by this workflow'
