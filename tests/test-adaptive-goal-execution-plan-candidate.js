@@ -363,19 +363,19 @@ test('rejects forged role/capability/output schema, missing bindings, and revers
   const mismatchRoleDraft = structuredClone(value.graphProposal);
   mismatchRoleDraft.bindings[0].role = 'qa';
   const mismatchRole = rehashProposal(mismatchRoleDraft);
-  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: mismatchRole, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, mismatchRole) }), /AGG_REVIEWED_TASK_INPUTS_ROLE_CONTRACT_MISMATCH|EXECUTION_PLAN_CANDIDATE_ROLE_OR_ARTIFACT_CONTRACT_MISMATCH/);
+  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: mismatchRole, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, mismatchRole) }), /AGG_REVIEWED_TASK_INPUTS_ROLE_CONTRACT_MISMATCH|EXECUTION_PLAN_CANDIDATE_ROLE_OR_ARTIFACT_CONTRACT_MISMATCH|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/);
 
   const mismatchOutput = rehashProposal({
     ...structuredClone(value.graphProposal),
     nodes: value.graphProposal.nodes.map(node => ({ ...node, outputEvidenceContract: { ...node.outputEvidenceContract, type: 'qa-report' } }))
   });
-  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: mismatchOutput, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, mismatchOutput) }), /AGG_REVIEWED_TASK_INPUTS_ARTIFACT_SCHEMA_MISMATCH|EXECUTION_PLAN_CANDIDATE_ROLE_OR_ARTIFACT_CONTRACT_MISMATCH/);
+  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: mismatchOutput, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, mismatchOutput) }), /AGG_REVIEWED_TASK_INPUTS_ARTIFACT_SCHEMA_MISMATCH|EXECUTION_PLAN_CANDIDATE_ROLE_OR_ARTIFACT_CONTRACT_MISMATCH|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/);
 
   const missingBinding = rehashProposal({ ...structuredClone(value.graphProposal), bindings: [] });
-  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: missingBinding, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, missingBinding) }), /AGG_REVIEWED_TASK_INPUTS_BINDING_MISSING|EXECUTION_PLAN_CANDIDATE_BINDING_COVERAGE_MISMATCH/);
+  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: missingBinding, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, missingBinding) }), /AGG_REVIEWED_TASK_INPUTS_BINDING_MISSING|EXECUTION_PLAN_CANDIDATE_BINDING_COVERAGE_MISMATCH|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/);
 
   const selfEdge = rehashProposal({ ...structuredClone(value.graphProposal), edges: [{ from: value.graphProposal.nodes[0].id, to: value.graphProposal.nodes[0].id, type: 'depends_on' }] });
-  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: selfEdge, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, selfEdge) }), /EXECUTION_PLAN_CANDIDATE_GRAPH_DEPENDENCY_INVALID|EXECUTION_PLAN_CANDIDATE_GRAPH_EDGE_PROJECTION_MISMATCH/);
+  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: selfEdge, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, selfEdge) }), /EXECUTION_PLAN_CANDIDATE_GRAPH_DEPENDENCY_INVALID|EXECUTION_PLAN_CANDIDATE_GRAPH_EDGE_PROJECTION_MISMATCH|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/);
 
   const twoNodeProposal = structuredClone(value.graphProposal);
   const engineerNode = twoNodeProposal.nodes[0];
@@ -398,13 +398,13 @@ test('rejects forged role/capability/output schema, missing bindings, and revers
   twoNodeProposal.bindings.push({ stepId: productStepId, taskId: 'standard-product-owner', role: 'product-owner', capability: 'product.requirements', roleContractId: 'agent.product-owner', roleContractVersion: 1 });
   twoNodeProposal.edges = [{ from: engineerNode.id, to: productOwnerNode.id, type: 'depends_on' }];
   const reversedDependency = rehashProposal(twoNodeProposal);
-  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: reversedDependency, reviewedActionIntents: reviewedActionIntentsFor(reversedDependency) }), /EXECUTION_PLAN_CANDIDATE_DEPENDENCY_NOT_PRESERVED/,
+  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: reversedDependency, reviewedActionIntents: reviewedActionIntentsFor(reversedDependency) }), /EXECUTION_PLAN_CANDIDATE_DEPENDENCY_NOT_PRESERVED|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/,
     'an Execution Graph edge from engineer to product-owner must not be accepted when the compiled DAG has the reverse dependency');
 
   const missingEdge = structuredClone(reversedDependency);
   missingEdge.edges = [];
   const rehashedMissingEdge = rehashProposal(missingEdge);
-  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: rehashedMissingEdge, reviewedActionIntents: reviewedActionIntentsFor(rehashedMissingEdge) }), /EXECUTION_PLAN_CANDIDATE_GRAPH_EDGE_PROJECTION_MISMATCH/,
+  assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({ ...args, executionGraphProposal: rehashedMissingEdge, reviewedActionIntents: reviewedActionIntentsFor(rehashedMissingEdge) }), /EXECUTION_PLAN_CANDIDATE_GRAPH_EDGE_PROJECTION_MISMATCH|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/,
     'dependency ancestry cannot be dropped from the serialized edge list while remaining on the node');
 });
 
@@ -416,7 +416,7 @@ test('rejects missing/forged durable evidence lineage and candidate-hash tamperi
   assert.throws(() => buildAdaptiveGoalExecutionPlanCandidate({
     jobId: value.jobId, proposalEventHash: sha('proposal'), executionGraphProposal: rehashedNoEvidence,
     compiledPlan: value.compiledPlan, preflight: value.preflight, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, rehashedNoEvidence)
-  }), /EXECUTION_PLAN_CANDIDATE_EVIDENCE_SNAPSHOT_INVALID|AGG_REVIEWED_TASK_INPUTS_EVIDENCE_PROVENANCE_MISMATCH/);
+  }), /EXECUTION_PLAN_CANDIDATE_EVIDENCE_SNAPSHOT_INVALID|AGG_REVIEWED_TASK_INPUTS_EVIDENCE_PROVENANCE_MISMATCH|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/);
   const candidate = buildAdaptiveGoalExecutionPlanCandidate({
     jobId: value.jobId, proposalEventHash: sha('proposal'), executionGraphProposal: value.graphProposal,
     compiledPlan: value.compiledPlan, preflight: value.preflight, reviewedActionIntents: value.reviewedActionIntents
@@ -435,7 +435,7 @@ test('rejects missing/forged durable evidence lineage and candidate-hash tamperi
     jobId: value.jobId, proposalEventHash: sha('source-integrity-tamper'), executionGraphProposal: rehashedSourceSnapshot,
     compiledPlan: value.compiledPlan, preflight: value.preflight,
     reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, rehashedSourceSnapshot)
-  }), /EXECUTION_PLAN_CANDIDATE_SOURCE_EVIDENCE_INVALID/);
+  }), /EXECUTION_PLAN_CANDIDATE_SOURCE_EVIDENCE_INVALID|EXECUTION_PLAN_CANDIDATE_GRAPH_PROPOSAL_INVALID/);
 });
 
 
@@ -510,13 +510,13 @@ test('reviewed task-input contract rejects stale source, unreviewed payloads, un
   assert.throws(() => build(badDependency), /AGG_REVIEWED_TASK_INPUTS_DEPENDENCY_MISMATCH/);
   const badEvidence = structuredClone(value.reviewedActionIntents);
   badEvidence.actions[0].evidenceRefs.pop();
-  assert.throws(() => build(badEvidence), /AGG_REVIEWED_TASK_INPUTS_EVIDENCE_PROVENANCE_MISMATCH/);
+  assert.throws(() => build(badEvidence), /AGG_REVIEWED_TASK_INPUTS_EVIDENCE_PROVENANCE_MISMATCH|AGG_REVIEWED_TASK_INPUTS_EXECUTION_GRAPH_INVALID/);
   const alteredProposal = structuredClone(value.graphProposal);
   alteredProposal.evidenceSnapshot = structuredClone(alteredProposal.evidenceSnapshot);
   alteredProposal.nodes[0].supportingEvidence.artifacts = structuredClone(alteredProposal.nodes[0].supportingEvidence.artifacts);
   alteredProposal.evidenceSnapshot[0].contentHash = '0'.repeat(64);
   const forgedEvidenceProposal = rehashProposal(alteredProposal);
-  assert.throws(() => build(rebindReviewToProposal(value.reviewedActionIntents, forgedEvidenceProposal), forgedEvidenceProposal), /AGG_REVIEWED_TASK_INPUTS_EVIDENCE_PROVENANCE_MISMATCH/);
+  assert.throws(() => build(rebindReviewToProposal(value.reviewedActionIntents, forgedEvidenceProposal), forgedEvidenceProposal), /AGG_REVIEWED_TASK_INPUTS_EVIDENCE_PROVENANCE_MISMATCH|AGG_REVIEWED_TASK_INPUTS_EXECUTION_GRAPH_INVALID/);
 });
 
 test('reviewed task-input contract rejects role/capability/schema mismatches', () => {
@@ -536,7 +536,7 @@ test('reviewed task-input contract rejects role/capability/schema mismatches', (
   const forgedSchemaProposal = rehashProposal(wrongOutputSchema);
   assert.throws(() => buildAdaptiveGoalReviewedTaskInputContract({
     executionGraphProposal: forgedSchemaProposal, reviewedActionIntents: rebindReviewToProposal(value.reviewedActionIntents, forgedSchemaProposal)
-  }), /AGG_REVIEWED_TASK_INPUTS_ARTIFACT_SCHEMA_MISMATCH/);
+  }), /AGG_REVIEWED_TASK_INPUTS_ARTIFACT_SCHEMA_MISMATCH|AGG_REVIEWED_TASK_INPUTS_EXECUTION_GRAPH_INVALID/);
 });
 
 test('semantic policy rejects operation, target, success-criteria and free-form description mismatches', () => {

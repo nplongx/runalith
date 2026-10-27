@@ -8,7 +8,10 @@ import {
   searchAdaptiveGoalGraph,
   resolveAdaptiveGoalRecovery
 } from '../src/runtime/adaptive-goal-graph.js';
-import { projectAdaptiveGoalCandidateToPlanGraph } from '../src/runtime/adaptive-goal-plan-adapter.js';
+import {
+  matchesAdaptiveGoalKnowledgeSnapshotProjection,
+  projectAdaptiveGoalCandidateToPlanGraph
+} from '../src/runtime/adaptive-goal-plan-adapter.js';
 
 function baseGraph({ nodes, edges, startNodeId = 'start', goalNodeId = 'goal' }) {
   return { schemaVersion: 1, startNodeId, goalNodeId, nodes, edges };
@@ -657,4 +660,69 @@ test('does not accept caller-asserted Goal/Idea verification metadata as a trust
     /in-process report from the configured verifier/);
   const draft = projectAdaptiveGoalCandidateToPlanGraph(graph, candidate, {});
   assert.equal(draft.source.verification.verified, false);
+});
+
+test('authenticated Goal/Idea projection binds signed labels and evidence refs, not only node IDs/types', () => {
+  const snapshot = {
+    nodes: [
+      { id: 'start', type: 'goal', stable_key: 'start', content: { title: 'Signed start' }, evidence_refs: [] },
+      { id: 'work', type: 'task', stable_key: 'work', content: { title: 'Signed implementation task' }, evidence_refs: ['artifact://verified-requirements'] },
+      { id: 'goal', type: 'goal', stable_key: 'goal', content: { title: 'Signed target' }, evidence_refs: [] }
+    ],
+    edges: [
+      { from_id: 'start', to_id: 'work', type: 'next_step' },
+      { from_id: 'work', to_id: 'goal', type: 'next_step' }
+    ]
+  };
+  const graph = baseGraph({
+    nodes: [
+      node('start', { type: 'goal', label: 'Signed start', evidenceRefs: [] }),
+      node('work', { type: 'task', label: 'Signed implementation task', evidenceRefs: ['artifact://verified-requirements'] }),
+      node('goal', { type: 'goal', label: 'Signed target', evidenceRefs: [] })
+    ],
+    edges: [edge('start', 'work'), edge('work', 'goal')]
+  });
+  assert.equal(matchesAdaptiveGoalKnowledgeSnapshotProjection(graph, snapshot), true);
+
+  const relabelled = structuredClone(graph);
+  relabelled.nodes.find(item => item.id === 'work').label = 'Unreviewed destructive action';
+  assert.equal(matchesAdaptiveGoalKnowledgeSnapshotProjection(relabelled, snapshot), false,
+    'an unchanged ID/type and edge set must not let a caller substitute a task label');
+
+  const substitutedEvidence = structuredClone(graph);
+  substitutedEvidence.nodes.find(item => item.id === 'work').evidenceRefs = ['artifact://unverified-output'];
+  assert.equal(matchesAdaptiveGoalKnowledgeSnapshotProjection(substitutedEvidence, snapshot), false,
+    'evidence references must be the exact references bound by the verified snapshot');
+
+  const changedEdge = structuredClone(graph);
+  changedEdge.edges[0].to = 'goal';
+  assert.equal(matchesAdaptiveGoalKnowledgeSnapshotProjection(changedEdge, snapshot), false,
+    'dependency edges must remain bound to the verified snapshot');
+});
+
+test('Plan Graph projection rejects accessor-backed graph and candidate input before invoking getters', () => {
+  const graph = baseGraph({
+    nodes: [node('start', { type: 'goal' }), node('work'), node('goal', { type: 'goal' })],
+    edges: [edge('start', 'work'), edge('work', 'goal')]
+  });
+  const options = { beamWidth: 4, maxDepth: 8, maxExpansions: 32 };
+  const candidate = searchAdaptiveGoalGraph(graph, options).candidates[0];
+  let getterCalls = 0;
+  const accessorCandidate = { ...candidate };
+  Object.defineProperty(accessorCandidate, 'planId', {
+    enumerable: true,
+    get() { getterCalls += 1; return candidate.planId; }
+  });
+  assert.throws(() => projectAdaptiveGoalCandidateToPlanGraph(graph, accessorCandidate, options),
+    /candidate objects must contain enumerable data properties only/);
+  assert.equal(getterCalls, 0, 'candidate accessor must not execute during validation');
+
+  const accessorGraph = { ...graph };
+  Object.defineProperty(accessorGraph, 'startNodeId', {
+    enumerable: true,
+    get() { getterCalls += 1; return graph.startNodeId; }
+  });
+  assert.throws(() => projectAdaptiveGoalCandidateToPlanGraph(accessorGraph, candidate, options),
+    /graph objects must contain enumerable data properties only/);
+  assert.equal(getterCalls, 0, 'graph accessor must not execute during validation');
 });

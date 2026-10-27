@@ -615,7 +615,27 @@ export function conversationKeyFromMessages(messages) {
 export class WorkflowStore {
   constructor(database = db) {
     this.db = database;
+    // A standalone WorkflowStore has no independent Goal/Idea verifier context.
+    // AGG action-intent dispatch therefore requires an in-process guard wired
+    // by the host runtime; a valid candidate hash/reviewer proof alone is not
+    // sufficient to prove the upstream source snapshot is current.
+    this.adaptiveGoalExecutionDispatchGuard = null;
+    this.adaptiveGoalExecutionApprovalGuard = null;
     initializeWorkflowPolicyStore(this.db);
+  }
+  setAdaptiveGoalExecutionDispatchGuard(guard) {
+    if (typeof guard !== 'function') throw new TypeError('AGG execution dispatch guard must be a function');
+    if (this.adaptiveGoalExecutionDispatchGuard && this.adaptiveGoalExecutionDispatchGuard !== guard) {
+      throw new Error('AGG execution dispatch guard is already configured and cannot be replaced');
+    }
+    this.adaptiveGoalExecutionDispatchGuard = guard;
+  }
+  setAdaptiveGoalExecutionApprovalGuard(guard) {
+    if (typeof guard !== 'function') throw new TypeError('AGG execution approval guard must be a function');
+    if (this.adaptiveGoalExecutionApprovalGuard && this.adaptiveGoalExecutionApprovalGuard !== guard) {
+      throw new Error('AGG execution approval guard is already configured and cannot be replaced');
+    }
+    this.adaptiveGoalExecutionApprovalGuard = guard;
   }
   getActiveJob(conversationKey) {
     return this.db.prepare("SELECT * FROM jobs WHERE conversation_key = ? AND status = 'active' ORDER BY updated_at DESC, rowid DESC LIMIT 1").get(conversationKey) || null;
@@ -6740,6 +6760,24 @@ export class WorkflowStore {
       if (!['IDLE', 'PROPOSED', 'DISCUSSING'].includes(String(job.state || '').toUpperCase())) {
         throw new Error(`cannot approve Job from state=${job.state}: ${jobId}`);
       }
+      if (proposal.payload?.adaptive_goal_execution_graph_proposal) {
+        // The MCP handler runs the same verifier before reaching this method,
+        // but that read-only check is not atomic with the approval write. Re-run
+        // source snapshot/evidence/reviewer checks while this transaction owns
+        // the SQLite writer lock, before creating the approval or immutable
+        // plan. This prevents a source mutation between preflight and approval.
+        if (typeof this.adaptiveGoalExecutionApprovalGuard !== 'function') {
+          throw new Error('AGG_EXECUTION_APPROVAL_SOURCE_GUARD_UNAVAILABLE: host runtime did not configure the independent Goal/Idea + reviewer approval verifier');
+        }
+        const authorization = this.adaptiveGoalExecutionApprovalGuard(jobId, proposal.proposalHash);
+        if (!authorization || authorization.executionReviewReady !== true || authorization.proposalHash !== proposal.proposalHash ||
+            typeof authorization.candidateHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.candidateHash) ||
+            typeof authorization.immutablePlanHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.immutablePlanHash) ||
+            typeof authorization.sourceSnapshotHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.sourceSnapshotHash) ||
+            typeof authorization.reviewerAttestationEventId !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.reviewerAttestationEventId)) {
+          throw new Error('AGG_EXECUTION_APPROVAL_SOURCE_GUARD_REJECTED: source snapshot, reviewer identity, evidence or immutable plan could not be revalidated under the approval lock');
+        }
+      }
       const approvalId = id('approval'); const ts = now();
       this.db.prepare("INSERT INTO approvals(approval_id, job_id, decision, actor, raw_text, proposal_hash, created_at) VALUES(?, ?, 'approved', ?, ?, ?, ?)").run(approvalId, jobId, actor, rawText, proposal.proposalHash, ts);
       const changed = this.db.prepare("UPDATE jobs SET state='APPROVED', approved_at=?, updated_at=? WHERE job_id=? AND state=? AND status='active'")
@@ -6771,11 +6809,25 @@ export class WorkflowStore {
       if (isSupportedWorkflow(jobBeforeDispatch)) this.assertApprovalCurrent(jobId);
       const dispatchPlan = this.getExecutionPlan(jobId);
       if (dispatchPlan?.children?.some(task => Object.hasOwn(task.execution || {}, 'action_intent'))) {
-        // Independent low-level gate: server preflight is not an authorization
-        // boundary for callers that reach WorkflowStore directly.
-        actionIntentBindingsFromCandidate(this, jobId);
+        // Independent low-level gate: handler preflight is not an authorization
+        // boundary. Revalidate the complete candidate, source snapshot, and
+        // reviewer identity under this BEGIN IMMEDIATE writer transaction.
+        // This prevents a source/evidence mutation between the MCP handler's
+        // earlier check and the actual durable dispatch transition.
+        if (typeof this.adaptiveGoalExecutionDispatchGuard !== 'function') {
+          throw new Error('AGG_EXECUTION_SOURCE_VERIFICATION_GUARD_UNAVAILABLE: host runtime did not configure the independent Goal/Idea + reviewer dispatch verifier');
+        }
+        const bindings = actionIntentBindingsFromCandidate(this, jobId);
         if (dispatchPlan.plan_hash !== this.getExecutionPlan(jobId)?.plan_hash) {
           throw new Error('AGG action-intent immutable plan changed at dispatch boundary');
+        }
+        const authorization = this.adaptiveGoalExecutionDispatchGuard(jobId, dispatchPlan, bindings);
+        if (!authorization || authorization.executionReviewReady !== true ||
+            authorization.immutablePlanHash !== dispatchPlan.plan_hash ||
+            typeof authorization.candidateHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.candidateHash) ||
+            typeof authorization.sourceSnapshotHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.sourceSnapshotHash) ||
+            typeof authorization.reviewerAttestationEventId !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.reviewerAttestationEventId)) {
+          throw new Error('AGG_EXECUTION_SOURCE_VERIFICATION_GUARD_REJECTED: source snapshot, reviewer identity, or immutable plan could not be revalidated under the dispatch lock');
         }
       }
       const task = this.ensureTask(jobId, { role, description }); const ts = now();

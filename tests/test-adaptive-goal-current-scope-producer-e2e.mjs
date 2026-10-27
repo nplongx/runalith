@@ -475,6 +475,34 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(unregisteredReadiness.readyForExecutionGraphReview, false);
   assert.ok(unregisteredReadiness.evidenceBlockers.some(item => item.code === 'SOURCE_EVIDENCE_UNVERIFIED'));
 
+  // Empty source references must be reported per step, not collapsed into a
+  // generic readiness failure or silently populated with synthetic evidence.
+  const noEvidenceGraph = structuredClone(graph);
+  for (const spec of ROLE_SPECS) {
+    noEvidenceGraph.nodes.find(node => node.id === spec.nodeId).evidenceRefs = [];
+  }
+  const noEvidenceSearch = await tool('adaptive_goal_graph_search', {
+    graph: noEvidenceGraph,
+    options: { beamWidth: 16, maxDepth: 24, maxExpansions: 1024, maxAuditEvents: 1000 },
+    plan_projection_options: { dependencyMode: 'source_edges_only' }
+  });
+  const noEvidenceDraft = noEvidenceSearch.planGraphDrafts.find(item => item.steps.length === 9);
+  assert.ok(noEvidenceDraft);
+  const noEvidenceBindings = ROLE_SPECS.map(spec => ({
+    step_id: noEvidenceDraft.steps.find(step => step.sourceNodeId === spec.nodeId).id,
+    task_id: spec.taskId,
+    capability: spec.capability
+  }));
+  const noEvidenceReadiness = await tool('adaptive_goal_execution_readiness_check', {
+    draft: noEvidenceDraft, workflow_id: 'standard-engineering', task_bindings: noEvidenceBindings
+  });
+  const perStepMissingEvidence = noEvidenceReadiness.evidenceBlockers.filter(item => item.code === 'STEP_EVIDENCE_MISSING');
+  assert.equal(perStepMissingEvidence.length, 9, JSON.stringify(noEvidenceReadiness.evidenceBlockers, null, 2));
+  assert.equal(new Set(perStepMissingEvidence.map(item => item.stepId)).size, 9,
+    'each Plan Graph step must have its own missing-evidence finding');
+  assert.equal(noEvidenceReadiness.evidenceReady, false);
+  assert.equal(noEvidenceReadiness.readyForExecutionGraphReview, false);
+
   // Artifact-byte mismatch: direct SQL is only applied to this private test DB and is restored byte-for-byte.
   const mutableDb = new DatabaseSync(dbPath);
   const arch = artifactRows['standard-architect'];
@@ -1039,6 +1067,99 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(approvedExecutionReadBack.immutablePlanHash, candidateReadBack.candidate.compiler.compilerPlanHash);
   assert.equal(approvedExecutionReadBack.executionReviewReady, true);
 
+  // Re-check reviewer freshness at the final dispatch boundary, not only at
+  // approval time. A previously valid review event replaced with a validly
+  // signed but expired attestation must not leave the immutable plan executable.
+  // This mutation is restricted to the disposable test DB and restored exactly.
+  const reviewerExpiryDb = new DatabaseSync(dbPath);
+  const reviewerExpiryRow = reviewerExpiryDb.prepare('SELECT event_id,payload_json FROM events WHERE job_id=? AND type=?')
+    .get(executionProposal.job_id, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
+  assert.ok(reviewerExpiryRow, 'the approved test candidate must retain its one trusted reviewer record');
+  const reviewerExpiryOriginalBytes = reviewerExpiryRow.payload_json;
+  const expiredReviewerUnsigned = {
+    ...reviewerAttestationUnsigned,
+    issued_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+    expires_at: new Date(Date.now() - 15_000).toISOString()
+  };
+  const expiredReviewerAttestation = {
+    ...expiredReviewerUnsigned,
+    signature: crypto.sign(null, Buffer.from(canonicalJson(expiredReviewerUnsigned), 'utf8'), reviewerIdentityKeys.privateKey).toString('base64')
+  };
+  reviewerExpiryDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
+    .run(JSON.stringify(expiredReviewerAttestation), reviewerExpiryRow.event_id);
+  reviewerExpiryDb.close();
+  const expiredReviewerDispatch = await rawTool('workflow_dispatch', { job_id: executionProposal.job_id });
+  assert.equal(expiredReviewerDispatch.isError, true,
+    'a validly signed but expired reviewer attestation must be rejected again immediately before dispatch');
+  assert.match(expiredReviewerDispatch.content?.map(item => item.text || '').join('\\n') || '',
+    /stale, expired|reviewer|REVIEWER|authorization/i);
+  const heldAfterExpiredReviewer = await tool('workflow_get', { job_id: executionProposal.job_id });
+  assert.equal(heldAfterExpiredReviewer.job.state, 'APPROVED');
+  assert.equal(heldAfterExpiredReviewer.tasks.length, 0, 'expired reviewer evidence must not create a coordinator task');
+  const restoreReviewerExpiryDb = new DatabaseSync(dbPath);
+  restoreReviewerExpiryDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
+    .run(reviewerExpiryOriginalBytes, reviewerExpiryRow.event_id);
+  restoreReviewerExpiryDb.close();
+  const reviewerExpiryRestoredRead = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(reviewerExpiryRestoredRead.executionReviewReady, true, JSON.stringify(reviewerExpiryRestoredRead.blockers));
+
+  // Evidence can be valid at proposal/approval time and change afterwards.
+  // Mutating both the stored artifact content and its self-reported hash is
+  // not enough: the independently persisted creation/result/completion lineage
+  // must still reproduce the exact evidence snapshot before dispatch. Keep this
+  // adversarial probe in the private DB and restore the exact original bytes.
+  const artifactRaceDb = new DatabaseSync(dbPath);
+  const artifactRaceOriginal = artifactRaceDb.prepare('SELECT artifact_id,content,content_hash FROM artifacts WHERE artifact_id=?')
+    .get(arch.artifact_id);
+  assert.ok(artifactRaceOriginal, 'the reviewed Execution Graph must have a durable typed architecture artifact');
+  const mutatedArtifactContent = JSON.stringify({ test_only: true, altered_after_approval: true });
+  const mutatedArtifactHash = crypto.createHash('sha256').update(mutatedArtifactContent, 'utf8').digest('hex');
+  artifactRaceDb.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?')
+    .run(mutatedArtifactContent, mutatedArtifactHash, artifactRaceOriginal.artifact_id);
+  artifactRaceDb.close();
+  const mutatedArtifactDispatch = await rawTool('workflow_dispatch', { job_id: executionProposal.job_id });
+  assert.equal(mutatedArtifactDispatch.isError, true,
+    'changing typed evidence after reviewer approval must block dispatch even when the artifact self-hash is recomputed');
+  assert.match(mutatedArtifactDispatch.content?.map(item => item.text || '').join('\\n') || '',
+    /EVIDENCE|ARTIFACT|EXECUTION_GRAPH|SOURCE_PLAN|CANDIDATE|LINEAGE/i);
+  const heldAfterArtifactRace = await tool('workflow_get', { job_id: executionProposal.job_id });
+  assert.equal(heldAfterArtifactRace.job.state, 'APPROVED');
+  assert.equal(heldAfterArtifactRace.tasks.length, 0, 'stale artifact lineage must not create a coordinator task');
+  const restoreArtifactRaceDb = new DatabaseSync(dbPath);
+  restoreArtifactRaceDb.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?')
+    .run(artifactRaceOriginal.content, artifactRaceOriginal.content_hash, artifactRaceOriginal.artifact_id);
+  restoreArtifactRaceDb.close();
+  const artifactRaceRestoredRead = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(artifactRaceRestoredRead.status, 'fresh', JSON.stringify(artifactRaceRestoredRead.blockers));
+  assert.equal(artifactRaceRestoredRead.immutablePlanHash, candidateReadBack.candidate.compiler.compilerPlanHash);
+
+  // Adversarial lifecycle race: approval and a previously fresh reviewer
+  // candidate must not survive a changed upstream Goal/Idea snapshot binding.
+  // The dispatch handler and the low-level WorkflowStore writer guard both
+  // revalidate the source. Keep the mutation inside this disposable DB and
+  // restore the exact original event bytes before the positive dispatch.
+  const sourceRaceDb = new DatabaseSync(dbPath);
+  const sourceRaceEvent = sourceRaceDb.prepare("SELECT event_id,payload_json FROM events WHERE job_id=? AND type='job.proposal_requested'")
+    .get(planProposal.job_id);
+  const sourceRaceOriginalBytes = sourceRaceEvent.payload_json;
+  const sourceRacePayload = JSON.parse(sourceRaceOriginalBytes);
+  sourceRacePayload.adaptive_goal_plan_proposal.knowledge_graph_snapshot.snapshot_hash = '0'.repeat(64);
+  sourceRaceDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(JSON.stringify(sourceRacePayload), sourceRaceEvent.event_id);
+  sourceRaceDb.close();
+  const staleSourceDispatch = await rawTool('workflow_dispatch', { job_id: executionProposal.job_id });
+  assert.equal(staleSourceDispatch.isError, true,
+    'an upstream snapshot mutation after approval must be revalidated immediately before dispatch');
+  assert.match(staleSourceDispatch.content?.map(item => item.text || '').join('\n') || '',
+    /SOURCE_IDEA_GRAPH|SOURCE_PLAN_PROPOSAL|EXECUTION_PLAN_CANDIDATE|AGG_EXECUTION_AUTHORIZATION/);
+  const heldAfterSourceRace = await tool('workflow_get', { job_id: executionProposal.job_id });
+  assert.equal(heldAfterSourceRace.job.state, 'APPROVED');
+  assert.equal(heldAfterSourceRace.tasks.length, 0, 'failed source revalidation must not create or start the coordinator task');
+  const restoreSourceRaceDb = new DatabaseSync(dbPath);
+  restoreSourceRaceDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(sourceRaceOriginalBytes, sourceRaceEvent.event_id);
+  restoreSourceRaceDb.close();
+  const sourceRaceRestoredRead = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(sourceRaceRestoredRead.status, 'fresh', JSON.stringify(sourceRaceRestoredRead.blockers));
+
   const dispatchedExecution = await tool('workflow_dispatch', { job_id: executionProposal.job_id });
   assert.equal(dispatchedExecution.dispatched, true, JSON.stringify(dispatchedExecution, null, 2));
   assert.equal(dispatchedExecution.execution_authorized, true);
@@ -1090,7 +1211,7 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
     console.log('AGG_CURRENT_SCOPE_PRODUCERS=PASS roles=9 typedArtifacts=9 exactHashAndLineage=verified privateDb=true');
     console.log('AGG_NINE_CHILD_DAG=PASS mappings=9 dependencies=preserved missingMapping=blocked invertedDependency=blocked');
     console.log('AGG_EXECUTION_READINESS=PASS contractReady=true evidenceReady=true claimVerified=isolated-trusted-attestation independentAttestations=isolated-trusted-attestation');
-    console.log('AGG_FAIL_CLOSED_NEGATIVES=PASS hash schema missingCompletion invalidAttempt failedProducer unregisteredArtifact staleSourceGraph');
+    console.log('AGG_FAIL_CLOSED_NEGATIVES=PASS hash schema missingCompletion invalidAttempt failedProducer unregisteredArtifact expiredReviewerAfterApproval alteredArtifactAfterApproval staleSourceGraph');
     console.log(`AGG_THREE_GRAPH_CHAIN=PASS producerJob=${created.job_id} planProposal=${planProposal.job_id} executionProposal=${executionProposal.job_id} jobs=${jobs} snapshotAttested=true reviewerIdentityVerified=true immutablePlanPinned=true dispatched=true isolatedDb=true`);
   } finally { finalDb.close(); }
 });

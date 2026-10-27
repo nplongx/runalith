@@ -270,6 +270,14 @@ export function assertAndRecordAdaptiveGoalTrustConfiguration(db, configuration,
     if (latest && configuration.configVersion < latest.config_version) {
       fail('AGG_TRUST_CONFIG_ROLLBACK', `trust domain ${configuration.domain} attempted rollback from config version ${latest.config_version} to ${configuration.configVersion}`);
     }
+    // Config versions are an append-only rotation/revocation sequence, not an
+    // arbitrary label. Skipping a version would make an unobserved revocation
+    // or trust-root change invisible to the local high-water ledger. A host may
+    // publish a new config, but each intervening version must be provisioned
+    // and observed in order; a later config cannot silently bridge the gap.
+    if (latest && configuration.configVersion > latest.config_version + 1) {
+      fail('AGG_TRUST_CONFIG_VERSION_GAP', `trust domain ${configuration.domain} must advance from config version ${latest.config_version} to ${latest.config_version + 1}; received ${configuration.configVersion}`);
+    }
     if (latest && configuration.configVersion === latest.config_version) {
       if (configuration.configurationFingerprint !== latest.configuration_fingerprint || configuration.providerId !== latest.provider_id) {
         fail('AGG_TRUST_CONFIG_VERSION_REUSED', `trust root configuration for domain ${configuration.domain} reused config version ${configuration.configVersion} with different canonical metadata or public roots`);
@@ -327,6 +335,8 @@ export function inspectAdaptiveGoalTrustConfigurationHistory(db, domain, configu
       configurationFingerprint: configuration?.configurationFingerprint ?? null } };
     if (!configuration) return { status: 'current_configuration_invalid', latest };
     if (configuration.configVersion < latest.config_version) return { status: 'rollback_detected', code: 'AGG_TRUST_CONFIG_ROLLBACK', latest,
+      current: { configVersion: configuration.configVersion, configurationFingerprint: configuration.configurationFingerprint } };
+    if (configuration.configVersion > latest.config_version + 1) return { status: 'version_gap_detected', code: 'AGG_TRUST_CONFIG_VERSION_GAP', latest,
       current: { configVersion: configuration.configVersion, configurationFingerprint: configuration.configurationFingerprint } };
     if (configuration.configVersion === latest.config_version &&
         (configuration.configurationFingerprint !== latest.configuration_fingerprint || configuration.providerId !== latest.provider_id)) {

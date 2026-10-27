@@ -3,6 +3,8 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createAdaptiveGoalKnowledgeStore } from '../src/runtime/adaptive-goal-knowledge-store.js';
+import { searchAdaptiveGoalGraph } from '../src/runtime/adaptive-goal-graph.js';
+import { isAuthenticatedAdaptiveGoalPlanDraft, projectAdaptiveGoalCandidateToPlanGraph } from '../src/runtime/adaptive-goal-plan-adapter.js';
 import { adaptiveGoalPublicKeyFingerprint } from '../src/runtime/adaptive-goal-trust-configuration.js';
 import {
   ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_PROVIDER_ENV,
@@ -10,7 +12,8 @@ import {
   ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_TRUST_ROOT_ENV,
   ADAPTIVE_GOAL_KNOWLEDGE_TRUST_CONFIG_ENV,
   canonicalAdaptiveGoalKnowledgeJson,
-  createAdaptiveGoalKnowledgeVerifier
+  createAdaptiveGoalKnowledgeVerifier,
+  isAuthenticatedAdaptiveGoalKnowledgeVerificationReport
 } from '../src/runtime/adaptive-goal-knowledge-verifier.js';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
@@ -112,6 +115,30 @@ function publicTrustConfig(provider, keys, version = 1) {
 
 function cryptoUuid() { return `${'123e4567-e89b-42d3-a456-426614174000'}`; }
 
+test('knowledge signature canonicalization rejects ambiguous JavaScript objects before reading attacker-controlled values', () => {
+  assert.equal(canonicalAdaptiveGoalKnowledgeJson({ z: -0, a: [true, null, 'ok'] }), '{"a":[true,null,"ok"],"z":0}');
+  const getter = {};
+  let getterInvoked = false;
+  Object.defineProperty(getter, 'signature', { enumerable: true, get() { getterInvoked = true; return 'attacker-value'; } });
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson(getter), /enumerable data properties only/);
+  assert.equal(getterInvoked, false, 'canonicalization must inspect descriptors without invoking getters');
+
+  const sparse = new Array(2); sparse[1] = 'value';
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson(sparse), /dense canonical arrays|must not be sparse/);
+  const arrayWithExtraProperty = ['value']; arrayWithExtraProperty.extra = true;
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson(arrayWithExtraProperty), /extra properties/);
+  const symbolKey = { value: true }; symbolKey[Symbol('unserialized')] = 'hidden';
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson(symbolKey), /forbidden key/);
+  const classInstance = new (class SignedPayload { constructor() { this.value = true; } })();
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson(classInstance), /plain JSON records/);
+  const cyclic = {}; cyclic.self = cyclic;
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson(cyclic), /cycle or repeated object identity/);
+  const shared = { value: true };
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson({ first: shared, second: shared }), /cycle or repeated object identity/);
+  const forbidden = JSON.parse('{"__proto__":{"polluted":true}}');
+  assert.throws(() => canonicalAdaptiveGoalKnowledgeJson(forbidden), /forbidden key/);
+});
+
 test('refuses to place trust anti-rollback history on the same connection as the Goal/Idea workflow database', t => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
@@ -155,8 +182,63 @@ test('requires configured verifier and verifies exact snapshot, revisions, membe
   assert.equal(graph.graph.startNodeId, f.start.id);
   assert.equal(graph.graph.goalNodeId, f.goal.id);
   assert.equal(graph.graph.nodes.find(node => node.id === f.action.id).evidenceRefs[0], 'artifact://artifact-001');
+  const searchOptions = { beamWidth: 4, maxDepth: 8, maxExpansions: 64 };
+  const search = searchAdaptiveGoalGraph(graph.graph, searchOptions);
+  assert.ok(search.candidates.length > 0, 'verified source fixture should expose at least one complete candidate');
+  const authenticatedDraft = projectAdaptiveGoalCandidateToPlanGraph(
+    graph.graph, search.candidates[0], searchOptions, {}, graph.verificationReport
+  );
+  assert.equal(isAuthenticatedAdaptiveGoalPlanDraft(authenticatedDraft), true);
+  assert.equal(Object.isFrozen(authenticatedDraft), true);
+  assert.equal(Object.isFrozen(authenticatedDraft.source), true);
+  assert.equal(Object.isFrozen(authenticatedDraft.steps), true);
+  assert.equal(Object.isFrozen(authenticatedDraft.steps[0]), true);
+  assert.throws(() => { authenticatedDraft.steps[0].title = 'caller-mutated label'; }, TypeError,
+    'same-process callers must not mutate authenticated draft content while retaining its trusted object identity');
+  assert.throws(() => { authenticatedDraft.source.verification.snapshotHash = sha('forged snapshot'); }, TypeError,
+    'the upstream attestation binding itself must remain immutable');
+  assert.equal(isAuthenticatedAdaptiveGoalPlanDraft(authenticatedDraft), true,
+    'a failed mutation attempt must not alter the content bound to the authenticated identity');
   assert.throws(() => f.verifier.buildVerifiedGraph(goalId, f.start.id, f.goal.id, sha('stale snapshot')),
     error => error.code === 'KNOWLEDGE_GRAPH_SNAPSHOT_STALE');
+});
+
+test('attestation ingestion rejects accessor-backed signed fields before invoking them or persisting anything', t => {
+  const f = fixture(); t.after(() => { f.db.close(); f.trustDb.close(); }); withVerifierEnvironment(t);
+  const request = f.verifier.getAttestationRequest(goalId);
+  const attestation = signedAttestation(request);
+  let getterInvoked = false;
+  Object.defineProperty(attestation, 'goal_id', { enumerable: true, configurable: true, get() { getterInvoked = true; return goalId; } });
+  assert.throws(() => f.verifier.attest(attestation), error => error.code === 'KNOWLEDGE_ATTESTATION_SHAPE_INVALID');
+  assert.equal(getterInvoked, false, 'untrusted getter must not execute before signature validation');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications').get().n, 0,
+    'invalid accessor-backed payload must not create a durable attestation');
+});
+
+test('authenticated verification reports are deeply immutable and lose authority at expiry', t => {
+  let currentTime = Date.now();
+  const f = fixture({ now: () => currentTime }); t.after(() => { f.db.close(); f.trustDb.close(); }); withVerifierEnvironment(t);
+  const request = f.verifier.getAttestationRequest(goalId);
+  const expiresAt = new Date(currentTime + 10_000).toISOString();
+  const attestation = signedAttestation(request, {
+    issuedAt: new Date(currentTime).toISOString(), expiresAt
+  });
+  assert.equal(f.verifier.attest(attestation).verified, true);
+  const report = f.verifier.getCurrentVerification(goalId);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(report, { now: currentTime }), true);
+  assert.equal(Object.isFrozen(report), true);
+  assert.equal(Object.isFrozen(report.snapshot), true);
+  assert.equal(Object.isFrozen(report.snapshot.nodes), true);
+  assert.equal(Object.isFrozen(report.snapshot.nodes[0].content), true);
+  assert.throws(() => { report.expiresAt = new Date(currentTime + 60_000).toISOString(); }, TypeError,
+    'a caller must not extend authenticated report lifetime while retaining its WeakSet identity');
+  assert.throws(() => { report.snapshot.nodes[0].content.title = 'caller-mutated signed claim'; }, TypeError,
+    'a caller must not mutate snapshot content after its signature was verified');
+  assert.throws(() => { report.snapshot.snapshot_hash = sha('forged current snapshot'); }, TypeError,
+    'a caller must not replace the signed snapshot hash in place');
+  currentTime += 10_001;
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(report, { now: currentTime }), false,
+    'an in-process report identity must not make an expired attestation current');
 });
 
 test('administered multi-key trust config is used for signatures and key revocation invalidates persisted verification with auditable config metadata', t => {
@@ -214,6 +296,13 @@ test('administered multi-key trust config is used for signatures and key revocat
   const afterRollback = f.verifier.getCurrentVerification(goalId);
   assert.equal(afterRollback.verified, false);
   assert.ok(afterRollback.blockers.some(item => item.code === 'AGG_TRUST_CONFIG_ROLLBACK'), JSON.stringify(afterRollback));
+  process.env[ADAPTIVE_GOAL_KNOWLEDGE_TRUST_CONFIG_ENV] = JSON.stringify(publicTrustConfig(provider, [
+    { keyId: 'source-primary', pem: publicKeyPem }, { keyId: 'source-rotate-in', pem: rotatePem }
+  ], 4));
+  const afterVersionGap = f.verifier.getVerifierConfigurationStatus();
+  assert.equal(afterVersionGap.available, false, 'skipping a trust configuration version must block even if the supplied roots are valid');
+  assert.equal(afterVersionGap.antiRollback.status, 'version_gap_detected');
+  assert.ok(afterVersionGap.blockers.some(item => item.code === 'AGG_TRUST_CONFIG_VERSION_GAP'));
 });
 
 test('rejects false evidence lineage, signatures from another key, forged hashes and verifier nonce replay', t => {
