@@ -237,9 +237,16 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       'docs/runalith-provenance-release-trust-design.md', 'docs/runalith-hosted-builder-pipeline.md',
       'docs/runalith-release-evidence-verifier.md', 'docs/agg-production-trust-provisioning-runbook.md'
     ];
-    for (const relative of sourceInputs.concat(ignoredProtocolDocs)) {
+    for (const relative of sourceInputs) {
       writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
     }
+    // These paths are deliberately owner-maintained, local-only source overlays.
+    // The unit test uses synthetic content to exercise archive/hash binding; it
+    // must not copy real operator evidence or assume those files exist on CI.
+    writeFile(sourceRoot, ignoredProtocolDocs[0], Buffer.from(
+      '# TEST FIXTURE ONLY — synthetic frozen protocol overlay\nNot an operational protocol, approval, or release input.\n', 'utf8'));
+    writeFile(sourceRoot, ignoredProtocolDocs[1], Buffer.from(
+      '# TEST FIXTURE ONLY — synthetic preflight overlay\nNo host observations or operational evidence are represented.\n', 'utf8'));
     execFileSync('git', ['init', '-q'], { cwd: sourceRoot });
     execFileSync('git', ['config', 'user.name', 'AGG Phase 1 verifier test'], { cwd: sourceRoot });
     execFileSync('git', ['config', 'user.email', 'agg-phase1-verifier-test@example.invalid'], { cwd: sourceRoot });

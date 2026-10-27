@@ -14,6 +14,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
 const catalogPath = path.join(here, 'fixtures/phase1-task-catalog.json');
 
+const PINNED_PHASE1_FREEZE_SHA256 = '4a2ceb6157afd9c299ccfee50695d0d0ddd1630375d49a211d68b53718fcca62';
+const PHASE1_FREEZE_PATH = 'docs/plugin-workflow-benchmark-phase1-freeze.md';
 const SOURCE_INPUTS = Object.freeze({
   catalog: 'benchmarks/adaptive-goal-graph/fixtures/phase1-task-catalog.json',
   runner: 'benchmarks/adaptive-goal-graph/run-phase1-benchmark.mjs',
@@ -22,7 +24,6 @@ const SOURCE_INPUTS = Object.freeze({
   oracle: 'benchmarks/adaptive-goal-graph/oracle.mjs',
   statistics: 'benchmarks/adaptive-goal-graph/phase1-statistics.mjs',
   plan: 'docs/plugin-workflow-benchmark-plan.md',
-  freeze: 'docs/plugin-workflow-benchmark-phase1-freeze.md',
   ledgerIntegrity: 'benchmarks/adaptive-goal-graph/phase1-ledger-integrity.mjs',
   ledgerVerifier: 'benchmarks/adaptive-goal-graph/verify-phase1-ledger.mjs',
   strictJson: 'src/runtime/strict-json.js'
@@ -71,6 +72,17 @@ function readStableRegularFile(filePath, label, maxBytes = 128 * 1024 * 1024) {
 
 const sourceBytesAtStart = new Map(Object.entries(SOURCE_INPUTS).map(([key, relative]) =>
   [key, readStableRegularFile(path.join(repo, relative), `AGG Phase 1 source input ${relative}`).bytes]));
+const phase1FreezeAbsolutePath = path.join(repo, PHASE1_FREEZE_PATH);
+let phase1FreezeBytesAtStart = null;
+try {
+  fs.lstatSync(phase1FreezeAbsolutePath);
+  phase1FreezeBytesAtStart = readStableRegularFile(phase1FreezeAbsolutePath, 'owner-maintained Phase 1 freeze overlay').bytes;
+} catch (cause) {
+  if (cause?.code !== 'ENOENT') throw cause;
+}
+if (phase1FreezeBytesAtStart && sha256(phase1FreezeBytesAtStart) !== PINNED_PHASE1_FREEZE_SHA256) {
+  throw new Error('owner-maintained Phase 1 freeze overlay bytes differ from the pinned protocol digest');
+}
 const catalogBytesAtStart = sourceBytesAtStart.get('catalog');
 const catalog = parseStrictJson(catalogBytesAtStart, 'frozen AGG Phase 1 task catalog');
 const config = Object.freeze({
@@ -122,6 +134,17 @@ function assertSourceInputSnapshotStillMatches() {
     if (!current.bytes.equals(sourceBytesAtStart.get(key))) {
       throw new Error(`AGG Phase 1 source drift detected between start and end of benchmark run: ${relative}`);
     }
+  }
+  let currentFreezeBytes = null;
+  try {
+    fs.lstatSync(phase1FreezeAbsolutePath);
+    currentFreezeBytes = readStableRegularFile(phase1FreezeAbsolutePath, 'owner-maintained Phase 1 freeze overlay recheck').bytes;
+  } catch (cause) {
+    if (cause?.code !== 'ENOENT') throw cause;
+  }
+  if ((currentFreezeBytes === null) !== (phase1FreezeBytesAtStart === null) ||
+      (currentFreezeBytes !== null && !currentFreezeBytes.equals(phase1FreezeBytesAtStart))) {
+    throw new Error('owner-maintained Phase 1 freeze overlay presence or bytes changed during benchmark run');
   }
 }
 function rngFor(seed) {
@@ -835,7 +858,8 @@ const provenance = {
   oraclePath: SOURCE_INPUTS.oracle, oracleSha256: sourceDigest('oracle'),
   statisticsPath: SOURCE_INPUTS.statistics, statisticsSha256: sourceDigest('statistics'),
   planPath: SOURCE_INPUTS.plan, planSha256: sourceDigest('plan'),
-  freezePath: SOURCE_INPUTS.freeze, freezeSha256: sourceDigest('freeze'),
+  freezePath: PHASE1_FREEZE_PATH, freezeSha256: PINNED_PHASE1_FREEZE_SHA256,
+  freezeSourceBytesObserved: phase1FreezeBytesAtStart !== null,
   ledgerIntegrityPath: SOURCE_INPUTS.ledgerIntegrity, ledgerIntegritySha256: sourceDigest('ledgerIntegrity'),
   ledgerVerifierPath: SOURCE_INPUTS.ledgerVerifier, ledgerVerifierSha256: sourceDigest('ledgerVerifier'),
   strictJsonPath: SOURCE_INPUTS.strictJson, strictJsonSha256: sourceDigest('strictJson')

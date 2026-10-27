@@ -64,6 +64,9 @@ if [[ "$OUT" != /* ]]; then OUT="$ROOT/$OUT"; fi
 mkdir -p "$(dirname "$OUT")"
 OUT_PARENT="$(cd "$(dirname "$OUT")" && pwd -P)"
 OUT="$OUT_PARENT/$(basename "$OUT")"
+# A clean checkout may not contain the ignored dist/ directory. Create it before
+# canonicalizing the protected frozen-output path below.
+mkdir -p "$ROOT/dist"
 PROTECTED_FROZEN_OUT="$ROOT/dist/chat-on-steroids-local-orchestrator-1.0.8.mcpb"
 PROTECTED_PARENT="$(cd "$(dirname "$PROTECTED_FROZEN_OUT")" && pwd -P)"
 PROTECTED_FROZEN_OUT="$PROTECTED_PARENT/$(basename "$PROTECTED_FROZEN_OUT")"
@@ -72,7 +75,6 @@ if [[ "$OUT" == "$PROTECTED_FROZEN_OUT" ]]; then
   echo "Restore the exact trusted frozen bytes, or use the formal re-freeze/review process. Build candidates to a separate path." >&2
   exit 2
 fi
-mkdir -p "$ROOT/dist"
 if [[ -e "$OUT" || -L "$OUT" ]]; then
   echo "Refusing to overwrite existing plugin bundle: $OUT" >&2
   echo "Set PLUGIN_BUNDLE_OUT to a new candidate path, or move the existing file only after verifying its custody and purpose." >&2

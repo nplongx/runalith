@@ -37,10 +37,16 @@ test('distinguishes malformed/path security failures from the three count/lineag
   assert.equal(classifyPhase2CandidateFailure('unexpected validator exit').classification, 'candidate_inventory_rejected');
 });
 
-test('historical RC.11 alignment report does not turn its recorded Git HEAD into an exact source snapshot', () => {
+const historicalRc11BundleRelative = 'artifacts/mcpb-candidate-build-20261026T1745+0700/runalith-1.0.9-rc.11-goal-idea-authenticated-projection-v22.mcpb';
+const historicalRc11ReportRelative = 'artifacts/adaptive-goal-graph/rc11-final-verification-20261026T1745+0700-source-alignment.json';
+test('historical RC.11 alignment report does not turn its recorded Git HEAD into an exact source snapshot', {
+  skip: !fs.existsSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', historicalRc11BundleRelative)) ||
+    !fs.existsSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', historicalRc11ReportRelative))
+    ? 'RC.11 candidate/report are ignored local forensic evidence and are not in a clean Git checkout' : false
+}, () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const bundleRelative = 'artifacts/mcpb-candidate-build-20261026T1745+0700/runalith-1.0.9-rc.11-goal-idea-authenticated-projection-v22.mcpb';
-  const reportRelative = 'artifacts/adaptive-goal-graph/rc11-final-verification-20261026T1745+0700-source-alignment.json';
+  const bundleRelative = historicalRc11BundleRelative;
+  const reportRelative = historicalRc11ReportRelative;
   const bundle = path.join(root, bundleRelative);
   const historicalReport = JSON.parse(fs.readFileSync(path.join(root, reportRelative), 'utf8'));
   const sourceHead = 'ff15b21934e5fd4920eea4b0816f6dc35d7f328a';
@@ -103,7 +109,21 @@ test('historical RC.11 alignment report does not turn its recorded Git HEAD into
     'the reported HEAD is a historical reference, not the exact 92-entry source snapshot');
 });
 
-test('all eight immutable dist candidates retain exact hashes and are classified as historical mixed lineage, not assumed corrupt from README drift', () => {
+const requiredHistoricalDistCandidates = [
+  'runalith-1.0.9-rc.5-candidate-20261019T135338Z.mcpb',
+  'runalith-1.0.9-rc.5-candidate-20261019T152736Z.mcpb',
+  'runalith-1.0.9-rc.5-candidate-20261020T084721Z.mcpb',
+  'runalith-1.0.9-rc.5-candidate-20261020T101143Z.mcpb',
+  'runalith-1.0.9-rc.5-candidate-20261020T142019Z.mcpb',
+  'runalith-1.0.9-rc.5-candidate-final3-20261019T140521Z.mcpb',
+  'runalith-1.0.9-rc.5-candidate-resource-recommender-20261019T-build.mcpb',
+  'runalith-1.0.9-rc.8-candidate-20261026T081256Z.mcpb'
+];
+test('all eight immutable dist candidates retain exact hashes and are classified as historical mixed lineage, not assumed corrupt from README drift', {
+  skip: !fs.existsSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')) ||
+    requiredHistoricalDistCandidates.some(name => !fs.existsSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', name)))
+    ? 'historical dist archives are ignored local forensic evidence and are not in a clean Git checkout' : false
+}, () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const diagnostic = spawnSync(process.execPath, [path.join(root, 'scripts/diagnose-phase2-archive-lineage.mjs')], {
     cwd: root, encoding: 'utf8', timeout: 60_000, maxBuffer: 32 * 1024 * 1024

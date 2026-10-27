@@ -212,10 +212,11 @@
     },
     {
       "path": "scripts/package-runalith-mcpb.sh",
-      "sha256": "52b724d9257927877978c1b759bc19c54a79be94f16d1f9e6df1d8432799447d",
+      "sha256": "cce63229159a89887588877398c10ee160255db1d982452d6c7f2aba8087ce1a",
       "claim": "Successor v19 pins the exact reviewed source bytes for scripts/package-runalith-mcpb.sh; prior v18 pin retained as previouslyPinnedSha256.",
       "previouslyPinnedSha256": "ba68f794907d9ef1aded3579d0ccfbb87e881d762a47039e557263dc20f29bbb",
-      "changeAssessment": "v13 fixes the deterministic ZIP file list to include the already-copied read-only reconciliation CLI; v12 package-script hash preserved in previouslyPinnedSha256, earlier source identities retained.",
+      "changeAssessment": "CI checkout hardening: create the ignored dist/ directory before canonicalizing the protected frozen bundle path, so reproducibility builds work in clean checkouts; previous pin retained below.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "52b724d9257927877978c1b759bc19c54a79be94f16d1f9e6df1d8432799447d",
       "previouslyPinnedBeforeV12Sha256": "0ce19399cd6536263b71a9daf959b37924cf71f0c79e57b0702d220e22f03cfc",
       "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1545+0700.json"
     },
@@ -284,9 +285,10 @@
     },
     {
       "path": "tests/test-agg-phase1-evidence-pack-verifier.mjs",
-      "sha256": "a72fb95b9f895ceaea7777d10b58719a3d0e3504141fcc89d02bd3e16f3a43cc",
+      "sha256": "42834be9a17768f5c1d367d5e8f49155e4d699c7ee4e4a35b73c2235f7a3cabb",
       "claim": "Isolated frozen evidence-pack fixture includes all current source-alignment build inputs while retaining source-to-bundle verification semantics.",
-      "changeAssessment": "v57 extends the isolated source fixture with every newly pinned Goal/Idea→Plan→Execution Graph implementation and external checkpoint source/test, keeping the historical Phase 1 packaging boundary unchanged.",
+      "changeAssessment": "CI checkout hardening: the isolated verifier test now synthesizes owner-maintained local-only overlays rather than requiring host evidence files; this pin records the current test source while preserving the prior digest below.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "a72fb95b9f895ceaea7777d10b58719a3d0e3504141fcc89d02bd3e16f3a43cc",
       "previouslyPinnedBeforeV12Sha256": "fa31d9f56391b51094f2f7e2d2813deef3e9e99c468c9f767c95660515b8c2e3",
       "previouslyPinnedBeforeV37Sha256": "53444d9dde5a492a8a86273367d092de258cb0a611bbc49f2e9b73ab981f31b7",
       "previouslyPinnedBeforeV57Sha256": "900a144f34446cbfc3f11cfccb64668ed2da109b51c72ca5724574dbe33cf80b"
@@ -336,18 +338,20 @@
     },
     {
       "path": "scripts/verify-mcpb-source-alignment.mjs",
-      "sha256": "301f31fb6816abd4f8df0f2bdde03669655f448c3e583e446dbb99e4af1773a3",
+      "sha256": "8ad6e37976e3ac4e430544a26f516f6bd262efa88f1e0dba88c7faad9d37b6b1",
       "claim": "Source alignment provenance binds graph snapshot/Plan/Execution implementations, reviewer/evidence lineage, external checkpoint verifier and atomic transition adapter plus their regressions.",
-      "changeAssessment": "v37 reviewed source identity refresh: scripts/verify-mcpb-source-alignment.mjs changed as part of release-critical source provenance completeness and regression coverage; prior v36 pin retained in previouslyPinnedBeforeV37Sha256.",
+      "changeAssessment": "CI checkout hardening: ordinary source-to-bundle closure no longer treats the owner-maintained local freeze overlay as a tracked build input; prior source digest retained below.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "301f31fb6816abd4f8df0f2bdde03669655f448c3e583e446dbb99e4af1773a3",
       "previouslyPinnedBeforeV24Sha256": "666d9ea45e17765a6739b51c57a868c2e49f2ff1bed187856a746040280ae457",
       "previouslyPinnedBeforeV37Sha256": "9569632540f62c609d49c20dee3932acaeb1cdcfc0db271f870cf3d678065c16",
       "previouslyPinnedBeforeV56Sha256": "293ef888e804a1fd89c70a51d938a2900c5209b1e4fcef5b1a1f5d6e0259c1ac"
     },
     {
       "path": "tests/test-mcpb-source-alignment.mjs",
-      "sha256": "1836b4da43550439199decf8189b86f21643b330eb3b7ae945153fcd4a751e79",
+      "sha256": "89b8b5973c76b6d3a9906bbd1c9c4bcd546edbd6c1bb90b4789b15089f7ef88a",
       "claim": "Source snapshot regression ensures graph-chain and external checkpoint trust-critical sources are pinned and drift changes source snapshot digest.",
-      "changeAssessment": "v37 reviewed source identity refresh: tests/test-mcpb-source-alignment.mjs changed as part of release-critical source provenance completeness and regression coverage; prior v36 pin retained in previouslyPinnedBeforeV37Sha256.",
+      "changeAssessment": "CI checkout hardening: source alignment test no longer requires the owner-maintained freeze overlay as a tracked build input; prior digest retained below.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "1836b4da43550439199decf8189b86f21643b330eb3b7ae945153fcd4a751e79",
       "previouslyPinnedBeforeV24Sha256": "d00a56b45e3b683d7a73e2b8ec772d1f104cc4109d52dd16c927fa2a1bbfe351",
       "previouslyPinnedBeforeV37Sha256": "df367a713ba6d70180bf6402e1cfe8024a98dade0db48dcdd13b60305ca48a21",
       "previouslyPinnedBeforeV56Sha256": "a104f0978e789541bc6af0f569469950d3082385add3904cc33b6fd2e105aece"
@@ -399,17 +403,19 @@
     },
     {
       "path": "scripts/diagnose-phase2-archive-lineage.mjs",
-      "sha256": "69ccc1de6a45c2ace7d89113726da4a8f78cc5e6daf2cb2dfa92eace82b518dc",
+      "sha256": "080c2551738190127815e52781543a724904dbe57d6e8271abc01affb2bea37a",
       "previouslyPinnedSha256": "eb0691698a4a4a97bed0d157fcadcd7f681b14724ae9d67c6b8ccb0e53ab559b",
       "claim": "Read-only Phase 2 archive custody diagnosis reports per-path archive/source SHA-256, Git blob identity, current-source comparison, every reachable commit containing the exact path/blob pair, and object reachability; also states the frozen contract is count-only and no authenticated canonical path list is present.",
-      "changeAssessment": "v43 adds per-path source custody matrix and accurately distinguishes the frozen 71-entry cardinality contract from an authoritative path manifest; no archive, historical hash, or count was changed."
+      "changeAssessment": "CI checkout hardening: default historical archive discovery returns an explicit empty diagnostic when dist/ is absent; prior digest retained below.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "69ccc1de6a45c2ace7d89113726da4a8f78cc5e6daf2cb2dfa92eace82b518dc"
     },
     {
       "path": "tests/test-phase2-inventory-diagnostic-contract.mjs",
-      "sha256": "20ffd0acd618538f8651320a496483b835a28873f7128bff6b42a5b92a52bb8d",
+      "sha256": "e447d89e746d87fceb6bd0520281397897bebaa357f7ab60a4c7ae00ce20f0c2",
       "previouslyPinnedSha256": "f2df401974c4aae1bf8686d138cd7b316242b1333615c2c175a00ff7f89b581c",
       "claim": "Historical archive diagnostics preserve the eight legacy candidate hashes while separately classifying a new source-aligned successor.",
-      "changeAssessment": "RC.15 adds the new successor to the forensic scan without treating it as one of the eight immutable historical archives; frozen 71-path contract remains unchanged."
+      "changeAssessment": "CI checkout hardening: historical RC.11 and dist/ archive assertions run only when exact local forensic inputs exist; prior digest retained below.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "20ffd0acd618538f8651320a496483b835a28873f7128bff6b42a5b92a52bb8d"
     },
     {
       "path": "scripts/lib/external-trust-checkpoint-contract.mjs",
@@ -509,9 +515,10 @@
     },
     {
       "path": ".github/workflows/runalith-verification-attestation-signer.yml",
-      "sha256": "c5805a1e592bee333292d5b2bee4fa138d8e4907fa7bc2b0f56744c164ddf5ad",
+      "sha256": "8deb8663c1b8a8072c60891567e3b5555671402f6dd2436063316f49f324c7d4",
       "claim": "v30 pins the separate verifier-attestation signing workflow which does not execute candidate code.",
-      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+      "changeAssessment": "Refreshes current checkout byte identity for the verification-attestation signer workflow; the previous pin is retained for comparison and this is not proof of a signed production provenance claim.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "c5805a1e592bee333292d5b2bee4fa138d8e4907fa7bc2b0f56744c164ddf5ad"
     },
     {
       "path": "scripts/reconcile-active-workflows-v2.mjs",

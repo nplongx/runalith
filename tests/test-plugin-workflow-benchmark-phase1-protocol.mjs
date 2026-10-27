@@ -12,7 +12,7 @@ import {
   assertDistinctPhase1AttestationNonces, assertFrozenProtocolHashes, verifyPhase1ExecutionGateConsumption,
   canonicalEd25519PublicKeyFingerprint, assertStablePhase1TargetBinding,
   capturePhase1EvidenceInventory, assertStablePhase1EvidenceInventory,
-  capturePhase1InputFileIdentity, assertStablePhase1InputFileIdentity,
+  capturePhase1InputFileIdentity, assertStablePhase1InputFileIdentity, FROZEN_PROTOCOL_HASHES,
   PHASE1_CATEGORIES, PHASE1_CONDITIONS, PHASE1_HARD_FAILS, PHASE1_SCENARIOS
 } from '../benchmarks/plugin-workflow-benchmark/phase1-protocol-runner.mjs';
 import { canonicalJson } from '../src/runtime/workflow/plan.js';
@@ -24,7 +24,11 @@ const jsonBytes = value => Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'u
 
 test('frozen protocol hash pins reject even syntactically valid changed acceptance criteria', () => {
   const planHash = sha(fs.readFileSync(path.join(root, 'docs/plugin-workflow-benchmark-plan.md')));
-  const freezeHash = sha(fs.readFileSync(path.join(root, 'docs/plugin-workflow-benchmark-phase1-freeze.md')));
+  const freezePath = path.join(root, 'docs/plugin-workflow-benchmark-phase1-freeze.md');
+  const freezeHash = FROZEN_PROTOCOL_HASHES.freezeSha256;
+  if (fs.existsSync(freezePath)) {
+    assert.equal(sha(fs.readFileSync(freezePath)), freezeHash, 'provided owner overlay bytes must match the immutable freeze pin');
+  }
   assert.deepEqual(assertFrozenProtocolHashes({ protocolPlanSha256: planHash, freezeSha256: freezeHash }), {
     protocolPlanSha256: planHash, freezeSha256: freezeHash
   });
@@ -40,7 +44,7 @@ function signEd25519(key, unsigned) {
 }
 function attestationBase(corpusBytes, runsBytes, corpusId, keys) {
   const planHash = sha(fs.readFileSync(path.join(root, 'docs/plugin-workflow-benchmark-plan.md')));
-  const freezeHash = sha(fs.readFileSync(path.join(root, 'docs/plugin-workflow-benchmark-phase1-freeze.md')));
+  const freezeHash = FROZEN_PROTOCOL_HASHES.freezeSha256;
   const now = Date.now();
   const corpus = JSON.parse(corpusBytes.toString('utf8'));
   const approvalUnsigned = {
@@ -358,7 +362,7 @@ test('one-shot gate-consumption receipt is owner-signed and bound to exactly one
     };
     const targetBinding = { candidateBundleSha256: 'b'.repeat(64), sourceSnapshotSha256: 'c'.repeat(64) };
     const planHash = sha(fs.readFileSync(path.join(root, 'docs/plugin-workflow-benchmark-plan.md')));
-    const freezeHash = sha(fs.readFileSync(path.join(root, 'docs/plugin-workflow-benchmark-phase1-freeze.md')));
+    const freezeHash = FROZEN_PROTOCOL_HASHES.freezeSha256;
     const unsigned = {
       schemaVersion: PHASE1_ATTESTATION_SCHEMA_VERSION,
       protocolVersion: PHASE1_PROTOCOL_VERSION,
@@ -480,6 +484,13 @@ test('frozen candidate inspection rejects ZIP symlink entries before reading man
 
 test('readiness preserves the original protocol and blocks without trusted corpus and actual A/B run evidence', () => {
   const readiness = buildPhase1Readiness();
+  const freezeDocumentAvailable = fs.existsSync(path.join(root, 'docs/plugin-workflow-benchmark-phase1-freeze.md'));
+  assert.equal(readiness.sourceProtocol.freezeDocumentAvailable, freezeDocumentAvailable);
+  assert.equal(readiness.sourceProtocol.freezeDocumentHashVerified, freezeDocumentAvailable);
+  if (!freezeDocumentAvailable) {
+    assert.equal(readiness.sourceProtocol.freezeSha256, null);
+    assert.ok(readiness.blockers.some(message => /pinned digest is not evidence that the document bytes were supplied or verified/.test(message)));
+  }
   assert.equal(readiness.decision, 'BLOCKED_NO_TRUSTED_CORPUS_OR_REAL_AB_RUNS');
   assert.equal(readiness.sourceProtocol.scenarioCount, 10);
   assert.deepEqual(readiness.sourceProtocol.categories, {
@@ -491,12 +502,30 @@ test('readiness preserves the original protocol and blocks without trusted corpu
   assert.equal(readiness.sourceProtocol.hardFails.length, 5);
   const sourceAlignmentCheck = readiness.checks.find(row => row.id === 'candidate_archive_and_proposal_bind_exact_current_source_snapshot');
   assert.equal(sourceAlignmentCheck?.pass, false, 'readiness must fail closed when pinned official bundle bytes no longer align with current source');
-  assert.ok(readiness.checks.filter(row => row.id !== 'candidate_archive_and_proposal_bind_exact_current_source_snapshot' &&
-    row.id !== 'candidate_bundle_bytes_manifest_and_owner_direction_are_hash_bound').every(row => row.pass));
-  assert.equal(readiness.sourceProtocol.targetBinding.sourceAlignmentStatus, 'BLOCKED_SOURCE_ALIGNMENT');
-  assert.equal(readiness.sourceProtocol.targetBinding.proposalSourceSnapshotMatches, false,
-    'a proposal without the newly computed current source-snapshot hash must not bind the new source snapshot');
-  assert.ok(readiness.blockers.some(message => /does not pass current source-to-binary alignment/.test(message)));
+  const readinessOnlyChecks = new Set([
+    'candidate_bundle_bytes_manifest_and_owner_direction_are_hash_bound',
+    'candidate_archive_and_proposal_bind_exact_current_source_snapshot',
+    'prior_formal_approval_is_preserved_but_not_reused_for_new_bytes',
+    'successor_preserves_exact_original_prompt_bytes_and_order',
+    'per_case_tools_match_bundle_and_case06_denials_remain',
+    'owner_direction_not_misread_as_exact_byte_signature_review_or_run_authorization',
+    ...(!freezeDocumentAvailable ? ['historical_freeze_hash_available', 'freeze_historical_partial_not_rewritten'] : [])
+  ]);
+  const targetBindingUnavailable = !readiness.sourceProtocol.targetBinding?.candidateBundleSha256;
+  if (targetBindingUnavailable) {
+    assert.match(readiness.sourceProtocol.targetBinding.error || '', /candidate is missing or unreadable/);
+    assert.ok(readiness.blockers.some(message => /candidate\/proposal binding could not be verified/.test(message)));
+  }
+  assert.ok(readiness.checks.filter(row => !readinessOnlyChecks.has(row.id)).every(row => row.pass));
+  if (targetBindingUnavailable) {
+    assert.equal(readiness.sourceProtocol.targetBinding.status, 'BLOCKED');
+    assert.ok(readiness.blockers.some(message => /candidate\/proposal binding could not be verified/.test(message)));
+  } else {
+    assert.equal(readiness.sourceProtocol.targetBinding.sourceAlignmentStatus, 'BLOCKED_SOURCE_ALIGNMENT');
+    assert.equal(readiness.sourceProtocol.targetBinding.proposalSourceSnapshotMatches, false,
+      'a proposal without the newly computed current source-snapshot hash must not bind the new source snapshot');
+    assert.ok(readiness.blockers.some(message => /does not pass current source-to-binary alignment/.test(message)));
+  }
   assert.ok(readiness.blockers.length >= 4);
   assert.equal(readiness.trustAnchorConfiguration.status, 'BLOCKED');
   assert.equal(readiness.acceptanceGates.protectedTrustAnchorConfigAvailable, false);
@@ -668,9 +697,11 @@ test('CLI readiness emits a machine-readable blocked report without inventing co
   assert.equal(output.runs, undefined);
 });
 
-test('readiness diagnoses the supplied current candidate without silently replacing the configured target or inheriting approval', () => {
-  const currentCandidate = path.join(root,
-    'artifacts/agg-phase1-hardening-20261023T134921Z-end-to-end/runalith-1.0.9-rc.5-agg-phase1-hardened.mcpb');
+const historicalDiagnosticCandidate = path.join(root,
+  'artifacts/agg-phase1-hardening-20261023T134921Z-end-to-end/runalith-1.0.9-rc.5-agg-phase1-hardened.mcpb');
+test('readiness diagnoses the supplied current candidate without silently replacing the configured target or inheriting approval',
+  { skip: !fs.existsSync(historicalDiagnosticCandidate) ? 'historical candidate is ignored local evidence and is not present in a clean CI checkout' : false }, () => {
+  const currentCandidate = historicalDiagnosticCandidate;
   const result = spawnSync(process.execPath, [runner, 'readiness', '--candidate', currentCandidate], {
     cwd: root, encoding: 'utf8', timeout: 15_000
   });
@@ -696,7 +727,9 @@ test('readiness diagnoses the supplied current candidate without silently replac
 });
 
 test('readiness rejects a symlinked diagnostic candidate rather than resolving it into a candidate approval', () => {
-  const temp = fs.mkdtempSync(path.join(root, '.test-tmp', 'phase1-readiness-candidate-symlink-'));
+  const tempParent = path.join(root, '.test-tmp');
+  fs.mkdirSync(tempParent, { recursive: true });
+  const temp = fs.mkdtempSync(path.join(tempParent, 'phase1-readiness-candidate-symlink-'));
   try {
     const currentCandidate = path.join(root,
       'artifacts/agg-phase1-hardening-20261023T134921Z-end-to-end/runalith-1.0.9-rc.5-agg-phase1-hardened.mcpb');

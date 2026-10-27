@@ -95,10 +95,17 @@ test('exclusive output publication rejects symlinked/non-canonical parents and p
   assert.deepEqual(fs.readdirSync(real).sort(), ['input-link.txt', 'output-link.txt', 'target.txt'], 'path rejection and collision leave no temporary files');
 });
 
-test('workflow can defer manifest publication until final receipts are attached', t => {
+const deferredManifestBaselineInputs = path.join(repoRoot, 'artifacts/agg-phase2-workflow-20261024T071500Z-stable-read-command-ledger-anchor-hardening-successor/inputs');
+const deferredManifestBaselineMissing = ['dataset.json', 'benchmark-corpus.json', 'graph.json']
+  .some(name => !fs.existsSync(path.join(deferredManifestBaselineInputs, name)));
+test('workflow can defer manifest publication until final receipts are attached', {
+  skip: deferredManifestBaselineMissing
+    ? 'historical Phase 2 input pack is ignored local evidence and is not present in a clean checkout'
+    : false
+}, t => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-phase2-deferred-manifest-'));
   t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
-  const baselineInputs = path.join(repoRoot, 'artifacts/agg-phase2-workflow-20261024T071500Z-stable-read-command-ledger-anchor-hardening-successor/inputs');
+  const baselineInputs = deferredManifestBaselineInputs;
   const outputDir = path.join(temp, 'deferred-pack');
   const run = spawnSync(process.execPath, [path.join(repoRoot, 'scripts/run-agg-phase2-workflow.mjs'),
     '--dataset', path.join(baselineInputs, 'dataset.json'), '--corpus', path.join(baselineInputs, 'benchmark-corpus.json'),
@@ -436,7 +443,28 @@ test('Phase 2 CLI trains and runs a hash-bound shadow search without overwriting
     assert.match(forgedShadowVerification.stdout, /PLAN_GRAPH_SHADOW_REPLAY/);
   } finally { fs.writeFileSync(resultPath, originalShadowResultBytes); }
 
-  const workflowDir = path.join(repoRoot, 'artifacts', `agg-phase2-workflow-smoke-${process.pid}`);
+  // The remaining workflow-pack finalization assertions compare against historical
+  // RC.5 binaries, an owner-maintained Phase-1 target proposal/freeze overlay, and
+  // a historical evidence pack. Those are intentionally ignored local evidence,
+  // not CI source inputs. The synthetic dataset/training/search/verifier checks
+  // above have already run; do not execute this local-evidence-only segment when
+  // the exact archived inputs are absent, and never substitute synthetic evidence
+  // for an owner-signed target or historical receipt.
+  const optionalWorkflowEvidence = [
+    'benchmarks/plugin-workflow-benchmark/phase1-latest-build-target-successor-proposal-20261022-v3.json',
+    'docs/plugin-workflow-benchmark-phase1-freeze.md',
+    'artifacts/agg-phase1-hardening-20261023T143802Z-deep-verification/runalith-1.0.9-rc.5-agg-phase1-hardened.mcpb',
+    'artifacts/runalith-1.0.9-rc.5-candidate-latest-build-20261022T175328+0700.mcpb',
+    'artifacts/agg-phase2-discriminator-20261024T091706+0700-final/SHA256SUMS.txt'
+  ];
+  const unavailableWorkflowEvidence = optionalWorkflowEvidence.filter(relative => !fs.existsSync(path.join(repoRoot, relative)));
+  if (unavailableWorkflowEvidence.length) {
+    t.diagnostic(`Skipping historical workflow-pack finalization sub-check because owner-maintained local evidence is unavailable: ${unavailableWorkflowEvidence.join(', ')}`);
+    return;
+  }
+  const scratchRoot = path.join(repoRoot, '.test-tmp');
+  fs.mkdirSync(scratchRoot, { recursive: true });
+  const workflowDir = path.join(scratchRoot, `agg-phase2-workflow-smoke-${process.pid}`);
   const workflowSiblingPath = `${workflowDir}-sibling-finalization.txt`;
   assert.equal(fs.existsSync(workflowDir), false, 'workflow evidence directory must be new');
   assert.equal(fs.existsSync(workflowSiblingPath), false, 'sibling path used to exercise exact worktree filtering must be new');

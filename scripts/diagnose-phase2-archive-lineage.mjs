@@ -32,9 +32,17 @@ for (let index = 0; index < argv.length; index++) {
   } else if (argv[index].startsWith('--')) throw new Error(`unsupported argument: ${argv[index]}`);
   else args.push(argv[index]);
 }
+let defaultCandidateNames = [];
+if (!args.length) {
+  try {
+    defaultCandidateNames = fs.readdirSync(path.join(root, 'dist'))
+      .filter(name => /^runalith-.*-candidate-.*\.mcpb$/.test(name));
+  } catch (cause) {
+    if (cause?.code !== 'ENOENT') throw cause;
+  }
+}
 const candidates = args.length ? args.map(value => path.resolve(root, value)) :
-  fs.readdirSync(path.join(root, 'dist')).filter(name => /^runalith-.*-candidate-.*\.mcpb$/.test(name))
-    .map(name => path.join(root, 'dist', name)).sort();
+  defaultCandidateNames.map(name => path.join(root, 'dist', name)).sort();
 if (!candidates.length) {
   console.error('No candidate archives found. Supply an archive path or restore the historical dist candidates.');
   process.exit(2);

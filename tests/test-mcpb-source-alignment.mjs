@@ -56,7 +56,6 @@ try {
     'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v1.json',
     'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
     'docs/plugin-workflow-benchmark-plan.md',
-    'docs/plugin-workflow-benchmark-phase1-freeze.md',
     'scripts/replay-agg-phase1-finalization.mjs',
     'scripts/verify-agg-phase1-evidence-pack.mjs',
     'scripts/verify-agg-phase1-phase2-package-boundary.mjs',

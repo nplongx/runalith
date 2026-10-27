@@ -70,8 +70,16 @@ test('runner records all tasks, methods, seeds, raw paths and source hashes repr
   assert.equal(first.tokenCost, null);
   assert.equal(first.monetaryCost, null);
   assert.deepEqual(new Set(first.summaries.map(item => item.variant)), new Set(['cot-linear:-','tot-tree:-','agg-beam:1','agg-beam:2','agg-beam:4']));
-  for (const [field, file] of [['catalogSha256', catalogPath], ['runnerSha256', runner], ['graphRuntimeSha256', path.join(root,'src/runtime/adaptive-goal-graph.js')], ['knowledgeStoreSha256', path.join(root,'src/runtime/adaptive-goal-knowledge-store.js')], ['oracleSha256', path.join(root,'benchmarks/adaptive-goal-graph/oracle.mjs')], ['statisticsSha256', path.join(root,'benchmarks/adaptive-goal-graph/phase1-statistics.mjs')], ['planSha256', path.join(root,'docs/plugin-workflow-benchmark-plan.md')], ['freezeSha256', path.join(root,'docs/plugin-workflow-benchmark-phase1-freeze.md')]]) {
+  for (const [field, file] of [['catalogSha256', catalogPath], ['runnerSha256', runner], ['graphRuntimeSha256', path.join(root,'src/runtime/adaptive-goal-graph.js')], ['knowledgeStoreSha256', path.join(root,'src/runtime/adaptive-goal-knowledge-store.js')], ['oracleSha256', path.join(root,'benchmarks/adaptive-goal-graph/oracle.mjs')], ['statisticsSha256', path.join(root,'benchmarks/adaptive-goal-graph/phase1-statistics.mjs')], ['planSha256', path.join(root,'docs/plugin-workflow-benchmark-plan.md')]]) {
     assert.equal(first.provenance[field], createHash('sha256').update(fs.readFileSync(file)).digest('hex'));
+  }
+  const freezePath = path.join(root, 'docs/plugin-workflow-benchmark-phase1-freeze.md');
+  assert.equal(first.provenance.freezePath, 'docs/plugin-workflow-benchmark-phase1-freeze.md');
+  assert.equal(first.provenance.freezeSha256, '4a2ceb6157afd9c299ccfee50695d0d0ddd1630375d49a211d68b53718fcca62');
+  assert.equal(first.provenance.freezeSourceBytesObserved, fs.existsSync(freezePath));
+  if (fs.existsSync(freezePath)) {
+    assert.equal(createHash('sha256').update(fs.readFileSync(freezePath)).digest('hex'), first.provenance.freezeSha256,
+      'present owner overlay bytes must match the pinned protocol digest');
   }
   assert.match(first.integrity.configurationSha256, /^[a-f0-9]{64}$/);
   assert.match(first.integrity.taskGraphInstancesSha256, /^[a-f0-9]{64}$/);
