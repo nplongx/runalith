@@ -2904,7 +2904,7 @@ try {
   const transientSyntaxOriginal = fs.readFileSync(transientSyntaxPath);
   let firstHybridAttempt;
   try {
-    fs.appendFileSync(transientSyntaxPath, Buffer.from('\\nfunction { injected transient syntax fault\\n'));
+    fs.appendFileSync(transientSyntaxPath, Buffer.from('\nfunction { injected transient syntax fault\n'));
     firstHybridAttempt = await tool('workflow_next_task', { job_id: hybridWorkflow.job_id });
   } finally {
     fs.writeFileSync(transientSyntaxPath, transientSyntaxOriginal);
