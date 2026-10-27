@@ -3942,8 +3942,6 @@ async function callToolImpl(name, args, telemetryContext = null) {
         const terminal = terminalizeFailedWorkflow(jobId, failed);
         return { stage: 'blocked', job_id: jobId, reason: 'one or more specialist tasks failed', failed_tasks: failed.map(taskSummary), terminalized: terminal.terminalized, terminal_reason: terminal.reason || null, job: terminal.job || null, report_id: terminal.report_id || null };
       }
-      const running = children.find(task => task.status === 'running' && !task.execution_status);
-      if (running) return { stage: 'task', task: taskSummary(running), expected_artifact: expectedArtifact(running), idempotent: true, completed_results: collectCompletedResults(jobId, children, running) };
       // Every deterministic ExecutionManager task covered by the immutable policy uses
       // execute_batch, including a single ready task. Do not fall back to single-task
       // execution. Group only compatible dependency-ready tasks and respect declared
@@ -3997,6 +3995,11 @@ async function callToolImpl(name, args, telemetryContext = null) {
         const next = await callTool('workflow_next_task', { job_id: jobId });
         return { ...next, batch_executions: [...(next.batch_executions || []), batchEvidence] };
       }
+      // A running specialist must not bypass newly-ready deterministic validation
+      // work. Resolve mandatory batches first, then resume that specialist only if
+      // every required batch completed successfully.
+      const running = children.find(task => task.status === 'running' && !task.execution_status);
+      if (running) return { stage: 'task', task: taskSummary(running), expected_artifact: expectedArtifact(running), idempotent: true, completed_results: collectCompletedResults(jobId, children, running) };
       const doneIds = completedPlanIds(children);
       const ready = children.find(task => {
         if (task.status !== 'pending') return false;

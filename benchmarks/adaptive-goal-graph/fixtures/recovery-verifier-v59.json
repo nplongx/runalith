@@ -529,8 +529,10 @@
     },
     {
       "path": "server/index-v1.0.9-rc.16.js",
-      "sha256": "ae4f2c170bdc639cd6e58662011755f75fd57ca0b9d931fab957b74bf4db44f9",
-      "claim": "Successor runtime entry point for the RC.16 source-aligned candidate."
+      "sha256": "6b5223231fa2d21dcdc7f22e5e5b0ac3c90a9daee50737a41ba724f591c83ea0",
+      "claim": "Successor runtime entry point for the RC.16 source-aligned candidate.",
+      "previouslyPinnedBeforeCiCheckoutFixSha256": "ae4f2c170bdc639cd6e58662011755f75fd57ca0b9d931fab957b74bf4db44f9",
+      "changeAssessment": "CI sequencing fix: mandatory ready deterministic validation batches are resolved before resuming an already-running specialist; prior source digest retained above."
     },
     {
       "path": "scripts/lib/sqlite-external-checkpoint-transition.mjs",
