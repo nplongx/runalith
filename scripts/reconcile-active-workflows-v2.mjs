@@ -157,6 +157,24 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
       artifacts: selectAvailable(db, 'artifacts', ['artifact_id'], 'WHERE task_id=?', [task.task_id]).length,
       leases: selectAvailable(db, 'task_leases', ['lease_id'], 'WHERE task_id=?', [task.task_id]).length
     };
+    // Bind the dry-run reconciliation identity to observed row content, not
+    // only stable IDs. Hash locally and expose only the digest; never include
+    // result bodies, artifact payloads, or lease secrets in the report.
+    const rowFingerprint = hash(JSON.stringify({
+      task: selectAvailable(db, 'tasks', ['task_id', 'job_id', 'role', 'status', 'openclaw_run_id', 'openclaw_session_key',
+        'parent_task_id', 'dependency_json', 'metadata_json', 'created_at', 'updated_at', 'execution_session_id',
+        'execution_status', 'execution_attempt', 'execution_pid', 'execution_exit_code', 'execution_started_at', 'execution_finished_at'],
+      'WHERE task_id=?', [task.task_id], '', 'LIMIT 2'),
+      attempts: selectAvailable(db, 'attempts', ['attempt_id', 'task_id', 'status', 'openclaw_run_id', 'started_at', 'finished_at', 'error'],
+        'WHERE task_id=?', [task.task_id], 'ORDER BY started_at, rowid'),
+      results: selectAvailable(db, 'results', ['result_id', 'task_id', 'outcome', 'content', 'content_hash', 'created_at'],
+        'WHERE task_id=?', [task.task_id], 'ORDER BY created_at, rowid'),
+      artifacts: selectAvailable(db, 'artifacts', ['artifact_id', 'job_id', 'task_id', 'kind', 'uri', 'metadata_json', 'created_at',
+        'schema_version', 'producer_role', 'content', 'evidence_json', 'status', 'supersedes', 'content_hash'],
+      'WHERE task_id=?', [task.task_id], 'ORDER BY created_at, rowid'),
+      leases: selectAvailable(db, 'task_leases', ['lease_id', 'task_id', 'job_id', 'attempt', 'worker_id', 'state', 'issued_at',
+        'heartbeat_at', 'expires_at', 'released_at', 'last_error', 'owner_epoch'], 'WHERE task_id=?', [task.task_id], 'ORDER BY rowid')
+    }));
     return {
       task: {
         taskId: task.task_id, role: task.role, status: task.status, updatedAt: task.updated_at, ageSinceUpdateMs: updatedAge,
@@ -168,7 +186,11 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
         openClawRunId: task.openclaw_run_id ?? null,
         openClawSessionKey: task.openclaw_session_key ?? null,
         parentTaskId: task.parent_task_id ?? null,
-        dependencyIds: parseJson(task.dependency_json || '[]')
+        dependencyIds: parseJson(task.dependency_json || '[]'),
+        workflowPlanTaskId: (() => {
+          const metadata = parseJson(task.metadata_json || '{}');
+          return typeof metadata?.workflow_plan_task_id === 'string' ? metadata.workflow_plan_task_id : null;
+        })()
       },
       latestAttempt: latestAttempt ? {
         attemptId: latestAttempt.attempt_id, status: latestAttempt.status, runId: latestAttempt.openclaw_run_id ?? null,
@@ -199,6 +221,7 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
         successfulResultWithRunningTask: successfulResultsWhileRunning,
         activeLeaseAttemptMismatchIds: mismatchedLeases.map(lease => lease.lease_id),
         observedCounts,
+        rowFingerprint,
         truncated: { attempts: observedCounts.attempts > attempts.length, results: observedCounts.results > results.length,
           artifacts: observedCounts.artifacts > artifacts.length, leases: observedCounts.leases > leases.length },
         ownerAuthority: 'not_persisted_in_supported_workflow_schema',
@@ -223,6 +246,186 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
 
 function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   const tasks = listTaskRows(db, job.job_id, { nowMs, procRoot });
+  const taskById = new Map(tasks.map(entry => [entry.task.taskId, entry]));
+  const planRows = selectAvailable(db, 'workflow_plans', ['job_id', 'workflow_id', 'workflow_version', 'plan_hash', 'plan_json'],
+    'WHERE job_id=?', [job.job_id], '', 'LIMIT 2');
+  let planBinding = { status: 'MISSING_NOT_PROOF_OF_TASK_INVALIDITY', planHash: null, specsById: new Map(), cycleIds: new Set(), blockers: [] };
+  if (planRows.length === 1) {
+    const row = planRows[0];
+    let plan;
+    try { plan = JSON.parse(row.plan_json); } catch { plan = null; }
+    const children = Array.isArray(plan?.children) ? plan.children : null;
+    const planIdentityMatches = plan && plan.job_id === job.job_id && plan.workflow_id === row.workflow_id &&
+      Number(plan.workflow_version) === Number(row.workflow_version);
+    if (hash(row.plan_json || '') !== row.plan_hash || !planIdentityMatches || !children) {
+      planBinding = { status: 'INVALID_HASH_IDENTITY_OR_SCHEMA', planHash: row.plan_hash || null, specsById: new Map(), cycleIds: new Set(), blockers: ['WORKFLOW_PLAN_HASH_IDENTITY_OR_SCHEMA_INVALID'] };
+    } else {
+      const specs = [...children, ...(plan.synthesis && typeof plan.synthesis === 'object' ? [plan.synthesis] : [])];
+      const specsById = new Map();
+      let malformed = false;
+      for (const spec of specs) {
+        if (!spec || typeof spec.id !== 'string' || !spec.id.trim() || specsById.has(spec.id) ||
+            !Array.isArray(spec.dependencies ?? [])) { malformed = true; break; }
+        const dependencies = spec.dependencies ?? [];
+        if (dependencies.some(value => typeof value !== 'string' || !value.trim()) ||
+            new Set(dependencies).size !== dependencies.length || dependencies.includes(spec.id)) { malformed = true; break; }
+        specsById.set(spec.id, { id: spec.id, dependencies: [...dependencies] });
+      }
+      if (malformed) {
+        planBinding = { status: 'INVALID_PLAN_TASK_SCHEMA', planHash: row.plan_hash || null, specsById: new Map(), cycleIds: new Set(), blockers: ['WORKFLOW_PLAN_TASK_SCHEMA_INVALID'] };
+      } else {
+        planBinding = { status: 'HASH_BOUND_DIAGNOSTIC_ONLY', planHash: row.plan_hash, specsById, cycleIds: new Set(), blockers: [] };
+        const danglingDependencies = [...specsById.values()].flatMap(spec => spec.dependencies
+          .filter(dependencyId => !specsById.has(dependencyId))
+          .map(dependencyId => ({ taskId: spec.id, dependencyId })));
+        if (danglingDependencies.length) {
+          planBinding.blockers.push('WORKFLOW_PLAN_DEPENDENCY_TARGET_MISSING');
+          planBinding.danglingDependencies = danglingDependencies;
+        }
+        const colors = new Map(); const stack = [];
+        const visit = id => {
+          const color = colors.get(id) || 0;
+          if (color === 2) return;
+          if (color === 1) {
+            const start = stack.lastIndexOf(id);
+            for (const cycleId of stack.slice(Math.max(0, start))) planBinding.cycleIds.add(cycleId);
+            planBinding.cycleIds.add(id);
+            return;
+          }
+          colors.set(id, 1); stack.push(id);
+          for (const dependencyId of specsById.get(id)?.dependencies || []) if (specsById.has(dependencyId)) visit(dependencyId);
+          stack.pop(); colors.set(id, 2);
+        };
+        for (const id of specsById.keys()) visit(id);
+        if (planBinding.cycleIds.size) planBinding.blockers.push('WORKFLOW_PLAN_DEPENDENCY_CYCLE_DETECTED');
+      }
+    }
+  } else if (planRows.length > 1) {
+    planBinding = { status: 'AMBIGUOUS_PLAN_ROWS', planHash: null, specsById: new Map(), cycleIds: new Set(), blockers: ['WORKFLOW_PLAN_ROWS_AMBIGUOUS'] };
+  }
+  const materializedByPlanId = new Map();
+  for (const entry of tasks) {
+    const planTaskId = entry.task.workflowPlanTaskId;
+    if (!planTaskId) continue;
+    if (!materializedByPlanId.has(planTaskId)) materializedByPlanId.set(planTaskId, []);
+    materializedByPlanId.get(planTaskId).push(entry);
+  }
+  for (const entry of tasks) {
+    const task = entry.task;
+    const hierarchyBlockers = [];
+    const parentTaskId = task.parentTaskId;
+    let parent = { status: parentTaskId ? 'UNRESOLVED' : 'NOT_APPLICABLE', taskId: parentTaskId || null,
+      reason: parentTaskId ? 'parent task ID is not present in the same job task inventory' : null };
+    if (parentTaskId) {
+      const sameJobParent = taskById.get(parentTaskId);
+      if (sameJobParent) {
+        parent = { status: 'RESOLVED', taskId: parentTaskId, taskStatus: sameJobParent.task.status };
+      } else {
+        const externalParent = selectAvailable(db, 'tasks', ['task_id', 'job_id', 'status'],
+          'WHERE task_id=?', [parentTaskId], '', 'LIMIT 2');
+        if (externalParent.some(row => row.job_id !== job.job_id)) {
+          parent = { status: 'CROSS_JOB', taskId: parentTaskId,
+            observedJobIds: [...new Set(externalParent.map(row => row.job_id).filter(Boolean))].slice(0, 4) };
+          hierarchyBlockers.push('TASK_PARENT_CROSS_JOB');
+          entry.flags.push('TASK_PARENT_CROSS_JOB');
+        } else {
+          parent = { status: 'UNRESOLVED', taskId: parentTaskId, reason: 'parent task row is missing' };
+          hierarchyBlockers.push('TASK_PARENT_REFERENCE_UNRESOLVED');
+          entry.flags.push('TASK_PARENT_REFERENCE_UNRESOLVED');
+        }
+      }
+    }
+
+    let dependencies = task.dependencyIds;
+    const dependenciesSchemaValid = Array.isArray(dependencies) &&
+      !dependencies.some(value => typeof value !== 'string' || !value.trim()) &&
+      new Set(dependencies).size === dependencies.length && !dependencies.includes(task.workflowPlanTaskId);
+    if (!dependenciesSchemaValid) {
+      dependencies = Array.isArray(dependencies) ? dependencies : [];
+      hierarchyBlockers.push('TASK_DEPENDENCIES_SCHEMA_INVALID');
+      entry.flags.push('TASK_DEPENDENCIES_SCHEMA_INVALID');
+    }
+    let planDependencyBinding = { status: 'NOT_VERIFIABLE', expectedPlanTaskIds: null, observedPlanTaskIds: [...dependencies].sort(), missingPlanTaskIds: [], unexpectedPlanTaskIds: [] };
+    const boundPlanSpec = task.workflowPlanTaskId && planBinding.status === 'HASH_BOUND_DIAGNOSTIC_ONLY'
+      ? planBinding.specsById.get(task.workflowPlanTaskId) : null;
+    if (boundPlanSpec && dependenciesSchemaValid) {
+      const expected = [...boundPlanSpec.dependencies].sort();
+      const observed = [...dependencies].sort();
+      const expectedSet = new Set(expected);
+      const observedSet = new Set(observed);
+      const missingPlanTaskIds = expected.filter(id => !observedSet.has(id));
+      const unexpectedPlanTaskIds = observed.filter(id => !expectedSet.has(id));
+      const matched = missingPlanTaskIds.length === 0 && unexpectedPlanTaskIds.length === 0;
+      planDependencyBinding = { status: matched ? 'MATCHED_IMMUTABLE_PLAN' : 'MATERIALIZATION_MISMATCH',
+        expectedPlanTaskIds: expected, observedPlanTaskIds: observed, missingPlanTaskIds, unexpectedPlanTaskIds };
+      if (!matched) {
+        hierarchyBlockers.push('TASK_DEPENDENCY_MATERIALIZATION_MISMATCH');
+        entry.flags.push('TASK_DEPENDENCY_MATERIALIZATION_MISMATCH');
+      }
+    }
+    const dependencyFindings = [];
+    if (dependencies.length && planBinding.status !== 'HASH_BOUND_DIAGNOSTIC_ONLY') {
+      hierarchyBlockers.push('TASK_DEPENDENCY_PLAN_UNVERIFIED');
+      entry.flags.push('TASK_DEPENDENCY_PLAN_UNVERIFIED');
+    }
+    if (task.workflowPlanTaskId && planBinding.status === 'HASH_BOUND_DIAGNOSTIC_ONLY' && !planBinding.specsById.has(task.workflowPlanTaskId)) {
+      hierarchyBlockers.push('TASK_PLAN_BINDING_NOT_IN_IMMUTABLE_PLAN');
+      entry.flags.push('TASK_PLAN_BINDING_NOT_IN_IMMUTABLE_PLAN');
+    }
+    for (const dependencyId of dependencies) {
+      if (typeof dependencyId !== 'string' || !dependencyId.trim()) continue;
+      if (planBinding.status !== 'HASH_BOUND_DIAGNOSTIC_ONLY') {
+        dependencyFindings.push({ planTaskId: dependencyId, status: 'PLAN_UNVERIFIED' });
+        continue;
+      }
+      if (!planBinding.specsById.has(dependencyId)) {
+        dependencyFindings.push({ planTaskId: dependencyId, status: 'NOT_IN_IMMUTABLE_PLAN' });
+        hierarchyBlockers.push('TASK_DEPENDENCY_NOT_IN_IMMUTABLE_PLAN');
+        entry.flags.push('TASK_DEPENDENCY_NOT_IN_IMMUTABLE_PLAN');
+        continue;
+      }
+      const matchingTasks = materializedByPlanId.get(dependencyId) || [];
+      if (matchingTasks.length === 0) {
+        dependencyFindings.push({ planTaskId: dependencyId, status: 'NOT_MATERIALIZED' });
+        if (['running', 'completed'].includes(String(task.status || '').toLowerCase())) {
+          hierarchyBlockers.push('TASK_DEPENDENCY_PRODUCER_NOT_MATERIALIZED');
+          entry.flags.push('TASK_DEPENDENCY_PRODUCER_NOT_MATERIALIZED');
+        }
+      } else if (matchingTasks.length > 1) {
+        dependencyFindings.push({ planTaskId: dependencyId, status: 'AMBIGUOUS_MATERIALIZATION', observedTaskCount: matchingTasks.length });
+        hierarchyBlockers.push('TASK_DEPENDENCY_PRODUCER_AMBIGUOUS');
+        entry.flags.push('TASK_DEPENDENCY_PRODUCER_AMBIGUOUS');
+      } else {
+        const dependency = matchingTasks[0];
+        const depStatus = String(dependency.task.status || '').toLowerCase();
+        dependencyFindings.push({ planTaskId: dependencyId, taskId: dependency.task.taskId,
+          status: depStatus === 'completed' ? 'SATISFIED' : 'NOT_COMPLETED', taskStatus: dependency.task.status });
+        if (['running', 'completed'].includes(String(task.status || '').toLowerCase()) && depStatus !== 'completed') {
+          hierarchyBlockers.push('TASK_DEPENDENCY_NOT_COMPLETED');
+          entry.flags.push('TASK_DEPENDENCY_NOT_COMPLETED');
+        }
+      }
+    }
+    entry.lifecycleEvidence.taskHierarchy = {
+      status: hierarchyBlockers.length ? 'CONFLICTING' : 'OBSERVED_CONSISTENT_OR_EMPTY',
+      completeness: 'DIAGNOSTIC_ONLY_NOT_EXECUTION_AUTHORIZATION',
+      planBinding: { status: planBinding.status, planHash: planBinding.planHash, blockers: planBinding.blockers },
+      parent,
+      dependencies: dependencyFindings,
+      planDependencyBinding,
+      dependencyCount: Array.isArray(task.dependencyIds) ? task.dependencyIds.length : null,
+      blockers: [...new Set(hierarchyBlockers)],
+      automaticLifecycleActionAuthorized: false
+    };
+  }
+  for (const entry of tasks) {
+    if (!entry.task.workflowPlanTaskId || !planBinding.cycleIds.has(entry.task.workflowPlanTaskId)) continue;
+    entry.flags.push('TASK_DEPENDENCY_CYCLE_DETECTED');
+    entry.lifecycleEvidence.taskHierarchy.status = 'CONFLICTING';
+    entry.lifecycleEvidence.taskHierarchy.blockers = [...new Set([
+      ...entry.lifecycleEvidence.taskHierarchy.blockers, 'TASK_DEPENDENCY_CYCLE_DETECTED'
+    ])];
+  }
   // The compact latestEvents window is useful for display, but must not be
   // used as the complete event identity for reconciliation. Correlate every
   // durable event that names a task, retaining identifiers and bounded payload
@@ -239,6 +442,15 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   }
   for (const entry of tasks) {
     const correlated = eventsByTaskId.get(entry.task.taskId) || [];
+    const eventPayloadFingerprint = hash(JSON.stringify(correlated.map(event => ({
+      eventId: event.event_id, type: event.type, createdAt: event.created_at,
+      payloadSha256: hash(event.payload_json || '')
+    }))));
+    entry.lineageAssessment.eventPayloadFingerprint = eventPayloadFingerprint;
+    entry.lineageAssessment.rowFingerprint = hash(JSON.stringify({
+      taskAndProducerRowsSha256: entry.lineageAssessment.rowFingerprint,
+      correlatedEventPayloadsSha256: eventPayloadFingerprint
+    }));
     const references = correlated.reduce((all, event) => {
       const parsed = parseJson(event.payload_json || '{}');
       return collectLineageReferences(parsed, all);
@@ -253,8 +465,11 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
     if (unresolvedResultIds.length) entry.flags.push('EVENT_RESULT_REFERENCE_UNRESOLVED');
     if (unresolvedArtifactIds.length) entry.flags.push('EVENT_ARTIFACT_REFERENCE_UNRESOLVED');
     entry.flags = [...new Set(entry.flags)];
+    const unresolvedReferenceCount = unresolvedAttemptIds.length + unresolvedResultIds.length + unresolvedArtifactIds.length;
+    const totalReferencedCount = references.attemptIds.size + references.resultIds.size + references.artifactIds.size;
     entry.lifecycleEvidence.eventReferences = {
-      status: unresolvedAttemptIds.length || unresolvedResultIds.length || unresolvedArtifactIds.length ? 'CONFLICTING' : 'RESOLVED_OR_NOT_REFERENCED',
+      status: unresolvedReferenceCount ? 'CONFLICTING' : totalReferencedCount ? 'ALL_REFERENCES_RESOLVED' : 'NO_REFERENCES_OBSERVED',
+      completeness: totalReferencedCount ? 'OBSERVED_REFERENCES_ONLY_NOT_PROOF_OF_COMPLETE_LINEAGE' : 'ABSENCE_OF_REFERENCES_DOES_NOT_PROVE_COMPLETE_LINEAGE',
       referencedAttemptIds: [...references.attemptIds].sort(), unresolvedAttemptIds: unresolvedAttemptIds.sort(),
       referencedResultIds: [...references.resultIds].sort(), unresolvedResultIds: unresolvedResultIds.sort(),
       referencedArtifactIds: [...references.artifactIds].sort(), unresolvedArtifactIds: unresolvedArtifactIds.sort()
@@ -388,6 +603,7 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
     const identity = {
       jobId: item.jobId, state: item.state, status: item.status, activeTaskId: item.activeTaskId,
       taskIds: item.tasks.map(entry => entry.task.taskId),
+      taskRowFingerprints: item.tasks.map(entry => ({ taskId: entry.task.taskId, sha256: entry.lineageAssessment.rowFingerprint })),
       taskEventIds: item.tasks.map(entry => ({ taskId: entry.task.taskId, eventIds: entry.eventLineage.eventIds })),
       attemptIds: item.tasks.flatMap(entry => entry.lineageAssessment.attemptIds),
       resultIds: item.tasks.flatMap(entry => entry.lineageAssessment.resultIds),
