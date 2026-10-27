@@ -2827,7 +2827,7 @@ try {
   const transientSyntaxPath = path.join(hybridWorkspace, 'server/index.js');
   const transientSyntaxOriginal = fs.readFileSync(transientSyntaxPath);
   let firstHybridAttempt;
-  fs.appendFileSync(transientSyntaxPath, Buffer.from('\nfunction { injected transient syntax fault\n'));
+  fs.writeFileSync(transientSyntaxPath, Buffer.from('function { injected transient syntax fault\n'));
   try {
   await completeHybridRole('engineer');
 
@@ -2903,6 +2903,8 @@ try {
     denialAuditDb.close();
   }
 
+  const syntaxProbe = spawnSync(process.execPath, ['--check', transientSyntaxPath], { encoding: 'utf8' });
+  assert.notEqual(syntaxProbe.status, 0, 'injected batch failure fixture must be syntactically invalid before dispatch');
   firstHybridAttempt = await tool('workflow_next_task', { job_id: hybridWorkflow.job_id });
   } finally {
     fs.writeFileSync(transientSyntaxPath, transientSyntaxOriginal);

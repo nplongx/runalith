@@ -21,9 +21,10 @@
     },
     {
       "path": "tests/test-runalith-plugin.js",
-      "sha256": "59710cd4d0272e931b182157e4a202736b86a1c6ab5900b0d51a25e322c06d3a",
+      "sha256": "6dde470a1936ca69953c142f1fec60d4d7c1b3a3b0fc5dc80bf673ee201605d1",
       "previouslyPinnedSha256": "020788b68024ea8a5bb75796a9fb516290e4e4876279e1150ff8a359183ae071",
-      "changeAssessment": "CI determinism fix: inject the syntax fault before completing the last prerequisite, preventing eager scheduling from running the batch before the fault exists; the actual newline-delimited fault and previous source digests are preserved below.",
+      "changeAssessment": "CI determinism fix: replace the staged server file with guaranteed-invalid bytes before completing the last prerequisite, assert the fixture fails node --check, then run the batch and restore original bytes; previous source digests are retained below.",
+      "previouslyPinnedBeforeSyntaxProbeSha256": "59710cd4d0272e931b182157e4a202736b86a1c6ab5900b0d51a25e322c06d3a",
       "previouslyPinnedBeforeFinalPrerequisiteTimingFixSha256": "697396bbde13a1e04f2170ef4b572e8a8bb6c3cc54891d6cf0d8a3d0fe648734",
       "previouslyPinnedBeforeBatchTimingFixSha256": "27d66cdedddd3788adc0670f2eebcb0eb4d90f8cdf37415f0dcdd898b67d209e",
       "previouslyPinnedBeforeCiCheckoutFixSha256": "0fc54befb9b449713d2282c418fc99208edd98e5c1a6998aac8d8b2e477dbe96",
