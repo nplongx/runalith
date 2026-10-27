@@ -11,16 +11,66 @@ function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (isRecord(value)) {
-    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+function assertStrictJsonValue(value, { seen = new Set(), depth = 0, rejectRepeatedIdentity = true } = {}) {
+  if (depth > 64) fail('EXECUTION_GRAPH_INPUT_INVALID', 'JSON input exceeds maximum nesting depth');
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) fail('EXECUTION_GRAPH_INPUT_INVALID', 'JSON input contains a non-finite number');
+    return;
   }
-  return JSON.stringify(value);
+  if (typeof value !== 'object' || seen.has(value)) {
+    fail('EXECUTION_GRAPH_INPUT_INVALID', 'input must be acyclic JSON data without undefined, functions, symbols, or other non-JSON values');
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (Array.isArray(value)) {
+    if (prototype !== Array.prototype || Reflect.ownKeys(value).some(key => typeof key === 'symbol' ||
+        (key !== 'length' && (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length)))) {
+      fail('EXECUTION_GRAPH_INPUT_INVALID', 'arrays must be dense JSON arrays without extra or symbol properties');
+    }
+    seen.add(value);
+    for (let index = 0; index < value.length; index++) {
+      if (!Object.hasOwn(value, index)) fail('EXECUTION_GRAPH_INPUT_INVALID', 'sparse arrays are not valid canonical JSON');
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) fail('EXECUTION_GRAPH_INPUT_INVALID', 'JSON arrays must contain enumerable data properties only');
+      assertStrictJsonValue(descriptor.value, { seen, depth: depth + 1, rejectRepeatedIdentity });
+    }
+    if (!rejectRepeatedIdentity) seen.delete(value);
+    return;
+  }
+  if (prototype !== Object.prototype && prototype !== null) fail('EXECUTION_GRAPH_INPUT_INVALID', 'objects must be plain JSON records');
+  if (Reflect.ownKeys(value).some(key => typeof key !== 'string' || key === '__proto__')) {
+    fail('EXECUTION_GRAPH_INPUT_INVALID', 'objects contain a forbidden symbol or prototype key');
+  }
+  seen.add(value);
+  // Iterate every own key, not Object.keys(): Object.keys silently omits
+  // non-enumerable string properties, which are not representable in JSON.
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) fail('EXECUTION_GRAPH_INPUT_INVALID', 'JSON objects must contain enumerable data properties only');
+    assertStrictJsonValue(descriptor.value, { seen, depth: depth + 1, rejectRepeatedIdentity });
+  }
+  if (!rejectRepeatedIdentity) seen.delete(value);
+}
+
+function stableJsonUnchecked(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJsonUnchecked).join(',')}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJsonUnchecked(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(Object.is(value, -0) ? 0 : value);
+}
+
+function stableJson(value) {
+  assertStrictJsonValue(value);
+  return stableJsonUnchecked(value);
 }
 
 function hash(value) {
-  return createHash('sha256').update(typeof value === 'string' ? value : stableJson(value)).digest('hex');
+  // Public entry points validate the full caller-owned tree before reaching
+  // hashing. Use the unchecked canonical serializer here because freshly
+  // constructed internal envelopes may share immutable contract objects; that
+  // implementation detail must not relax validation of caller-supplied data.
+  return createHash('sha256').update(typeof value === 'string' ? value : stableJsonUnchecked(value)).digest('hex');
 }
 
 function fail(code, message) {
@@ -61,6 +111,28 @@ function verifyReviewOnlyDraft(draft) {
   }
   const { draftHash, ...unsigned } = draft;
   if (hash(unsigned) !== draftHash) fail('EXECUTION_GRAPH_SOURCE_DRAFT_HASH_MISMATCH', 'source Plan Graph draft hash does not match its contents');
+  const positions = new Map();
+  for (const [index, step] of draft.steps.entries()) {
+    if (!isRecord(step) || typeof step.id !== 'string' || !STEP_ID.test(step.id) || positions.has(step.id) ||
+        !Array.isArray(step.dependencies) || step.dependencies.some(id => typeof id !== 'string' || !STEP_ID.test(id))) {
+      fail('EXECUTION_GRAPH_SOURCE_DRAFT_STEPS_INVALID', `Plan Graph step ${index} has an invalid/duplicate identity or dependency list`);
+    }
+    positions.set(step.id, index);
+  }
+  for (const [index, step] of draft.steps.entries()) {
+    if (new Set(step.dependencies).size !== step.dependencies.length) {
+      fail('EXECUTION_GRAPH_DEPENDENCY_INVALID', `step ${step.id} contains duplicate dependencies`);
+    }
+    for (const dependencyId of step.dependencies) {
+      const dependencyPosition = positions.get(dependencyId);
+      // Plan Graph drafts are emitted in topological path order. Requiring each
+      // dependency to precede its consumer rejects self-edges, forward edges,
+      // and cycles before they can be copied into a reviewable Execution Graph.
+      if (dependencyPosition === undefined || dependencyPosition >= index) {
+        fail('EXECUTION_GRAPH_DEPENDENCY_INVALID', `step ${step.id} depends on unknown, self, forward, or cyclic step ${dependencyId}`);
+      }
+    }
+  }
   return new Map(draft.steps.map(step => [step.id, step]));
 }
 
@@ -91,6 +163,15 @@ function normalizeVerifiedSourceEvidence(record) {
 }
 
 export function buildAdaptiveGoalExecutionGraphProposal({ sourcePlanProposal, readiness, taskBindings, sourceEvidenceSnapshot = null }) {
+  // Internal callers may share immutable sub-objects between separately
+  // assembled inputs. Cycles and hostile object shapes remain rejected here;
+  // the emitted proposal is detached into a JSON tree, and its public verifier
+  // rejects repeated identities in any caller-supplied serialized envelope.
+  const buildInputOptions = { rejectRepeatedIdentity: false };
+  assertStrictJsonValue(sourcePlanProposal, buildInputOptions);
+  assertStrictJsonValue(readiness, buildInputOptions);
+  assertStrictJsonValue(taskBindings, buildInputOptions);
+  if (sourceEvidenceSnapshot !== null) assertStrictJsonValue(sourceEvidenceSnapshot, buildInputOptions);
   if (!isRecord(sourcePlanProposal)) fail('EXECUTION_GRAPH_SOURCE_PROPOSAL_INVALID', 'sourcePlanProposal must be an object');
   const sourcePlanProposalJobId = requiredString(sourcePlanProposal.jobId, 'sourcePlanProposal.jobId', /^job_[a-f0-9-]{36}$/);
   const sourcePlanProposalFingerprint = requiredString(sourcePlanProposal.fingerprint, 'sourcePlanProposal.fingerprint', SHA256);
@@ -112,10 +193,21 @@ export function buildAdaptiveGoalExecutionGraphProposal({ sourcePlanProposal, re
     fail('EXECUTION_GRAPH_SOURCE_EVIDENCE_DUPLICATE', 'source file integrity snapshot contains duplicate references');
   }
   const sourceEvidenceByReference = new Map(normalizedSourceEvidence.map(item => [item.reference, item]));
-  const sourceVerification = sourcePlanProposal.sourceVerification?.status === 'verified'
-    ? sourcePlanProposal.sourceVerification
-    : { status: 'unverified', verified: false };
   const draft = sourcePlanProposal.draft;
+  const draftVerification = draft?.source?.verification;
+  if ((sourcePlanProposal.sourceVerification !== undefined &&
+       stableJson(sourcePlanProposal.sourceVerification) !== stableJson(draftVerification)) ||
+      (draftVerification?.status === 'verified' && sourcePlanProposal.sourceVerification === undefined)) {
+    fail('EXECUTION_GRAPH_SOURCE_VERIFICATION_MISMATCH',
+      'source verification metadata must exactly match the in-process authenticated Plan Graph draft; caller-supplied trust labels are not authority');
+  }
+  // Derive the downstream report from the authenticated draft itself instead
+  // of independently copying an adjacent caller field. The comparison above
+  // rejects inconsistent envelopes; verifyReviewOnlyDraft then rechecks the
+  // identity-bound content hash, attestation expiry and authenticated object.
+  const sourceVerification = draftVerification?.status === 'verified'
+    ? draftVerification
+    : { status: 'unverified', verified: false };
   const stepsById = verifyReviewOnlyDraft(draft);
   if (draft.draftHash !== draftHash || draft.source.graphHash !== graphHash || draft.source.candidatePlanId !== candidatePlanId) {
     fail('EXECUTION_GRAPH_SOURCE_IDENTITY_MISMATCH', 'source candidate/draft identity does not agree with the pinned Plan Graph proposal');
@@ -377,12 +469,137 @@ export function buildAdaptiveGoalExecutionGraphProposal({ sourcePlanProposal, re
     },
     statement: 'This is a review-only graph proposal derived from current role contracts and durable evidence. The source Goal/Idea Graph has a separate trusted-attestation status; the selected AGG search candidate still requires explicit human and semantic action review. Nodes contain intent and typed contracts only; no executable, arguments, task rows, immutable plan, permission, approval, dispatch, or execution authority is created.'
   };
-  const proposalHash = hash(unsignedProposal);
-  return { ...unsignedProposal, proposalHash };
+  const detachedProposal = JSON.parse(stableJsonUnchecked(unsignedProposal));
+  const proposalHash = hash(detachedProposal);
+  return { ...detachedProposal, proposalHash };
 }
 
 export function verifyAdaptiveGoalExecutionGraphProposalHash(proposal) {
-  if (!isRecord(proposal) || typeof proposal.proposalHash !== 'string' || !SHA256.test(proposal.proposalHash)) return false;
+  try { assertStrictJsonValue(proposal); } catch { return false; }
+  if (!isRecord(proposal) || typeof proposal.proposalHash !== 'string' || !SHA256.test(proposal.proposalHash) ||
+      proposal.schemaVersion !== ADAPTIVE_GOAL_EXECUTION_GRAPH_PROPOSAL_SCHEMA_VERSION ||
+      proposal.kind !== 'adaptive_goal_execution_graph_proposal' || proposal.status !== 'review_required' ||
+      !isRecord(proposal.source) || !isRecord(proposal.workflowTemplate) || !isRecord(proposal.hashes) ||
+      !isRecord(proposal.gates) || !Array.isArray(proposal.nodes) || !Array.isArray(proposal.edges) ||
+      !Array.isArray(proposal.bindings) || !Array.isArray(proposal.evidenceSnapshot) ||
+      !Array.isArray(proposal.sourceEvidenceSnapshot) || !isRecord(proposal.readiness)) return false;
   const { proposalHash, ...unsigned } = proposal;
-  return hash(unsigned) === proposalHash;
+  if (hash(unsigned) !== proposalHash) return false;
+
+  // This is a structural integrity check, not an authenticated signature or
+  // execution authorization. Recompute all component hashes that can be
+  // derived from the serialized proposal so a caller cannot rewrite a node,
+  // binding, evidence snapshot, or source identity and merely re-hash the
+  // outer envelope. The readiness report itself is summarized by its digest;
+  // it must still be rebuilt from current durable artifacts before execution.
+  const h = proposal.hashes;
+  if (!SHA256.test(h.sourcePlanProposalFingerprint || '') || !SHA256.test(h.sourceGraphHash || '') ||
+      !SHA256.test(h.planGraphDraftHash || '') || !SHA256.test(h.bindingHash || '') ||
+      !SHA256.test(h.evidenceHash || '') || !SHA256.test(h.sourceEvidenceHash || '') ||
+      !SHA256.test(h.sourceVerificationHash || '') || !SHA256.test(h.roleContractHash || '') ||
+      !SHA256.test(h.artifactSchemaHash || '') || !SHA256.test(h.readinessHash || '') ||
+      !SHA256.test(h.workflowTemplatePlanHash || '') ||
+      h.sourcePlanProposalFingerprint !== proposal.source.planProposalFingerprint ||
+      h.sourceGraphHash !== proposal.source.graphHash || h.planGraphDraftHash !== proposal.source.draftHash ||
+      h.bindingHash !== hash(proposal.bindings) || h.evidenceHash !== hash(proposal.evidenceSnapshot) ||
+      h.sourceEvidenceHash !== hash(proposal.sourceEvidenceSnapshot) ||
+      h.sourceVerificationHash !== hash(proposal.source.verification) ||
+      h.workflowTemplatePlanHash !== proposal.workflowTemplate.planHash) return false;
+
+  const contractSnapshots = proposal.nodes.map(node => ({
+    stepId: node.sourceStepId,
+    taskId: proposal.bindings.find(binding => binding.stepId === node.sourceStepId)?.taskId,
+    roleContract: node.roleContract
+  })).sort((a, b) => a.stepId < b.stepId ? -1 : a.stepId > b.stepId ? 1 : 0);
+  const artifactSchemas = proposal.nodes.map(node => ({ stepId: node.sourceStepId, outputEvidenceContract: node.outputEvidenceContract }))
+    .sort((a, b) => a.stepId < b.stepId ? -1 : a.stepId > b.stepId ? 1 : 0);
+  if (contractSnapshots.some(item => typeof item.stepId !== 'string' || typeof item.taskId !== 'string') ||
+      h.roleContractHash !== hash(contractSnapshots) || h.artifactSchemaHash !== hash(artifactSchemas)) return false;
+
+  const expectedFingerprint = hash({
+    schemaVersion: proposal.schemaVersion,
+    sourcePlanProposalJobId: proposal.source.planProposalJobId,
+    candidatePlanId: proposal.source.candidatePlanId,
+    workflowId: proposal.workflowTemplate.id,
+    workflowVersion: proposal.workflowTemplate.version,
+    hashes: h
+  });
+  if (proposal.fingerprint !== expectedFingerprint || proposal.proposalId !== `agg-eg-${expectedFingerprint.slice(0, 24)}`) return false;
+
+  const expectedGates = {
+    humanReviewRequired: true, workflowApprovalRequired: true, executionGraphMaterialized: false,
+    executableContractsCreated: false, immutableExecutionPlanCreated: false,
+    dispatchAllowed: false, executionAuthorized: false
+  };
+  if (stableJson(proposal.gates) !== stableJson(expectedGates) ||
+      proposal.readiness.contractReady !== true || proposal.readiness.evidenceReady !== true ||
+      proposal.readiness.readyForExecutionGraphReview !== true || proposal.readiness.readinessHash !== h.readinessHash) return false;
+
+  const nodeIds = new Set();
+  const nodeBySourceStep = new Map();
+  const sourceEvidenceByReference = new Map();
+  for (const evidence of proposal.sourceEvidenceSnapshot) {
+    let normalized;
+    try { normalized = normalizeVerifiedSourceEvidence(evidence); } catch { return false; }
+    if (sourceEvidenceByReference.has(normalized.reference) || stableJson(normalized) !== stableJson(evidence)) return false;
+    sourceEvidenceByReference.set(normalized.reference, normalized);
+  }
+  for (const node of proposal.nodes) {
+    if (!isRecord(node) || typeof node.id !== 'string' || nodeIds.has(node.id) ||
+        typeof node.sourceStepId !== 'string' || nodeBySourceStep.has(node.sourceStepId) ||
+        !isRecord(node.execution) || stableJson(node.execution) !== stableJson({ enabled: false, executable: null, args: null, authorization: 'none' }) ||
+        !isRecord(node.supportingEvidence) || node.supportingEvidence.verified !== true ||
+        !Array.isArray(node.supportingEvidence.artifacts) || !Array.isArray(node.supportingEvidence.sourceFiles) ||
+        node.supportingEvidence.sourceFilesIntegrityVerified !== true) return false;
+    const nodeSourceReferences = new Set();
+    for (const sourceEvidence of node.supportingEvidence.sourceFiles) {
+      let normalized;
+      try { normalized = normalizeVerifiedSourceEvidence(sourceEvidence); } catch { return false; }
+      if (nodeSourceReferences.has(normalized.reference) ||
+          stableJson(normalized) !== stableJson(sourceEvidence) ||
+          stableJson(sourceEvidenceByReference.get(normalized.reference) || null) !== stableJson(normalized)) return false;
+      nodeSourceReferences.add(normalized.reference);
+    }
+    nodeIds.add(node.id);
+    nodeBySourceStep.set(node.sourceStepId, node);
+  }
+  const expectedEdges = [];
+  const nodeIdsByDependency = new Map();
+  for (const node of proposal.nodes) {
+    if (!Array.isArray(node.dependencies) || new Set(node.dependencies).size !== node.dependencies.length ||
+        node.dependencies.some(id => typeof id !== 'string' || !nodeIds.has(id) || id === node.id)) return false;
+    nodeIdsByDependency.set(node.id, node.dependencies);
+    for (const dependencyId of node.dependencies) expectedEdges.push({ from: dependencyId, to: node.id, type: 'depends_on' });
+  }
+  // The edge list and dependency lists can agree perfectly while both encode
+  // a cycle. Verify the serialized Execution Graph is a DAG independently of
+  // the builder: callers can re-hash an untrusted proposal, so construction-
+  // time checks alone are not an integrity boundary.
+  const visitState = new Map();
+  const visit = nodeId => {
+    const state = visitState.get(nodeId) || 0;
+    if (state === 1) return false;
+    if (state === 2) return true;
+    visitState.set(nodeId, 1);
+    for (const dependencyId of nodeIdsByDependency.get(nodeId) || []) {
+      if (!visit(dependencyId)) return false;
+    }
+    visitState.set(nodeId, 2);
+    return true;
+  };
+  for (const nodeId of nodeIdsByDependency.keys()) if (!visit(nodeId)) return false;
+  const sortEdges = values => [...values].sort((a, b) => `${a.from}:${a.to}:${a.type}`.localeCompare(`${b.from}:${b.to}:${b.type}`));
+  if (stableJson(sortEdges(proposal.edges)) !== stableJson(sortEdges(expectedEdges))) return false;
+
+  const artifactByReference = new Map();
+  for (const node of proposal.nodes) for (const evidence of node.supportingEvidence.artifacts) {
+    if (!isRecord(evidence) || typeof evidence.reference !== 'string') return false;
+    const previous = artifactByReference.get(evidence.reference);
+    if (previous && stableJson(previous) !== stableJson(evidence)) return false;
+    artifactByReference.set(evidence.reference, evidence);
+  }
+  const expectedEvidence = [...artifactByReference.values()].sort((a, b) => a.reference.localeCompare(b.reference));
+  if (stableJson(expectedEvidence) !== stableJson([...proposal.evidenceSnapshot].sort((a, b) => a.reference.localeCompare(b.reference)))) return false;
+
+  return true;
 }

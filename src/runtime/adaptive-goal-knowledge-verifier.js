@@ -24,25 +24,81 @@ const MAX_ATTESTATION_TTL_MS = 30 * 60 * 1000;
 // lose this identity and must be re-read/reverified by the host.
 const authenticatedVerificationReports = new WeakSet();
 
-export function isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(value) {
-  return isRecord(value) && authenticatedVerificationReports.has(value) && value.verified === true && value.status === 'verified';
+function freezeJsonTree(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) freezeJsonTree(child, seen);
+  return Object.freeze(value);
+}
+
+export function isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(value, { now = Date.now() } = {}) {
+  if (!isRecord(value) || !authenticatedVerificationReports.has(value) || value.verified !== true || value.status !== 'verified' ||
+      value.claimVerified !== true || value.independenceVerified !== true ||
+      typeof value.providerId !== 'string' || !value.providerId.trim() ||
+      !SHA256.test(value.attestationId || '') || !SHA256.test(value.trustRootSha256 || '') ||
+      !SHA256.test(value.snapshotHash || '') || !SHA256.test(value.evidenceManifestHash || '') ||
+      !isRecord(value.snapshot) || value.snapshot.goal_id !== value.goalId || value.snapshot.snapshot_hash !== value.snapshotHash ||
+      !Number.isSafeInteger(now)) return false;
+  const issued = typeof value.issuedAt === 'string' ? Date.parse(value.issuedAt) : NaN;
+  const expires = typeof value.expiresAt === 'string' ? Date.parse(value.expiresAt) : NaN;
+  return Number.isFinite(issued) && Number.isFinite(expires) &&
+    new Date(issued).toISOString() === value.issuedAt && new Date(expires).toISOString() === value.expiresAt &&
+    issued <= now + 60_000 && expires > now && expires > issued && expires - issued <= MAX_ATTESTATION_TTL_MS;
 }
 
 function isRecord(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 
-function stableValue(value, depth = 0) {
+function stableValue(value, { depth = 0, seen = new Set() } = {}) {
   if (depth > 40) throw new TypeError('knowledge verification payload exceeds maximum nesting depth');
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) throw new TypeError('knowledge verification payload contains a non-finite number');
     return Object.is(value, -0) ? 0 : value;
   }
-  if (Array.isArray(value)) return value.map(item => stableValue(item, depth + 1));
-  if (!isRecord(value)) throw new TypeError('knowledge verification payload must contain JSON values only');
+  if (typeof value !== 'object') throw new TypeError('knowledge verification payload must contain JSON values only');
+  if (seen.has(value)) throw new TypeError('knowledge verification payload contains a cycle or repeated object identity');
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) throw new TypeError('knowledge verification arrays must use the standard array prototype');
+    const keys = Reflect.ownKeys(value);
+    if (keys.some(key => typeof key !== 'string' || (key !== 'length' && !/^(0|[1-9][0-9]*)$/.test(key)))) {
+      throw new TypeError('knowledge verification arrays cannot contain symbols or extra properties');
+    }
+    const length = Object.getOwnPropertyDescriptor(value, 'length');
+    if (!length || !('value' in length) || !Number.isSafeInteger(length.value) || length.value < 0 || keys.length !== length.value + 1) {
+      throw new TypeError('knowledge verification arrays must be dense canonical arrays');
+    }
+    const output = new Array(length.value);
+    for (let index = 0; index < length.value; index += 1) {
+      if (!Object.hasOwn(value, index)) throw new TypeError('knowledge verification arrays must not be sparse');
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+        throw new TypeError('knowledge verification arrays must contain enumerable data properties only');
+      }
+      output[index] = stableValue(descriptor.value, { depth: depth + 1, seen });
+    }
+    return output;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (!isRecord(value) || (prototype !== Object.prototype && prototype !== null)) {
+    throw new TypeError('knowledge verification objects must be plain JSON records');
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.some(key => typeof key !== 'string' || key === '__proto__')) {
+    throw new TypeError('knowledge verification payload contains a forbidden key');
+  }
   const output = {};
-  for (const key of Object.keys(value).sort()) {
-    if (key === '__proto__') throw new TypeError('knowledge verification payload contains a forbidden key');
-    Object.defineProperty(output, key, { value: stableValue(value[key], depth + 1), enumerable: true, writable: true, configurable: true });
+  for (const key of keys.sort()) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+      throw new TypeError('knowledge verification objects must contain enumerable data properties only');
+    }
+    Object.defineProperty(output, key, {
+      value: stableValue(descriptor.value, { depth: depth + 1, seen }),
+      enumerable: true, writable: true, configurable: true
+    });
   }
   return output;
 }
@@ -350,7 +406,13 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
     catch (error) { return { verified: false, status: 'trust_configuration_blocked', goalId, snapshotHash: snapshot.snapshot_hash,
       blockers: [{ code: error?.code || 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', message: String(error?.message || error) }] }; }
     const report = { ...readPersistedAttestation(snapshot, configured), snapshotHash: snapshot.snapshot_hash, snapshot, verifierAvailable: true };
-    if (report.verified === true && report.status === 'verified') authenticatedVerificationReports.add(report);
+    if (report.verified === true && report.status === 'verified') {
+      authenticatedVerificationReports.add(report);
+      // The WeakSet authenticates object identity, not mutable fields. Freeze
+      // the full report/snapshot tree so a caller cannot mutate signed metadata
+      // or snapshot content after verification while retaining that identity.
+      freezeJsonTree(report);
+    }
     return report;
   }
 
@@ -359,7 +421,7 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       const configured = configuredVerifier();
       const status = adaptiveGoalTrustConfigurationStatus(configured);
       const antiRollback = inspectAdaptiveGoalTrustConfigurationHistory(trustConfigurationDb, configured.domain, configured);
-      if (['rollback_detected', 'version_reused', 'time_rollback_detected', 'unavailable'].includes(antiRollback.status)) {
+      if (['rollback_detected', 'version_gap_detected', 'version_reused', 'time_rollback_detected', 'unavailable'].includes(antiRollback.status)) {
         return { ...status, available: false, antiRollback, blockers: [...status.blockers,
           { code: antiRollback.code || 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', message: `trust configuration anti-rollback check is ${antiRollback.status}` }] };
       }
@@ -398,6 +460,15 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
 
   function attest(attestationInput) {
     if (!isRecord(attestationInput)) fail('KNOWLEDGE_ATTESTATION_SHAPE_INVALID', 'attestation must be an object signed by the configured external verifier');
+    let canonicalInput;
+    try { canonicalInput = canonicalAdaptiveGoalKnowledgeJson(attestationInput); }
+    catch (error) {
+      fail('KNOWLEDGE_ATTESTATION_SHAPE_INVALID', `attestation must be an unambiguous JSON data object: ${String(error?.message || error)}`);
+    }
+    // Verify and persist the exact inert JSON snapshot we canonicalized, not
+    // the caller-owned object whose descriptors/properties could change later.
+    try { attestationInput = JSON.parse(canonicalInput); }
+    catch { fail('KNOWLEDGE_ATTESTATION_SHAPE_INVALID', 'canonical attestation could not be reconstructed as JSON'); }
     const configured = configuredVerifier();
     assertAndRecordAdaptiveGoalTrustConfiguration(trustConfigurationDb, configured, { now: now() });
     const goalId = attestationInput.goal_id;

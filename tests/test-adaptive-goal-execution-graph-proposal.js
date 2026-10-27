@@ -19,6 +19,34 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
+function rehashDraft(draft) {
+  const { draftHash: _oldHash, ...unsigned } = draft;
+  return { ...draft, draftHash: createHash('sha256').update(stableJson(unsigned)).digest('hex') };
+}
+
+function rehashExecutionProposal(proposal) {
+  const { proposalHash: _oldHash, ...unsigned } = proposal;
+  return { ...proposal, proposalHash: createHash('sha256').update(stableJson(unsigned)).digest('hex') };
+}
+
+function rehashExecutionProposalComponents(proposal) {
+  const hash = value => createHash('sha256').update(stableJson(value)).digest('hex');
+  proposal.hashes.bindingHash = hash(proposal.bindings);
+  proposal.hashes.roleContractHash = hash(proposal.nodes.map(node => ({
+    stepId: node.sourceStepId,
+    taskId: proposal.bindings.find(binding => binding.stepId === node.sourceStepId)?.taskId,
+    roleContract: node.roleContract
+  })).sort((a, b) => a.stepId.localeCompare(b.stepId)));
+  proposal.hashes.artifactSchemaHash = hash(proposal.nodes.map(node => ({
+    stepId: node.sourceStepId, outputEvidenceContract: node.outputEvidenceContract
+  })).sort((a, b) => a.stepId.localeCompare(b.stepId)));
+  proposal.fingerprint = hash({ schemaVersion: proposal.schemaVersion,
+    sourcePlanProposalJobId: proposal.source.planProposalJobId, candidatePlanId: proposal.source.candidatePlanId,
+    workflowId: proposal.workflowTemplate.id, workflowVersion: proposal.workflowTemplate.version, hashes: proposal.hashes });
+  proposal.proposalId = `agg-eg-${proposal.fingerprint.slice(0, 24)}`;
+  return rehashExecutionProposal(proposal);
+}
+
 function graphFixture() {
   const sourcePath = 'src/runtime/adaptive-goal-graph.js';
   const sourceHash = createHash('sha256').update(fs.readFileSync(path.join(process.cwd(), sourcePath))).digest('hex');
@@ -175,6 +203,125 @@ test('proposal-hash verifier detects gate weakening or evidence tampering', () =
   assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(tampered), false);
 });
 
+test('proposal verifier rejects rehashed envelopes with inconsistent component hashes or review-only gates', () => {
+  const value = context();
+  const proposal = buildAdaptiveGoalExecutionGraphProposal({
+    sourcePlanProposal: value.sourcePlanProposal, readiness: value.readiness, taskBindings: value.taskBindings
+  });
+
+  const changedEvidence = structuredClone(proposal);
+  changedEvidence.nodes[0].supportingEvidence.artifacts[0].contentHash = '0'.repeat(64);
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(changedEvidence)), false,
+    'recomputing only the outer envelope must not conceal an evidence/component-hash mismatch');
+
+  const enabledDispatch = structuredClone(proposal);
+  enabledDispatch.gates.dispatchAllowed = true;
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(enabledDispatch)), false,
+    'a correctly rehashed proposal must still fail if a review-only gate is weakened');
+
+  const enabledNode = structuredClone(proposal);
+  enabledNode.nodes[0].execution = { enabled: true, executable: 'node', args: [], authorization: 'approved' };
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(enabledNode)), false,
+    'a correctly rehashed proposal must never authorize an executable node');
+});
+
+test('serialized Execution Graph verifier binds every node source-file reference to the pinned source evidence snapshot', () => {
+  const value = context();
+  const base = buildAdaptiveGoalExecutionGraphProposal({
+    sourcePlanProposal: value.sourcePlanProposal, readiness: value.readiness, taskBindings: value.taskBindings
+  });
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(base), true);
+
+  const forgedSourceFile = structuredClone(base);
+  forgedSourceFile.nodes[0].supportingEvidence.sourceFiles[0].expectedSha256 = '0'.repeat(64);
+  forgedSourceFile.nodes[0].supportingEvidence.sourceFiles[0].observedSha256 = '0'.repeat(64);
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(forgedSourceFile)), false,
+    'recomputing the outer unkeyed proposal hash cannot detach a node source file from the pinned source snapshot');
+
+  const duplicateSourceFile = structuredClone(base);
+  duplicateSourceFile.nodes[0].supportingEvidence.sourceFiles.push(structuredClone(duplicateSourceFile.nodes[0].supportingEvidence.sourceFiles[0]));
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(duplicateSourceFile)), false,
+    'duplicate source references must be rejected even when the outer envelope is recomputed');
+
+  const unverifiedIntegrity = structuredClone(base);
+  unverifiedIntegrity.nodes[0].supportingEvidence.sourceFilesIntegrityVerified = false;
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(unverifiedIntegrity)), false,
+    'a proposal cannot claim readiness while source-file integrity is marked false');
+});
+
+test('serialized Execution Graph verifier rejects rehashed duplicate dependencies and multi-node cycles', () => {
+  const value = context();
+  const base = buildAdaptiveGoalExecutionGraphProposal({
+    sourcePlanProposal: value.sourcePlanProposal, readiness: value.readiness, taskBindings: value.taskBindings
+  });
+  const original = base.nodes[0];
+  const secondStepId = `agg-step-${'b'.repeat(24)}`;
+  const secondNode = structuredClone(original);
+  secondNode.id = 'agg-exec-cycle-node-b';
+  secondNode.sourceStepId = secondStepId;
+  secondNode.dependencies = [];
+
+  const cycle = structuredClone(base);
+  cycle.nodes.push(structuredClone(secondNode));
+  cycle.bindings.push({ ...cycle.bindings[0], stepId: secondStepId, taskId: 'standard-reviewer' });
+  cycle.nodes[0].dependencies = [secondNode.id];
+  cycle.nodes[1].dependencies = [cycle.nodes[0].id];
+  cycle.edges = [
+    { from: cycle.nodes[1].id, to: cycle.nodes[0].id, type: 'depends_on' },
+    { from: cycle.nodes[0].id, to: cycle.nodes[1].id, type: 'depends_on' }
+  ];
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposalComponents(cycle)), false,
+    'a matching edge list and recomputed outer/component hashes must not make a cyclic Execution Graph valid');
+
+  const duplicate = structuredClone(base);
+  duplicate.nodes.push(structuredClone(secondNode));
+  duplicate.bindings.push({ ...duplicate.bindings[0], stepId: secondStepId, taskId: 'standard-reviewer' });
+  duplicate.nodes[0].dependencies = [secondNode.id, secondNode.id];
+  duplicate.edges = [
+    { from: secondNode.id, to: duplicate.nodes[0].id, type: 'depends_on' },
+    { from: secondNode.id, to: duplicate.nodes[0].id, type: 'depends_on' }
+  ];
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposalComponents(duplicate)), false,
+    'duplicate dependencies must fail even when duplicate edges mirror them exactly');
+});
+
+test('proposal hash verifier rejects non-canonical JavaScript values even when the outer envelope is rehashed', () => {
+  const value = context();
+  const proposal = buildAdaptiveGoalExecutionGraphProposal({
+    sourcePlanProposal: value.sourcePlanProposal, readiness: value.readiness, taskBindings: value.taskBindings
+  });
+
+  const undefinedValue = { ...structuredClone(proposal), untrustedExtension: undefined };
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(undefinedValue)), false,
+    'undefined is not JSON and must not have a distinct pre-serialization hash representation');
+
+  const nonFiniteValue = { ...structuredClone(proposal), untrustedExtension: Number.NaN };
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(nonFiniteValue)), false,
+    'NaN must not be accepted as a canonical JSON number');
+
+  const accessorValue = structuredClone(proposal);
+  let getterInvoked = false;
+  Object.defineProperty(accessorValue, 'untrustedExtension', { enumerable: true, get: () => { getterInvoked = true; return 'side effect'; } });
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(accessorValue), false,
+    'accessors must not execute while validating a purported JSON proposal');
+  assert.equal(getterInvoked, false, 'the verifier must inspect property descriptors without executing untrusted getters');
+
+  const nonEnumerableValue = structuredClone(proposal);
+  Object.defineProperty(nonEnumerableValue, 'untrustedExtension', { enumerable: false, value: 'hidden JSON field' });
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(nonEnumerableValue), false,
+    'non-enumerable own properties must not be silently omitted from canonical proposal identity');
+
+  const cyclicValue = structuredClone(proposal);
+  cyclicValue.untrustedExtension = cyclicValue;
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(cyclicValue), false,
+    'cyclic objects cannot represent serialized proposal data');
+
+  const sharedChild = { untrusted: true };
+  const aliasedValue = { ...structuredClone(proposal), untrustedExtension: [sharedChild, sharedChild] };
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(aliasedValue), false,
+    'repeated object identity is not a JSON tree and must not be accepted as canonical input');
+});
+
 test('rejects serialized Plan Graph drafts whose unkeyed hash self-asserts upstream verification', () => {
   const value = context();
   const forgedDraft = structuredClone(value.sourcePlanProposal.draft);
@@ -191,7 +338,21 @@ test('rejects serialized Plan Graph drafts whose unkeyed hash self-asserts upstr
   const forgedProposal = { ...value.sourcePlanProposal, draft: forgedDraft, draftHash: forgedDraft.draftHash };
   assert.throws(() => buildAdaptiveGoalExecutionGraphProposal({
     sourcePlanProposal: forgedProposal, readiness: { ...value.readiness, draftHash: forgedDraft.draftHash }, taskBindings: value.taskBindings
-  }), /EXECUTION_GRAPH_SOURCE_DRAFT_INVALID/);
+  }), /EXECUTION_GRAPH_SOURCE_DRAFT_INVALID|EXECUTION_GRAPH_SOURCE_VERIFICATION_MISMATCH/);
+});
+
+test('rejects caller-supplied source verification labels that disagree with the Plan Graph draft', () => {
+  const value = context();
+  const forgedSourceVerification = {
+    status: 'verified', verified: true, providerId: 'claimed-provider', attestationId: 'a'.repeat(64),
+    snapshotHash: 'b'.repeat(64), evidenceManifestHash: 'c'.repeat(64), trustRootSha256: 'd'.repeat(64),
+    issuedAt: new Date(Date.now() - 1000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    claimVerified: true, independenceVerified: true
+  };
+  const mismatch = { ...value.sourcePlanProposal, sourceVerification: forgedSourceVerification };
+  assert.throws(() => buildAdaptiveGoalExecutionGraphProposal({
+    sourcePlanProposal: mismatch, readiness: value.readiness, taskBindings: value.taskBindings
+  }), /EXECUTION_GRAPH_SOURCE_VERIFICATION_MISMATCH/);
 });
 
 test('rejects inconsistent readiness action mapping or conflicting evidence identity', () => {
@@ -207,4 +368,17 @@ test('rejects inconsistent readiness action mapping or conflicting evidence iden
   assert.throws(() => buildAdaptiveGoalExecutionGraphProposal({
     sourcePlanProposal: value.sourcePlanProposal, readiness: conflictingEvidence, taskBindings: value.taskBindings
   }), /EXECUTION_GRAPH_EVIDENCE_CONFLICT/);
+});
+
+test('rejects self/forward/cyclic Plan Graph dependencies even when an unverified draft is rehashed', () => {
+  const value = context();
+  const malformedDraft = structuredClone(value.sourcePlanProposal.draft);
+  malformedDraft.steps[0].dependencies = [malformedDraft.steps[0].id];
+  const rehashed = rehashDraft(malformedDraft);
+  const malformedProposal = { ...value.sourcePlanProposal, draft: rehashed, draftHash: rehashed.draftHash };
+  assert.throws(() => buildAdaptiveGoalExecutionGraphProposal({
+    sourcePlanProposal: malformedProposal,
+    readiness: { ...value.readiness, draftHash: rehashed.draftHash },
+    taskBindings: value.taskBindings
+  }), /EXECUTION_GRAPH_DEPENDENCY_INVALID/);
 });

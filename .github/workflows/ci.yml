@@ -40,6 +40,12 @@ jobs:
       - name: Documentation link and rendered-artifact checks
         run: npm run docs:check
 
+      - name: GitHub Pages source, version and link checks
+        run: npm run site:check
+
+      - name: Keep Pages publication fail-closed while release gates are blocked
+        run: node --test tests/test-pages-publication-lock.mjs
+
       - name: Protocol tests
         run: npm run test:protocol
 
@@ -53,8 +59,21 @@ jobs:
           node tests/test-execution-verifier.js
           node tests/test-worker-task-strict-json-boundary.js
 
+      - name: External trust-checkpoint contract
+        run: node --test tests/test-external-trust-checkpoint-contract.mjs
+
       - name: Plugin end-to-end acceptance
         run: npm test
 
+      - name: Reproducible package-build contract
+        run: npm run test:package-reproducibility
+
       - name: Whitespace validation
-        run: git diff --check HEAD^ HEAD
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+            git diff --check "$BASE_SHA" HEAD
+          else
+            git diff --check HEAD^ HEAD
+          fi

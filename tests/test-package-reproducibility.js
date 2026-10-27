@@ -88,7 +88,6 @@ function packageInputSnapshot(label) {
     'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v1.json',
     'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
     'docs/plugin-workflow-benchmark-plan.md',
-    'docs/plugin-workflow-benchmark-phase1-freeze.md',
     'scripts/replay-agg-phase1-finalization.mjs',
     'scripts/verify-agg-phase1-evidence-pack.mjs',
     'scripts/verify-agg-phase1-phase2-package-boundary.mjs',
@@ -207,7 +206,18 @@ function buildEnvironmentSnapshot() {
     touch: command('touch', ['--version']).split(/\r?\n/)[0],
     platform: command('uname', ['-srmo']),
     langgraph_tree: dependencyTree.dependencies?.['@langchain/langgraph'] ?? null,
-    dependency_file_sha256: Object.fromEntries(dependencyFiles.map(relative => [relative, digest(fs.readFileSync(path.join(root, relative)))])),
+    dependency_file_sha256: Object.fromEntries(dependencyFiles.map(relative => {
+      const filePath = path.join(root, relative);
+      let stat;
+      try { stat = fs.lstatSync(filePath); }
+      catch (error) {
+        if (error?.code === 'ENOENT') return [relative, null];
+        throw error;
+      }
+      assert.ok(stat.isFile() && !stat.isSymbolicLink(), `dependency fingerprint input must be a regular non-symlink file: ${relative}`);
+      assert.equal(fs.realpathSync(filePath), filePath, `dependency fingerprint input must use a canonical path: ${relative}`);
+      return [relative, digest(fs.readFileSync(filePath))];
+    })),
   };
 }
 

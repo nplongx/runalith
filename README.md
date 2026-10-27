@@ -169,6 +169,7 @@ See the [documentation index](docs/README.md) for architecture, tool schemas, po
 |---|---|
 | Build, connect and verify the MCP runtime | [Quickstart](docs/quickstart.md) |
 | Understand AGG from graph search through evidence and execution gates | [Adaptive Goal Graph system guide](docs/adaptive-goal-graph.md) |
+| Review the latest Goal/Idea → Plan → Execution integration checks and release blockers | [Integration follow-up dossier](docs/goal-plan-execution-integration-followup-20261026.md) |
 | Provision verifier/reviewer trust and understand blockers | [AGG trust provisioning runbook](docs/agg-production-trust-provisioning-runbook.md) and [RC.11 acceptance](docs/goal-plan-execution-acceptance-rc11-20261026.md) |
 | Understand AGG benchmark methodology and what has/has not been demonstrated | [AGG empirical evaluation](docs/research/agg-empirical-evaluation/README.md) and [Phase 1 benchmark methodology](docs/agg-phase1-benchmark-methodology.md) |
 | Understand approval, execution, recovery and synthesis | [Workflow lifecycle and recovery](docs/workflow-lifecycle.md) |
@@ -196,6 +197,11 @@ See the [documentation index](docs/README.md) for architecture, tool schemas, po
 | `npm run test:dashboard` | Run dashboard integration and security regression tests. |
 | `npm run pack:runalith-mcpb` | Build and verify a local MCPB candidate. |
 | `npm run docs:check` | Check local Markdown links and documentation constraints. |
+| `node scripts/build-static-site.mjs` | Render `site/index.html` from the versioned template, package entry point, current MCP tool inventory, and matching acceptance document. |
+| `npm run site:check` | Verify generated-site parity, navigation/local anchors, link schemes, version/tool-count alignment and required security/rollout warnings. |
+| `node scripts/check-static-site.mjs --check-external-links` | Additionally perform read-only HTTP checks of distinct external URLs; network rate limits and remote policy can make this gate inconclusive. |
+
+The current read-only Goal/Idea and active-workflow reconciliation overlay is documented in [the reconciliation companion](docs/adaptive-goal-graph-reconciliation.md). The historical [AGG architecture document](docs/adaptive-goal-graph.md) remains byte-identical because the offline benchmark pins its exact bytes.
 
 ## Security and project status
 

@@ -25,7 +25,11 @@ const BUILD_INPUT_PATHS = Object.freeze([
   'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v1.json',
   'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
   'docs/plugin-workflow-benchmark-plan.md',
-  'docs/plugin-workflow-benchmark-phase1-freeze.md',
+  // The owner-maintained Phase-1 freeze document is deliberately excluded from
+  // Git and is captured only as a separately hashed overlay by the Phase-1
+  // evidence-pack protocol. Do not make ordinary source-to-bundle CI depend on
+  // this machine-local file; operational evidence verification still fails
+  // closed unless its exact bytes are supplied in the captured overlay.
   'scripts/replay-agg-phase1-finalization.mjs',
   'scripts/verify-agg-phase1-evidence-pack.mjs',
   'scripts/verify-agg-phase1-phase2-package-boundary.mjs',
@@ -36,10 +40,76 @@ const BUILD_INPUT_PATHS = Object.freeze([
   'tests/test-adaptive-goal-trust-entrypoint.mjs',
   'tests/test-reconcile-active-workflows.mjs',
   'benchmarks/plugin-workflow-benchmark/phase2-inventory-diagnostics.mjs',
+  'benchmarks/plugin-workflow-benchmark/create-phase2-candidate-inventory.mjs',
+  'benchmarks/plugin-workflow-benchmark/test-create-phase2-candidate-inventory.mjs',
+  'scripts/diagnose-phase2-archive-lineage.mjs',
+  'tests/test-phase2-inventory-diagnostic-contract.mjs',
+  'tests/test-adaptive-goal-execution-graph-proposal.js',
   'tests/test-agg-phase1-evidence-pack-verifier.mjs',
   'tests/test-agg-phase1-phase2-package-boundary.mjs',
   'tests/test-mcpb-source-alignment.mjs',
   'tests/test-plugin-workflow-benchmark-phase1-protocol.mjs',
+  // Release-trust policy and independent-verifier implementation are build
+  // inputs even though they are not shipped inside the MCPB. Omitting these
+  // let a source snapshot identify runtime bytes while silently excluding the
+  // policy and verifier code that decided whether those bytes were releasable.
+  'scripts/lib/runalith-release-trust-contract.mjs',
+  'scripts/verify-release-evidence.mjs',
+  'scripts/lib/hosted-builder-attestation.mjs',
+  'scripts/lib/hosted-verification-predicate.mjs',
+  'scripts/verify-hosted-builder-provenance.mjs',
+  'scripts/create-hosted-candidate-verification-predicate.mjs',
+  'scripts/runalith-hosted-build-policy.json',
+  'scripts/runalith-rollout.mjs',
+  'tests/test-runalith-release-trust-contract.mjs',
+  'tests/test-hosted-builder-attestation.mjs',
+  'tests/test-hosted-verification-predicate.mjs',
+  'tests/test-runalith-hosted-workflows.mjs',
+  'tests/test-runalith-rollout.mjs',
+  // A source snapshot must bind the implementation that verifies and projects
+  // Goal/Idea → Plan → Execution Graphs, not just the server dispatcher or
+  // tests. These modules carry authenticated snapshot identity, typed evidence
+  // lineage, reviewer identity, immutable-plan binding, and dispatch guards.
+  'src/runtime/adaptive-goal-graph.js',
+  'src/runtime/adaptive-goal-knowledge-store.js',
+  'src/runtime/adaptive-goal-knowledge-verifier.js',
+  'src/runtime/adaptive-goal-plan-adapter.js',
+  'src/runtime/adaptive-goal-compatibility.js',
+  'src/runtime/adaptive-goal-execution-readiness.js',
+  'src/runtime/adaptive-goal-execution-graph-proposal.js',
+  'src/runtime/adaptive-goal-execution-plan-candidate.js',
+  'src/runtime/adaptive-goal-reviewed-task-inputs.js',
+  'src/runtime/adaptive-goal-action-intent-policy.js',
+  'src/runtime/adaptive-goal-reviewer-identity.js',
+  'src/runtime/adaptive-goal-source-evidence.js',
+  'src/runtime/adaptive-goal-evidence-lineage.js',
+  'src/runtime/adaptive-goal-sandbox-executor.js',
+  'tests/test-adaptive-goal-execution-graph-proposal.js',
+  'tests/test-adaptive-goal-execution-plan-candidate.js',
+  'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+  'tests/test-adaptive-goal-knowledge-verifier.mjs',
+  'tests/test-adaptive-goal-reviewer-identity.js',
+  'tests/test-adaptive-goal-evidence-lineage.js',
+  // Checkpoint correctness is a release decision input. Pin both the signed
+  // response contract and the transactional compare-and-swap implementation,
+  // plus its independent-connection/reopen adversarial regression suite.
+  'scripts/lib/external-trust-checkpoint-contract.mjs',
+  'scripts/lib/sqlite-external-checkpoint-transition.mjs',
+  'tests/test-external-trust-checkpoint-contract.mjs',
+  // Phase 2 custody signatures and the verifier that consumes them are part
+  // of release eligibility. A source snapshot that omits these inputs could
+  // otherwise bind a candidate while leaving its frozen-inventory authority
+  // contract outside the authenticated build input set.
+  'scripts/lib/phase2-custody-evidence.mjs',
+  'scripts/verify-phase2-custody-evidence.mjs',
+  'tests/test-phase2-custody-evidence.mjs',
+  '.github/workflows/runalith-provenance-builder.yml',
+  '.github/workflows/runalith-provenance-verifier.yml',
+  '.github/workflows/runalith-verification-attestation-signer.yml',
+  'docs/runalith-provenance-release-trust-design.md',
+  'docs/runalith-hosted-builder-pipeline.md',
+  'docs/runalith-release-evidence-verifier.md',
+  'docs/agg-production-trust-provisioning-runbook.md',
 ]);
 
 function fail(message) {
@@ -136,7 +206,20 @@ function readGitSourceState(root) {
   if (head.status !== 0) return null;
   const patch = spawnSync('git', ['-C', root, 'diff', '--binary', 'HEAD'], { encoding: 'buffer', maxBuffer: 128 * 1024 * 1024 });
   if (patch.status !== 0) fail(`cannot capture Git working-tree state for source alignment: ${String(patch.stderr || '')}`);
-  return { head: head.stdout.trim(), patchSha256: sha256(patch.stdout) };
+  const status = spawnSync('git', ['-C', root, 'status', '--porcelain=v2', '--untracked-files=all'], {
+    encoding: 'buffer', maxBuffer: 128 * 1024 * 1024
+  });
+  if (status.status !== 0) fail(`cannot capture Git status for source alignment: ${String(status.stderr || '')}`);
+  // A bundle can byte-align to a dirty worktree. Preserve that fact explicitly:
+  // HEAD alone is not the source snapshot, and a tracked diff alone omits new
+  // files that may be packaged. Hash status bytes without exposing local paths.
+  return {
+    head: head.stdout.trim(),
+    trackedDiffSha256: sha256(patch.stdout),
+    workingTreeStatusSha256: sha256(status.stdout),
+    trackedWorkingTreeClean: patch.stdout.byteLength === 0,
+    workingTreeClean: status.stdout.byteLength === 0
+  };
 }
 
 function sourceMapping(archivePath) {
@@ -234,17 +317,33 @@ function verifyAlignmentAgainstSnapshot({ root, bundle, bundleBytes, reportedBun
       ({ archivePath, sourcePath, kind, sizeBytes, sha256: digest })),
     buildInputs,
   })));
+  // Keep the content snapshot reconstructible from the packaged bytes and Git
+  // HEAD. Bind the captured cleanliness/diff state in a separate provenance
+  // digest so clean-clone evidence-pack reconstruction remains compatible.
+  const sourceProvenanceSha256 = sha256(Buffer.from(JSON.stringify({
+    schemaVersion: 1, sourceSnapshotSha256, sourceGitState: initialGitState
+  })));
+  const sourceProvenanceStatus = !initialGitState
+    ? 'GIT_PROVENANCE_UNAVAILABLE'
+    : initialGitState.workingTreeClean
+      ? 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT'
+      : 'DIRTY_GIT_TREE_BYTES_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT';
 
   return {
     schemaVersion: 1,
     status: 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT',
+    byteIdentityStatus: 'PASS_EXACT_ARCHIVE_ENTRY_BYTES',
+    sourceProvenanceStatus,
+    releaseEligibility: 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED',
     checkedAt: new Date().toISOString(),
     sourceRoot: root,
     sourceGitHead: head,
+    sourceGitState: initialGitState,
     bundlePath: reportedBundlePath,
     bundleBytes: bundleBytes.byteLength,
     bundleSha256: sha256(bundleBytes),
     sourceSnapshotSha256,
+    sourceProvenanceSha256,
     archiveEntryCount: entries.length,
     exactSourceByteMatchCount: sourceEntries.filter(entry => entry.kind === 'exact_source_bytes').length,
     projectedMetadataMatchCount: sourceEntries.filter(entry => entry.kind === 'projected_package_metadata').length,
@@ -272,7 +371,15 @@ export function verifyMcpbSourceAlignment({ sourceRoot, bundlePath }) {
     const fd = fs.openSync(snapshotPath, 'wx', 0o400);
     try { fs.writeFileSync(fd, bundleBytes); fs.fsyncSync(fd); }
     finally { fs.closeSync(fd); }
-    return verifyAlignmentAgainstSnapshot({ root, bundle: snapshotPath, bundleBytes, reportedBundlePath });
+    const result = verifyAlignmentAgainstSnapshot({ root, bundle: snapshotPath, bundleBytes, reportedBundlePath });
+    // The archive was read into a private byte snapshot before ZIP inspection.
+    // Recheck the named artifact after all extraction/source checks so a report
+    // cannot silently describe bytes that no longer occupy its reported path.
+    const finalBundleBytes = readStableRegularFile(reportedBundlePath, 'MCPB bundle final identity recheck', 64 * 1024 * 1024);
+    if (!finalBundleBytes.equals(bundleBytes)) {
+      fail('MCPB bundle path no longer contains the exact bytes captured at verification start');
+    }
+    return { ...result, bundlePathByteIdentityRecheckedAtCompletion: true };
   } finally {
     fs.rmSync(snapshotDirectory, { recursive: true, force: true });
   }
@@ -287,7 +394,7 @@ function main() {
     try { fs.writeFileSync(fd, `${JSON.stringify(result, null, 2)}\n`); }
     finally { fs.closeSync(fd); }
   }
-  process.stdout.write(`MCPB_SOURCE_ALIGNMENT=PASS bundle_sha256=${result.bundleSha256} source_snapshot_sha256=${result.sourceSnapshotSha256} entries=${result.archiveEntryCount} tools=${result.manifestToolCount}\n`);
+  process.stdout.write(`MCPB_SOURCE_ALIGNMENT=PASS byte_identity=${result.byteIdentityStatus} source_provenance=${result.sourceProvenanceStatus} release_eligibility=${result.releaseEligibility} bundle_sha256=${result.bundleSha256} source_snapshot_sha256=${result.sourceSnapshotSha256} entries=${result.archiveEntryCount} tools=${result.manifestToolCount}\n`);
   if (args.output) process.stdout.write(`provenance_report=${path.resolve(args.output)}\n`);
 }
 

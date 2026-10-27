@@ -127,7 +127,7 @@ const ISOLATION_EVIDENCE_COMMON_KEYS = Object.freeze([
   'protocolPlanSha256', 'freezeSha256', 'executionIds', 'evidenceMethod', 'verifiedAt', 'controlChecks'
 ]);
 const SHA256 = /^[a-f0-9]{64}$/;
-const FROZEN_PROTOCOL_HASHES = Object.freeze({
+export const FROZEN_PROTOCOL_HASHES = Object.freeze({
   protocolPlanSha256: '78fed565dc6f58f89774d40d974c724c838314f3d4f3d06aca9ad89171fc5144',
   freezeSha256: '4a2ceb6157afd9c299ccfee50695d0d0ddd1630375d49a211d68b53718fcca62'
 });
@@ -305,12 +305,22 @@ function assertStableInputHash(filePath, expectedSha256, label, maxBytes = 128 *
     throw error('PHASE1_INPUT_CHANGED_DURING_ADJUDICATION', `${label} bytes changed after initial verification; discard the score and obtain fresh evidence`);
   }
 }
-function protocolHashes() {
+function protocolHashes({ allowTestFixtures = false } = {}) {
   const planBytes = readStableRegularFile(PLAN_PATH, 'frozen Phase 1 protocol plan', 8 * 1024 * 1024).bytes;
-  const freezeBytes = readStableRegularFile(FREEZE_PATH, 'frozen Phase 1 freeze record', 8 * 1024 * 1024).bytes;
+  let freezeBytes = null;
+  try {
+    fs.lstatSync(FREEZE_PATH);
+    freezeBytes = readStableRegularFile(FREEZE_PATH, 'frozen Phase 1 freeze record', 8 * 1024 * 1024).bytes;
+  } catch (cause) {
+    // Unit fixtures may pin the known digest without possessing owner-maintained
+    // document bytes. This seam is available only to test-fixture validation;
+    // operational callers do not pass allowTestFixtures and still require the
+    // actual canonical file bytes before any acceptance decision.
+    if (!(allowTestFixtures && cause?.code === 'ENOENT')) throw cause;
+  }
   const hashes = {
     protocolPlanSha256: sha256(planBytes),
-    freezeSha256: sha256(freezeBytes)
+    freezeSha256: freezeBytes ? sha256(freezeBytes) : FROZEN_PROTOCOL_HASHES.freezeSha256
   };
   return assertFrozenProtocolHashes(hashes);
 }
@@ -721,6 +731,13 @@ function readExecutionGateConsumptionLedger(ledgerPath, allowTestFixtures) {
 export function verifyPhase1ExecutionGateConsumption({ receiptPath, ownerTrustRootPath, ownerTrustRootSha256,
   targetBinding, corpus, corpusBytes, corpusApprovalOwnerSubject, runsEnvelope, runsBytes, operationalAuthorization,
   ledgerPath = EXECUTION_GATE_CONSUMPTION_LEDGER_PATH, allowTestFixtures = false }) {
+  // Reject production attempts to substitute the protected monotonic ledger
+  // before reading signed artifacts or unrelated protocol files. This keeps
+  // the trust-boundary error deterministic even in a checkout lacking the
+  // owner-maintained freeze document.
+  if (!allowTestFixtures && path.resolve(ledgerPath || EXECUTION_GATE_CONSUMPTION_LEDGER_PATH) !== EXECUTION_GATE_CONSUMPTION_LEDGER_PATH) {
+    throw error('PHASE1_EXECUTION_GATE_LEDGER_PATH_INVALID', 'production gate-consumption verification must use the fixed root-owned host ledger');
+  }
   if (typeof receiptPath !== 'string' || !receiptPath.trim()) {
     throw error('PHASE1_EXECUTION_GATE_NOT_CONSUMED', 'a separately owner-signed one-shot gate-consumption receipt is required before operational adjudication');
   }
@@ -728,7 +745,7 @@ export function verifyPhase1ExecutionGateConsumption({ receiptPath, ownerTrustRo
   const receipt = receiptRead.value;
   const verified = verifySignature(receipt, EXECUTION_GATE_CONSUMPTION_KEYS, ownerTrustRootPath,
     'one-shot execution-gate consumption receipt', ownerTrustRootSha256);
-  const hashes = protocolHashes();
+  const hashes = protocolHashes({ allowTestFixtures });
   if (!isObject(operationalAuthorization) || !isObject(targetBinding) || !isObject(corpus) ||
       !isObject(runsEnvelope) || !Array.isArray(runsEnvelope.runs) || !runsEnvelope.runs.length ||
       receipt.kind !== 'phase1_execution_gate_consumption' || typeof receipt.decisionId !== 'string' ||
@@ -922,10 +939,19 @@ function verifyProductionIsolationAttestation({ isolationAttestationPath, isolat
 
 export function buildPhase1Readiness({ candidatePath = null } = {}) {
   const planBytes = readStableRegularFile(PLAN_PATH, 'frozen Phase 1 protocol plan', 8 * 1024 * 1024).bytes;
-  const freezeBytes = readStableRegularFile(FREEZE_PATH, 'frozen Phase 1 freeze record', 8 * 1024 * 1024).bytes;
-  const hashes = { protocolPlanSha256: sha256(planBytes), freezeSha256: sha256(freezeBytes) };
+  let freezeBytes = null;
+  try {
+    // Missing owner-maintained overlay is a readiness blocker, not a reason for
+    // a diagnostic command to crash. Existing paths are still read strictly so
+    // symlinks, special files, and unstable bytes remain errors.
+    fs.lstatSync(FREEZE_PATH);
+    freezeBytes = readStableRegularFile(FREEZE_PATH, 'frozen Phase 1 freeze record', 8 * 1024 * 1024).bytes;
+  } catch (cause) {
+    if (cause?.code !== 'ENOENT') throw cause;
+  }
+  const hashes = { protocolPlanSha256: sha256(planBytes), freezeSha256: freezeBytes ? sha256(freezeBytes) : null };
   const planText = planBytes.toString('utf8');
-  const freezeText = freezeBytes.toString('utf8');
+  const freezeText = freezeBytes ? freezeBytes.toString('utf8') : '';
   const planScenarioHits = PHASE1_SCENARIOS.map(scenario => ({
     id: scenario.id,
     foundInOriginalPlan: planText.includes(scenario.sourceLine)
@@ -980,7 +1006,11 @@ export function buildPhase1Readiness({ candidatePath = null } = {}) {
     productionGradeOSContainerIsolationAttested: false,
     productionNetworkDenyAndResourceQuotasAttested: false,
     currentTargetIsolationEvidenceAndSignatureSuppliedToScorer: false,
-    frozenPhase1ExecutionGateRemainsClosed: targetBinding?.historicalExecutionGatesRemainClosed === true && targetBinding?.executionGateOpen === false,
+    // Missing target/protocol inputs cannot authorize execution. Report the
+    // gate as closed even when diagnostic target binding could not be built;
+    // only a fully verified binding can report this as anything else.
+    frozenPhase1ExecutionGateRemainsClosed: targetBinding === null ||
+      (targetBinding.historicalExecutionGatesRemainClosed === true && targetBinding.executionGateOpen === false),
     durableOneShotGateConsumptionEvidenceSuppliedToReadiness: false,
     executionGateOpenedByReadinessOrScorer: false
   };
@@ -989,7 +1019,10 @@ export function buildPhase1Readiness({ candidatePath = null } = {}) {
     protocol: PHASE1_PROTOCOL_VERSION,
     decision: 'BLOCKED_NO_TRUSTED_CORPUS_OR_REAL_AB_RUNS',
     sourceProtocol: {
-      planPath: path.relative(ROOT, PLAN_PATH), ...hashes,
+      planPath: path.relative(ROOT, PLAN_PATH),
+      freezeDocumentAvailable: freezeBytes !== null,
+      freezeDocumentHashVerified: hashes.freezeSha256 === FROZEN_PROTOCOL_HASHES.freezeSha256,
+      ...hashes,
       scenarioCount: PHASE1_SCENARIOS.length, conditions: PHASE1_CONDITIONS,
       categories: PHASE1_CATEGORIES, originalProposedBands: [
         { max: 69, label: 'insufficiently reliable for complex workflows' },
@@ -1017,11 +1050,14 @@ export function buildPhase1Readiness({ candidatePath = null } = {}) {
     },
     sourceScenarioMatches: planScenarioHits,
     blockers: [
+      ...(freezeBytes === null ? ['The owner-maintained frozen Phase-1 document is absent from this checkout; its pinned digest is not evidence that the document bytes were supplied or verified.'] : []),
+      ...(freezeBytes !== null && hashes.freezeSha256 !== FROZEN_PROTOCOL_HASHES.freezeSha256 ? ['The owner-maintained frozen Phase-1 document bytes differ from the pinned protocol digest; operational scoring and authorization remain blocked.'] : []),
       'The owner-directed latest engineering target is recorded and hash-bound to the v3 proposal; the existing formal owner-approval file is verified against the superseded proposal/hash and is not reused as approval of the refreshed archive bytes.',
       'No signed corpus with the full frozen prompt/policy and current candidate hash has been verified under an established trusted owner key.',
       'No real paired plugin_enabled/basic_tools run ledger for all ten scenarios has been supplied.',
       'No independently signed adjudication binds scenario outputs, artifact hashes, scores and hard-fail decisions to a frozen protocol and corpus.',
-      'The historical freeze snapshot is explicitly PARTIAL and states that a baseline must not start solely from that snapshot.',
+      ...(freezeBytes !== null && hashes.freezeSha256 === FROZEN_PROTOCOL_HASHES.freezeSha256
+        ? ['The historical freeze snapshot is explicitly PARTIAL and states that a baseline must not start solely from that snapshot.'] : []),
       'The frozen scenario specification remains prepared-not-authorized with execution_gate.status=blocked; no separate recorded one-shot gate-consumption evidence bound to a run was supplied. CLI/environment flags and readiness/scoring do not open this gate.',
       'Independent review, trusted signature/trust-root validation and fresh exact-scope operational authorization remain pending; the owner-directed target selection is not substituted for these gates.',
       'The scorer requires a root-owned, non-symlinked, non-group/world-writable trust-anchor config outside the repository, separately pinning owner/reviewer/evaluator/isolation-auditor trust-root bytes, plus exact-target signed review, fresh exact-scope operational authorization and a separate current-target signed isolation attestation with hash-verified OS/container, network-deny and quota evidence; a caller-supplied environment pin or PEM is not a trusted anchor.',
@@ -1177,9 +1213,10 @@ function validateCorpus(corpus, { allowTestFixtures = false, targetBinding = nul
   return corpus;
 }
 
-function verifyCorpusApproval(corpus, corpusBytes, attestation, trustRootPath, expectedTrustRootSha256 = null, targetBinding = null) {
+function verifyCorpusApproval(corpus, corpusBytes, attestation, trustRootPath, expectedTrustRootSha256 = null, targetBinding = null,
+  { allowTestFixtures = false } = {}) {
   const verified = verifySignature(attestation, APPROVAL_ATTESTATION_KEYS, trustRootPath, 'corpus approval', expectedTrustRootSha256);
-  const hashes = protocolHashes();
+  const hashes = protocolHashes({ allowTestFixtures });
   const expectedCandidateHash = targetBinding?.candidateBundleSha256 || corpus.runSettings.targetBundleSha256;
   const expectedSourceSnapshotHash = targetBinding?.sourceSnapshotSha256 || corpus.runSettings.targetSourceSnapshotSha256;
   if (attestation.kind !== 'phase1_benchmark_corpus_approval' || attestation.corpusId !== corpus.corpusId ||
@@ -1722,7 +1759,7 @@ function validateRunEvidence(runsEnvelope, corpus, corpusBytes, runsBytes, evide
   }
   const verifiedAttestation = verifySignature(runAttestation, RUN_ATTESTATION_KEYS, trustRootPath,
     'run adjudication', expectedEvaluatorTrustRootSha256);
-  const hashes = protocolHashes();
+  const hashes = protocolHashes({ allowTestFixtures });
   if (runAttestation.kind !== 'phase1_benchmark_evidence_adjudication' ||
       runAttestation.candidateBundleSha256 !== corpus.runSettings.targetBundleSha256 ||
       runAttestation.sourceSnapshotSha256 !== corpus.runSettings.targetSourceSnapshotSha256 ||
@@ -2241,7 +2278,7 @@ function adjudicatePhase1ABInternal({ corpusPath, corpusAttestationPath, corpusT
   const corpusAttestationRead = readJson(corpusAttestationPath, 'corpus owner attestation');
   const corpusAttestation = corpusAttestationRead.value;
   const corpusApproval = verifyCorpusApproval(corpus, corpusRead.bytes, corpusAttestation, corpusTrustRootPath,
-    allowTestFixtures ? null : pinnedRoots.owner, targetBinding);
+    allowTestFixtures ? null : pinnedRoots.owner, targetBinding, { allowTestFixtures });
   let independentReview = null;
   let operationalAuthorization = null;
   if (!allowTestFixtures) {
@@ -2309,7 +2346,7 @@ function adjudicatePhase1ABInternal({ corpusPath, corpusAttestationPath, corpusT
     { attestationNonce: runsAttestation.nonce },
     isolationAttestation && { attestationNonce: isolationAttestation.attestationNonce }
   ]);
-  const hashes = protocolHashes();
+  const hashes = protocolHashes({ allowTestFixtures });
   const result = scoreRuns(corpus, runValidation.pairs);
   if (!allowTestFixtures) {
     // Final TOCTOU barrier: re-read the same canonical paths and compare exact
@@ -2351,7 +2388,7 @@ function adjudicatePhase1ABInternal({ corpusPath, corpusAttestationPath, corpusT
     // were first read. Long adjudications must not return after signed evidence
     // has expired even when the underlying bytes remain unchanged.
     const finalCorpusApproval = verifyCorpusApproval(corpus, corpusRead.bytes, corpusAttestationRead.value,
-      corpusTrustRootPath, pinnedRoots.owner, targetBinding);
+      corpusTrustRootPath, pinnedRoots.owner, targetBinding, { allowTestFixtures: false });
     if (finalCorpusApproval.attestationNonce !== corpusApproval.attestationNonce) {
       throw error('PHASE1_INPUT_CHANGED_DURING_ADJUDICATION', 'owner corpus approval identity changed during final freshness validation');
     }

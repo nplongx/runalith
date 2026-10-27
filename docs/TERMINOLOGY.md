@@ -22,6 +22,7 @@ Runalith uses host-neutral product language. The MCPB package format is a bundle
 | **Custom role profile** | `custom_role_id`, `custom_role_version`, `custom_role_create` | Use generic wording in prose, but preserve API fields and role IDs in examples. |
 | **Agent Skill** | `SKILL.md`, `skills`, `custom_role_update` | The upstream skill format is retained; do not invent another file format or change property names. |
 | **Execution record** | `ExecutionManager`, `execute_batch`, `task_execute_local` | Preserve internal class names where source tracing or debugging requires them. |
+| **Read-only reconciliation report** | `scripts/reconcile-active-workflows.mjs`, `adaptiveGoalGraph`, `recoveryPlan` | Correlates durable workflow lineage and inventories Goal/Idea graph snapshot freshness; it does not verify external signatures or authorize lifecycle changes. |
 | **Policy pack** | `workflow_policy_*`, policy IDs and version fields | A reusable versioned definition; it does not grant permissions and only catalogued predicates are enforced. |
 | **Explicit approval** | `workflow_approve`, plan hash, approval events | Proposal creation and preview are not approval. Keep this distinction explicit. |
 | **Historical engineering record** | `M0`, `M11`, `M12`, `P0`–`P14`, case IDs, evidence filenames | These identify particular milestones, tests and records. Do not rewrite literal identifiers inside source evidence. |

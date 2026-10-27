@@ -5,14 +5,72 @@ import { isAuthenticatedAdaptiveGoalKnowledgeVerificationReport } from './adapti
 export const ADAPTIVE_GOAL_PLAN_DRAFT_SCHEMA_VERSION = 1;
 
 const ACTION_NODE_TYPES = new Set(['task', 'experiment']);
-const authenticatedPlanDrafts = new WeakSet();
+// Object identity alone is not enough to authenticate a mutable draft. Bind
+// the exact digest and upstream attestation identity at creation time, then
+// freeze the whole authenticated tree before exposing it to downstream code.
+const authenticatedPlanDrafts = new WeakMap();
+
+function deepFreeze(value, seen = new Set()) {
+  if (!value || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  for (const key of Reflect.ownKeys(value)) deepFreeze(value[key], seen);
+  return Object.freeze(value);
+}
 
 export function isAuthenticatedAdaptiveGoalPlanDraft(value) {
-  return isRecord(value) && authenticatedPlanDrafts.has(value) && value.source?.verification?.verified === true;
+  if (!isRecord(value)) return false;
+  const authenticated = authenticatedPlanDrafts.get(value);
+  if (!authenticated || !Object.isFrozen(value) || value.source?.verification?.verified !== true ||
+      value.source.verification.status !== 'verified' ||
+      value.source.verification.snapshotHash !== authenticated.snapshotHash ||
+      value.source.verification.attestationId !== authenticated.attestationId ||
+      value.source.verification.evidenceManifestHash !== authenticated.evidenceManifestHash ||
+      value.draftHash !== authenticated.draftHash) return false;
+  const { draftHash, ...unsigned } = value;
+  const expiresAt = Date.parse(value.source.verification.expiresAt || '');
+  return hash(stableJson(unsigned)) === authenticated.draftHash &&
+    Number.isFinite(expiresAt) && expiresAt > Date.now();
 }
 
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+// Public projection inputs cross a trust boundary. Validate property
+// descriptors before normal property access so accessors cannot run code
+// while a graph or candidate is being inspected. Authenticated verifier
+// reports use a separate in-process capability and are not serialized here.
+function assertStrictJsonInput(value, label, { seen = new Set(), depth = 0 } = {}) {
+  if (depth > 64) reject(`${label} exceeds maximum JSON nesting depth`);
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) reject(`${label} contains a non-finite number`);
+    return;
+  }
+  if (typeof value !== 'object' || seen.has(value)) reject(`${label} must be acyclic JSON data without repeated object identities`);
+  const prototype = Object.getPrototypeOf(value);
+  const keys = Reflect.ownKeys(value);
+  if (Array.isArray(value)) {
+    if (prototype !== Array.prototype || keys.some(key => typeof key !== 'string' ||
+        (key !== 'length' && (!/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= value.length))) ||
+        keys.length !== value.length + 1) reject(`${label} arrays must be dense standard arrays without extra or symbol properties`);
+    seen.add(value);
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, index)) reject(`${label} arrays must not be sparse`);
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) reject(`${label} arrays must contain enumerable data properties only`);
+      assertStrictJsonInput(descriptor.value, label, { seen, depth: depth + 1 });
+    }
+    return;
+  }
+  if (prototype !== Object.prototype && prototype !== null) reject(`${label} must contain plain JSON records only`);
+  if (keys.some(key => typeof key !== 'string' || key === '__proto__')) reject(`${label} contains a forbidden key`);
+  seen.add(value);
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) reject(`${label} objects must contain enumerable data properties only`);
+    assertStrictJsonInput(descriptor.value, label, { seen, depth: depth + 1 });
+  }
 }
 
 function stableJson(value) {
@@ -20,11 +78,40 @@ function stableJson(value) {
   if (isRecord(value)) {
     return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
   }
-  return JSON.stringify(value);
+  return JSON.stringify(Object.is(value, -0) ? 0 : value);
 }
 
 function hash(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function authenticatedSnapshotNodeLabel(node) {
+  const content = node?.content && typeof node.content === 'object' && !Array.isArray(node.content) ? node.content : {};
+  return [content.label, content.title, content.name, content.summary]
+    .find(value => typeof value === 'string' && value.trim()) || node?.stable_key;
+}
+
+/**
+ * Check the semantic fields actually projected from a verified persisted
+ * snapshot. A signed snapshot must not be used to authenticate caller-edited
+ * task labels or evidence references merely because node IDs and types match.
+ */
+export function matchesAdaptiveGoalKnowledgeSnapshotProjection(graph, snapshot) {
+  if (!isRecord(graph) || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges) ||
+      !isRecord(snapshot) || !Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.edges)) return false;
+  const projectedNodes = graph.nodes.map(node => ({
+    id: node.id, type: node.type, label: node.label || node.id, evidenceRefs: node.evidenceRefs
+  })).sort((a, b) => a.id.localeCompare(b.id));
+  const snapshotNodes = snapshot.nodes.map(node => ({
+    id: node.id, type: node.type, label: authenticatedSnapshotNodeLabel(node), evidenceRefs: node.evidence_refs
+  })).sort((a, b) => a.id.localeCompare(b.id));
+  const projectedEdges = graph.edges.map(edge => ({ from: edge.from, to: edge.to, type: edge.type }))
+    .sort((a, b) => `${a.from}:${a.to}:${a.type}`.localeCompare(`${b.from}:${b.to}:${b.type}`));
+  const snapshotEdges = snapshot.edges.filter(edge => edge.type !== 'recovers_to')
+    .map(edge => ({ from: edge.from_id, to: edge.to_id, type: edge.type }))
+    .sort((a, b) => `${a.from}:${a.to}:${a.type}`.localeCompare(`${b.from}:${b.to}:${b.type}`));
+  return stableJson(snapshotNodes) === stableJson(projectedNodes) &&
+    stableJson(snapshotEdges) === stableJson(projectedEdges);
 }
 
 function reject(message) {
@@ -37,6 +124,10 @@ function reject(message) {
  * execution plan and never authorizes dispatch or task execution.
  */
 export function projectAdaptiveGoalCandidateToPlanGraph(graphInput, candidateInput, optionsInput, projectionOptionsInput = {}, sourceVerificationInput = null) {
+  assertStrictJsonInput(graphInput, 'graph');
+  assertStrictJsonInput(candidateInput, 'candidate');
+  if (optionsInput !== undefined) assertStrictJsonInput(optionsInput, 'search options');
+  assertStrictJsonInput(projectionOptionsInput, 'projection options');
   if (!isRecord(projectionOptionsInput) || Object.keys(projectionOptionsInput).some(key => key !== 'dependencyMode') ||
       (projectionOptionsInput.dependencyMode !== undefined &&
         !['sequential_path', 'source_edges_only'].includes(projectionOptionsInput.dependencyMode))) {
@@ -60,10 +151,7 @@ export function projectAdaptiveGoalCandidateToPlanGraph(graphInput, candidateInp
   if (sourceVerificationInput !== null) {
     if (!isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(sourceVerificationInput) ||
         sourceVerificationInput.snapshotHash !== sourceVerificationInput.snapshot?.snapshot_hash ||
-        stableJson(sourceVerificationInput.snapshot.nodes.map(node => ({ id: node.id, type: node.type, evidenceRefs: node.evidence_refs })) .sort((a, b) => a.id.localeCompare(b.id)) ) !==
-          stableJson(graph.nodes.map(node => ({ id: node.id, type: node.type, evidenceRefs: node.evidenceRefs })).sort((a, b) => a.id.localeCompare(b.id))) ||
-        stableJson(sourceVerificationInput.snapshot.edges.filter(edge => edge.type !== 'recovers_to').map(edge => ({ from: edge.from_id, to: edge.to_id, type: edge.type })).sort((a, b) => `${a.from}:${a.to}:${a.type}`.localeCompare(`${b.from}:${b.to}:${b.type}`))) !==
-          stableJson(graph.edges.slice().sort((a, b) => `${a.from}:${a.to}:${a.type}`.localeCompare(`${b.from}:${b.to}:${b.type}`)))) {
+        !matchesAdaptiveGoalKnowledgeSnapshotProjection(graph, sourceVerificationInput.snapshot)) {
       reject('source verification must be an in-process report from the configured verifier for the exact current snapshot; caller-supplied flags or serialized reports are not proof');
     }
     sourceVerification = {
@@ -216,6 +304,14 @@ export function projectAdaptiveGoalCandidateToPlanGraph(graphInput, candidateInp
     }
   };
   draft.draftHash = hash(stableJson(draft));
-  if (sourceVerification.verified === true) authenticatedPlanDrafts.add(draft);
+  if (sourceVerification.verified === true) {
+    deepFreeze(draft);
+    authenticatedPlanDrafts.set(draft, Object.freeze({
+      draftHash: draft.draftHash,
+      snapshotHash: sourceVerification.snapshotHash,
+      attestationId: sourceVerification.attestationId,
+      evidenceManifestHash: sourceVerification.evidenceManifestHash
+    }));
+  }
   return draft;
 }

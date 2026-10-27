@@ -56,7 +56,6 @@ try {
     'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v1.json',
     'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
     'docs/plugin-workflow-benchmark-plan.md',
-    'docs/plugin-workflow-benchmark-phase1-freeze.md',
     'scripts/replay-agg-phase1-finalization.mjs',
     'scripts/verify-agg-phase1-evidence-pack.mjs',
     'scripts/verify-agg-phase1-phase2-package-boundary.mjs',
@@ -67,10 +66,66 @@ try {
     'tests/test-adaptive-goal-trust-entrypoint.mjs',
     'tests/test-reconcile-active-workflows.mjs',
     'benchmarks/plugin-workflow-benchmark/phase2-inventory-diagnostics.mjs',
+    'benchmarks/plugin-workflow-benchmark/create-phase2-candidate-inventory.mjs',
+    'benchmarks/plugin-workflow-benchmark/test-create-phase2-candidate-inventory.mjs',
+    'scripts/diagnose-phase2-archive-lineage.mjs',
+    'tests/test-phase2-inventory-diagnostic-contract.mjs',
+    'tests/test-adaptive-goal-execution-graph-proposal.js',
     'tests/test-agg-phase1-evidence-pack-verifier.mjs',
     'tests/test-agg-phase1-phase2-package-boundary.mjs',
     'tests/test-mcpb-source-alignment.mjs',
     'tests/test-plugin-workflow-benchmark-phase1-protocol.mjs',
+    'scripts/lib/runalith-release-trust-contract.mjs',
+    'scripts/lib/external-trust-checkpoint-contract.mjs',
+    'scripts/lib/sqlite-external-checkpoint-transition.mjs',
+    'tests/test-external-trust-checkpoint-contract.mjs',
+    'scripts/verify-release-evidence.mjs',
+    'scripts/lib/hosted-builder-attestation.mjs',
+    'scripts/lib/hosted-verification-predicate.mjs',
+    'scripts/lib/phase2-custody-evidence.mjs',
+    'scripts/verify-phase2-custody-evidence.mjs',
+    'tests/test-phase2-custody-evidence.mjs',
+    'benchmarks/plugin-workflow-benchmark/create-phase2-candidate-inventory.mjs',
+    'benchmarks/plugin-workflow-benchmark/test-create-phase2-candidate-inventory.mjs',
+    'scripts/diagnose-phase2-archive-lineage.mjs',
+    'tests/test-phase2-inventory-diagnostic-contract.mjs',
+    'tests/test-adaptive-goal-execution-graph-proposal.js',
+    'scripts/verify-hosted-builder-provenance.mjs',
+    'scripts/create-hosted-candidate-verification-predicate.mjs',
+    'scripts/runalith-hosted-build-policy.json',
+    'scripts/runalith-rollout.mjs',
+    'src/runtime/adaptive-goal-graph.js',
+    'src/runtime/adaptive-goal-knowledge-store.js',
+    'src/runtime/adaptive-goal-knowledge-verifier.js',
+    'src/runtime/adaptive-goal-plan-adapter.js',
+    'src/runtime/adaptive-goal-compatibility.js',
+    'src/runtime/adaptive-goal-execution-readiness.js',
+    'src/runtime/adaptive-goal-execution-graph-proposal.js',
+    'src/runtime/adaptive-goal-execution-plan-candidate.js',
+    'src/runtime/adaptive-goal-reviewed-task-inputs.js',
+    'src/runtime/adaptive-goal-action-intent-policy.js',
+    'src/runtime/adaptive-goal-reviewer-identity.js',
+    'src/runtime/adaptive-goal-source-evidence.js',
+    'src/runtime/adaptive-goal-evidence-lineage.js',
+    'src/runtime/adaptive-goal-sandbox-executor.js',
+    'tests/test-adaptive-goal-execution-graph-proposal.js',
+    'tests/test-adaptive-goal-execution-plan-candidate.js',
+    'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+    'tests/test-adaptive-goal-knowledge-verifier.mjs',
+    'tests/test-adaptive-goal-reviewer-identity.js',
+    'tests/test-adaptive-goal-evidence-lineage.js',
+    'tests/test-runalith-release-trust-contract.mjs',
+    'tests/test-hosted-builder-attestation.mjs',
+    'tests/test-hosted-verification-predicate.mjs',
+    'tests/test-runalith-hosted-workflows.mjs',
+    'tests/test-runalith-rollout.mjs',
+    '.github/workflows/runalith-provenance-builder.yml',
+    '.github/workflows/runalith-provenance-verifier.yml',
+    '.github/workflows/runalith-verification-attestation-signer.yml',
+    'docs/runalith-provenance-release-trust-design.md',
+    'docs/runalith-hosted-builder-pipeline.md',
+    'docs/runalith-release-evidence-verifier.md',
+    'docs/agg-production-trust-provisioning-runbook.md',
   ]) {
     writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
   }
@@ -83,14 +138,133 @@ try {
   const entries = ['README.md', 'LICENSE', 'manifest.json', 'package.json', 'server/index.js', 'src/runtime/example.js'];
   execFileSync('zip', ['-X', '-q', bundle, ...entries], { cwd: stage });
 
+  execFileSync('git', ['init', '-q'], { cwd: sourceRoot });
+  execFileSync('git', ['add', '-A'], { cwd: sourceRoot });
+  execFileSync('git', ['-c', 'user.name=Source Alignment Test', '-c', 'user.email=source-alignment@example.invalid',
+    'commit', '-qm', 'fixture source baseline'], { cwd: sourceRoot });
+
   const pass = runVerifier(bundle, sourceRoot, report);
   assert.equal(pass.status, 0, pass.stderr);
   assert.match(pass.stdout, /MCPB_SOURCE_ALIGNMENT=PASS/);
+  assert.match(pass.stdout, /byte_identity=PASS_EXACT_ARCHIVE_ENTRY_BYTES/);
+  assert.match(pass.stdout, /release_eligibility=BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED/);
   const evidence = JSON.parse(fs.readFileSync(report, 'utf8'));
   assert.equal(evidence.status, 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT');
+  assert.equal(evidence.byteIdentityStatus, 'PASS_EXACT_ARCHIVE_ENTRY_BYTES');
+  assert.equal(evidence.sourceProvenanceStatus, 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT');
+  assert.equal(evidence.releaseEligibility, 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED',
+    'exact byte alignment must not be presented as authenticated build provenance or release authority');
+  assert.equal(evidence.bundlePathByteIdentityRecheckedAtCompletion, true,
+    'reported bundle path must still contain the captured bytes after archive/source verification completes');
   assert.equal(evidence.archiveEntryCount, entries.length);
   assert.equal(evidence.manifestToolCount, 1);
   assert.ok(/^[a-f0-9]{64}$/.test(evidence.sourceSnapshotSha256));
+  assert.equal(evidence.sourceGitState.trackedWorkingTreeClean, true);
+  assert.equal(evidence.sourceGitState.workingTreeClean, true);
+  assert.match(evidence.sourceGitState.trackedDiffSha256, /^[a-f0-9]{64}$/);
+  assert.match(evidence.sourceGitState.workingTreeStatusSha256, /^[a-f0-9]{64}$/);
+  assert.match(evidence.sourceProvenanceSha256, /^[a-f0-9]{64}$/);
+  const releaseTrustInputs = [
+    'scripts/lib/runalith-release-trust-contract.mjs',
+    'scripts/verify-release-evidence.mjs',
+    'scripts/lib/hosted-builder-attestation.mjs',
+    'scripts/lib/hosted-verification-predicate.mjs',
+    'scripts/lib/phase2-custody-evidence.mjs',
+    'scripts/verify-phase2-custody-evidence.mjs',
+    'tests/test-phase2-custody-evidence.mjs',
+    'scripts/runalith-hosted-build-policy.json',
+    'scripts/lib/external-trust-checkpoint-contract.mjs',
+    'scripts/lib/sqlite-external-checkpoint-transition.mjs',
+    'tests/test-external-trust-checkpoint-contract.mjs',
+    'src/runtime/adaptive-goal-graph.js',
+    'src/runtime/adaptive-goal-knowledge-store.js',
+    'src/runtime/adaptive-goal-knowledge-verifier.js',
+    'src/runtime/adaptive-goal-plan-adapter.js',
+    'src/runtime/adaptive-goal-compatibility.js',
+    'src/runtime/adaptive-goal-execution-readiness.js',
+    'src/runtime/adaptive-goal-execution-graph-proposal.js',
+    'src/runtime/adaptive-goal-execution-plan-candidate.js',
+    'src/runtime/adaptive-goal-reviewed-task-inputs.js',
+    'src/runtime/adaptive-goal-action-intent-policy.js',
+    'src/runtime/adaptive-goal-reviewer-identity.js',
+    'src/runtime/adaptive-goal-source-evidence.js',
+    'src/runtime/adaptive-goal-evidence-lineage.js',
+    'src/runtime/adaptive-goal-sandbox-executor.js',
+    'tests/test-adaptive-goal-execution-graph-proposal.js',
+    'tests/test-adaptive-goal-execution-plan-candidate.js',
+    'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+    'tests/test-adaptive-goal-knowledge-verifier.mjs',
+    'tests/test-adaptive-goal-reviewer-identity.js',
+    'tests/test-adaptive-goal-evidence-lineage.js',
+    '.github/workflows/runalith-provenance-builder.yml',
+    '.github/workflows/runalith-provenance-verifier.yml',
+    '.github/workflows/runalith-verification-attestation-signer.yml',
+  ];
+  const inputByPath = new Map(evidence.buildInputs.map(item => [item.sourcePath, item]));
+  for (const relative of releaseTrustInputs) {
+    assert.match(inputByPath.get(relative)?.sha256 || '', /^[a-f0-9]{64}$/,
+      `release-critical trust policy/build input must be bound into the source snapshot: ${relative}`);
+  }
+
+  // Release policy/verifier code is not an archive entry, but it determines
+  // how the archive may be accepted. Its byte changes must therefore change
+  // the reconstructible source snapshot digest rather than escaping provenance.
+  const policyRoot = path.join(temp, 'policy-input-drift-source');
+  fs.cpSync(sourceRoot, policyRoot, { recursive: true });
+  writeFile(policyRoot, 'scripts/lib/runalith-release-trust-contract.mjs',
+    `${fs.readFileSync(path.join(policyRoot, 'scripts/lib/runalith-release-trust-contract.mjs'), 'utf8')}\n// policy-input drift fixture\n`);
+  const policyDriftReportPath = path.join(temp, 'policy-input-drift-provenance.json');
+  const policyDrift = runVerifier(bundle, policyRoot, policyDriftReportPath);
+  assert.equal(policyDrift.status, 0, policyDrift.stderr);
+  const policyDriftEvidence = JSON.parse(fs.readFileSync(policyDriftReportPath, 'utf8'));
+  assert.notEqual(policyDriftEvidence.sourceSnapshotSha256, evidence.sourceSnapshotSha256,
+    'source snapshot digest must change when release-critical verifier/policy bytes change, even if MCPB payload bytes do not');
+
+  const custodyDriftRoot = path.join(temp, 'custody-input-drift-source');
+  fs.cpSync(sourceRoot, custodyDriftRoot, { recursive: true });
+  writeFile(custodyDriftRoot, 'scripts/lib/phase2-custody-evidence.mjs',
+    `${fs.readFileSync(path.join(custodyDriftRoot, 'scripts/lib/phase2-custody-evidence.mjs'), 'utf8')}\n// custody-input drift fixture\n`);
+  const custodyDriftReportPath = path.join(temp, 'custody-input-drift-provenance.json');
+  const custodyDrift = runVerifier(bundle, custodyDriftRoot, custodyDriftReportPath);
+  assert.equal(custodyDrift.status, 0, custodyDrift.stderr);
+  const custodyDriftEvidence = JSON.parse(fs.readFileSync(custodyDriftReportPath, 'utf8'));
+  assert.notEqual(custodyDriftEvidence.sourceSnapshotSha256, evidence.sourceSnapshotSha256,
+    'source snapshot digest must bind the frozen-inventory custody contract, verifier and tests, not only generic release-trust code');
+
+  const frozenGateDriftRoot = path.join(temp, 'frozen-gate-input-drift-source');
+  fs.cpSync(sourceRoot, frozenGateDriftRoot, { recursive: true });
+  writeFile(frozenGateDriftRoot, 'tests/test-phase2-inventory-diagnostic-contract.mjs',
+    `${fs.readFileSync(path.join(frozenGateDriftRoot, 'tests/test-phase2-inventory-diagnostic-contract.mjs'), 'utf8')}\n// frozen-gate drift fixture\n`);
+  const frozenGateDriftReportPath = path.join(temp, 'frozen-gate-input-drift-provenance.json');
+  const frozenGateDrift = runVerifier(bundle, frozenGateDriftRoot, frozenGateDriftReportPath);
+  assert.equal(frozenGateDrift.status, 0, frozenGateDrift.stderr);
+  const frozenGateDriftEvidence = JSON.parse(fs.readFileSync(frozenGateDriftReportPath, 'utf8'));
+  assert.notEqual(frozenGateDriftEvidence.sourceSnapshotSha256, evidence.sourceSnapshotSha256,
+    'source snapshot digest must bind the frozen 71-path acceptance gate and its regression test');
+
+  // A bundle that matches a modified source tree may still be byte-aligned,
+  // but the provenance must not imply that the Git commit alone describes it.
+  const dirtySourceBytes = 'export const fixture = "dirty but byte-aligned";\n';
+  writeFile(sourceRoot, 'server/index.js', dirtySourceBytes);
+  writeFile(stage, 'server/index.js', dirtySourceBytes);
+  const dirtyBundle = path.join(temp, 'dirty-source-candidate.mcpb');
+  execFileSync('zip', ['-X', '-q', dirtyBundle, ...entries], { cwd: stage });
+  const dirtyReportPath = path.join(temp, 'dirty-source-provenance.json');
+  const dirtyPass = runVerifier(dirtyBundle, sourceRoot, dirtyReportPath);
+  assert.equal(dirtyPass.status, 0, dirtyPass.stderr);
+  assert.match(dirtyPass.stdout, /source_provenance=DIRTY_GIT_TREE_BYTES_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT/);
+  const dirtyEvidence = JSON.parse(fs.readFileSync(dirtyReportPath, 'utf8'));
+  assert.equal(dirtyEvidence.status, 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT');
+  assert.equal(dirtyEvidence.byteIdentityStatus, 'PASS_EXACT_ARCHIVE_ENTRY_BYTES');
+  assert.equal(dirtyEvidence.sourceProvenanceStatus, 'DIRTY_GIT_TREE_BYTES_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT');
+  assert.equal(dirtyEvidence.releaseEligibility, 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED');
+  assert.equal(dirtyEvidence.sourceGitState.trackedWorkingTreeClean, false);
+  assert.equal(dirtyEvidence.sourceGitState.workingTreeClean, false);
+  assert.notEqual(dirtyEvidence.sourceGitState.trackedDiffSha256, evidence.sourceGitState.trackedDiffSha256);
+  assert.notEqual(dirtyEvidence.sourceSnapshotSha256, evidence.sourceSnapshotSha256,
+    'content snapshot digest must change when packaged source bytes change');
+  assert.notEqual(dirtyEvidence.sourceProvenanceSha256, evidence.sourceProvenanceSha256,
+    'source provenance digest must additionally bind dirty Git state');
 
   // Duplicate object members must not be silently resolved by JSON.parse:
   // distinct parsers must agree on the exact manifest/package values that

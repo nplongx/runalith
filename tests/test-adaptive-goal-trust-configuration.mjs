@@ -188,7 +188,7 @@ test('rejects future-dated configurations and signatures issued outside an other
     error => error.code === 'AGG_TRUST_ROOT_ISSUED_OUTSIDE_VALIDITY');
 });
 
-test('durable per-domain ledger rejects rollback, same-version root replacement and timestamp rollback', t => {
+test('durable per-domain ledger rejects rollback, skipped versions, same-version root replacement and timestamp rollback', t => {
   const primary = root(); const rotated = root();
   const db = new DatabaseSync(':memory:'); t.after(() => db.close());
   const v1 = config(KNOWLEDGE.domain, 'source-admin', [entry('source-primary', primary.pem)], { updated_at: new Date(Date.now() - 20_000).toISOString() });
@@ -213,6 +213,18 @@ test('durable per-domain ledger rejects rollback, same-version root replacement 
     WHERE domain=? ORDER BY observed_at DESC LIMIT 1`).get(KNOWLEDGE.domain);
   assert.equal(rejection.reason_code, 'AGG_TRUST_CONFIG_ROLLBACK');
   assert.equal(rejection.attempted_config_version, 1);
+
+  const skippedVersion = config(KNOWLEDGE.domain, 'source-admin', [entry('source-skipped', primary.pem)], {
+    config_version: 4, updated_at: new Date(Date.now() - 1_000).toISOString()
+  });
+  process.env[KNOWLEDGE.configJsonEnv] = JSON.stringify(skippedVersion);
+  const loadedSkipped = load();
+  assert.equal(inspectAdaptiveGoalTrustConfigurationHistory(db, KNOWLEDGE.domain, loadedSkipped).status, 'version_gap_detected');
+  assert.throws(() => assertAndRecordAdaptiveGoalTrustConfiguration(db, loadedSkipped), error => error.code === 'AGG_TRUST_CONFIG_VERSION_GAP');
+  const gapAudit = db.prepare(`SELECT reason_code,attempted_config_version FROM adaptive_goal_trust_configuration_events
+    WHERE domain=? ORDER BY rowid DESC LIMIT 1`).get(KNOWLEDGE.domain);
+  assert.equal(gapAudit.reason_code, 'AGG_TRUST_CONFIG_VERSION_GAP');
+  assert.equal(gapAudit.attempted_config_version, 4);
 
   const sameVersionChanged = config(KNOWLEDGE.domain, 'source-admin', [entry('source-alternate', primary.pem)], {
     config_version: 2, updated_at: new Date(Date.now() - 5_000).toISOString()
@@ -332,6 +344,14 @@ test('operator validation CLI checks a supplied file without changing trust/runt
     });
     assert.equal(symlinkedParent.status, 2, symlinkedParent.stderr || symlinkedParent.stdout);
     assert.match(symlinkedParent.stderr, /canonical regular non-symlink/);
+
+    const symlinkedFile = path.join(directory, 'source-trust-symlink.json');
+    fs.symlinkSync(file, symlinkedFile, 'file');
+    const finalComponentSymlink = spawnSync(process.execPath, [VALIDATOR_CLI, '--domain', 'goal_idea_verifier', '--config', symlinkedFile], {
+      cwd: REPO_ROOT, encoding: 'utf8', timeout: 10_000, env
+    });
+    assert.equal(finalComponentSymlink.status, 2, finalComponentSymlink.stderr || finalComponentSymlink.stdout);
+    assert.match(finalComponentSymlink.stderr, /canonical regular non-symlink/);
 
     const invalidFile = path.join(directory, 'invalid-trust.json');
     fs.writeFileSync(invalidFile, JSON.stringify({ ...document, domain: REVIEWER.domain }), { flag: 'wx', mode: 0o600 });

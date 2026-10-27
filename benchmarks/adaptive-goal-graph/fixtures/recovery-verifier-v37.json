@@ -1,0 +1,975 @@
+{
+  "schemaVersion": 37,
+  "fixtureId": "recovery-verifier-investigation-v37",
+  "supersedesFixtureId": "recovery-verifier-investigation-v36",
+  "provenanceRevision": 1,
+  "provenanceRevisionReason": "The source-alignment contract now binds release-critical trust policy, verifier, hosted workflow, test, and operator documentation inputs; the evidence-pack fixture includes those inputs. Execution Graph structural verification also rejects malformed canonical JSON and inconsistent component hashes. Historical v36 and the frozen graph/path/evidence oracle remain unchanged.",
+  "description": "Immutable recovery-verifier v37 acceptance fixture for release-trust source provenance completeness and Execution Graph structural integrity.",
+  "provenance": [
+    {
+      "path": "server/index.js",
+      "sha256": "aa2b8f45f5a98817aac019f1659ff91f0bfc22da68cdbef1d9ad1ae6ceee8cb8",
+      "previouslyPinnedSha256": "3c5968104925aa1d9dae0bcc55915e15a4a00f7a5a674fc9f12d9c405b6bc9be",
+      "changeAssessment": "Refreshes the whole-file pin to the current integrated workspace source while preserving the separately pinned recovery-verifier semantic scope; this is a source-identity update, not an attestation of claim truth.",
+      "claim": "AGG durable evidence resolution rejects duplicate, malformed, overlong, and oversized reference sets before attempting source or artifact lineage resolution.",
+      "semanticScope": {
+        "startMarker": "case 'workflow_recovery_verify': {",
+        "endMarker": "\n    case '",
+        "sha256": "941835e624cae58b7935723144a49dddc13532deb30e444ec5835c4df9df62e9",
+        "reviewNote": "The exact recovery-verifier function block remains separately pinned; surrounding server source now includes stricter AGG completion-ledger conflict handling."
+      }
+    },
+    {
+      "path": "tests/test-runalith-plugin.js",
+      "sha256": "0fc54befb9b449713d2282c418fc99208edd98e5c1a6998aac8d8b2e477dbe96",
+      "previouslyPinnedSha256": "020788b68024ea8a5bb75796a9fb516290e4e4876279e1150ff8a359183ae071",
+      "changeAssessment": "v11 trust/onboarding integration source identity refresh; previous v10 hash retained in previouslyPinnedSha256. Adds RC.7 positive and negative lifecycle tests: approving a Plan Graph review wrapper does not grant mapped action authority and cannot be dispatched; an Execution Graph wrapper cannot dispatch without a fresh trust-root-verified action-intent candidate; only an exact candidate-bound plan can pass the dispatch gate.",
+      "claim": "Integrated MCP and sandbox regressions exercise mandatory task mapping, dependency-preserving proposals, exact source attestation/reviewer trust separation, key rotation/revocation denial, tampering, idempotency and recovery; all action execution remains test-only.",
+      "previouslyPinnedBeforeV11Sha256": "45bff1a3f5aa7dfee515685ec405a033888c1ee47f061f85d7c70595450414ee"
+    },
+    {
+      "path": "tests/test-adaptive-goal-source-evidence.js",
+      "sha256": "e68c7ab66aa00ba7a6688b8c5be3b99e483ff9c6ddff1d82e3053325bc49058d",
+      "changeAssessment": "Adds deterministic opened-descriptor-to-path symlink replacement race test and verifies non-promotion after identity changes.",
+      "claim": "Source resolver race regression requires source_changed_during_read and restores original bytes.",
+      "previouslyPinnedSha256": "f86d77d76c9a16cf924743f1b4e1d67c56d67e127e5d8740cdd6b60ca000060e"
+    },
+    {
+      "path": "tests/test-adaptive-goal-candidate-assessment-contract.mjs",
+      "sha256": "8b18b0d86f55b57ad6baf7a94d7ac867e56ee970971298ea4ed865b986eb7837",
+      "changeAssessment": "Adds recomputed assessment-hash attack attempting to claim truth, independent attestation, and runtime bundle binding.",
+      "claim": "Assessment hash is validated as integrity only; schema contract rejects forged claim/authority promotion.",
+      "previouslyPinnedSha256": "8b18b0d86f55b57ad6baf7a94d7ac867e56ee970971298ea4ed865b986eb7837"
+    },
+    {
+      "path": "benchmarks/adaptive-goal-graph/run-benchmark.mjs",
+      "sha256": "74159bb640d15b2c27ecabb382603a893533fd80dbedc6b8d2c405811f58709b",
+      "claim": "The offline benchmark runner verifies exact versioned source pins and preserves the immutable evidence/path oracle. Successor v35 updates this exact source pin; prior fixture retains the previous hash.",
+      "changeAssessment": "v37 reviewed source identity refresh: benchmarks/adaptive-goal-graph/run-benchmark.mjs changed as part of release-critical source provenance completeness and regression coverage; prior v36 pin retained in previouslyPinnedBeforeV37Sha256.",
+      "previouslyPinnedSha256": "b1730cb4d7c8785ecff39033ca771035604a28bb64fe610b4ad9e63e79eb368b",
+      "previouslyPinnedBeforeV11Sha256": "39453635332768c87fdf8b48cfdf33cb8fed4fd03a586f19868f04cda20561d1",
+      "previouslyPinnedBeforeV12Sha256": "0a6bca69fa81ab73084ea2ee637d312fc5cec2d738b411934de7314a0271e7cd",
+      "previouslyPinnedBeforeV13Sha256": "c855ebcd9dd1690b28864ece2c183c012be8427757f7b72c45cb8e47e37667fb",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json",
+      "previouslyPinnedBeforeV24Sha256": "ac2b27c4284cf4d1ca1e07b5ac1ce5a49938e09f103b9f1a04ccabb8459948a1",
+      "previouslyPinnedBeforeV25Sha256": "fddd5024684a223e2efebd3177eafda2f94de4f75546dcbb0acb34b159879af5",
+      "previouslyPinnedBeforeV26Sha256": "92948b5e20499541ac7e61a33c325ea5407d304116d08ecf23ee97ce4b9e5072",
+      "previouslyPinnedBeforeV29Sha256": "5d33d9b8a20f72a026c0d4d97182a6af12261d26f04e08148bf29dcc48818356",
+      "previouslyRecordedChangeAssessmentBeforeV29": "v28 source identity refresh for historical archive lineage classification and preserved candidate regression; prior runner identity remains recorded.",
+      "previouslyPinnedBeforeV30Sha256": "6dc454c3bcba6be644d7fed44a03b0ef61c58380ec275f0fa2ea4d8fa214bcbc",
+      "previouslyRecordedChangeAssessmentBeforeV30": "v29: selects a versioned successor fixture for the intentionally reviewed source/policy changes while preserving v28 as an immutable historical contract.",
+      "previouslyPinnedBeforeV37Sha256": "c75b361810b7a5df464b2be35271f5408e06fa720d3664eab875ec893b7f9177"
+    },
+    {
+      "path": "src/runtime/adaptive-goal-source-evidence.js",
+      "sha256": "c106a18f4518c8e819b96af41f9202d630884b76b69e177e463e23319b36e11d",
+      "claim": "Evidence-reference collection is bounded and rejects malformed fields; local source-byte integrity remains explicitly distinct from claim truth and independence.",
+      "changeAssessment": "Extracts reusable strict reference-shape validation and adds malformed/oversized reference regressions."
+    },
+    {
+      "path": "src/runtime/adaptive-goal-sandbox-executor.js",
+      "sha256": "3acd1a90d4d3c6e8345cfdaa48482b089814f6098a83fc1a3295ce701346cc37",
+      "claim": "Sandbox receipt verification requires canonical durable receipt bytes, exact nested schemas, stable descriptor/path identity and rehashed allowlisted output bytes; fixture mode does not grant production authority.",
+      "changeAssessment": "Pins the reviewed successor15 stored-receipt verifier, including allowlisted implementation bytes, exact canonical input payload bytes, payload byte limits and cross-binding/tamper checks; no sandbox action was executed."
+    },
+    {
+      "path": "server/index-v1.0.9-rc.7.js",
+      "sha256": "c877b42560e4c0e33d015195b44bc98fdc1ac4f240f9e8e3c55b13177a74ed69",
+      "previouslyPinnedSha256": "e01ffc89b6d5e0f059bf0e40d54a65c2de15bc4b5eeff3ba4359bb71aa1cfee2",
+      "changeAssessment": "Introduces the RC.7 versioned runtime successor; the historical server/index.js and RC.6 source snapshots remain intact.",
+      "claim": "Plan Graph review approval never authorizes or dispatches mapped AGG actions; Execution Graph creation requires a current approved/pinned Plan Graph; Execution Graph dispatch requires exact current trusted action-intent candidate and immutable plan.",
+      "historicalSnapshotPath": "artifacts/agg-phase2-workflow-20261024T092623Z-source-callpath-trust-anchor-hardening-successor/source-snapshot/server/index.js"
+    },
+    {
+      "path": "server/index-v1.0.9-rc.8.js",
+      "sha256": "0d50fd4760fd2b6374980cc375e054562cc5b6d3f68895492b8497bb1e190e8b",
+      "claim": "Versioned RC.8 entrypoint integrates signed persistent Goal/Idea snapshot verification with Plan/Execution Graph freshness gates, while candidate action and reviewer/approval/dispatch authority remain distinct.",
+      "previouslyPinnedSha256": "b525df35214cd751addfb6adbf21dd0b8272f1da82516cc97c0f3330bc46d70e",
+      "changeAssessment": "v11 trust/onboarding integration source identity refresh; previous v10 hash retained in previouslyPinnedSha256."
+    },
+    {
+      "path": "package.json",
+      "sha256": "dfb7b8d5aeb18fdc6eaf6908899118da6f730eeb47d0e3996bf4fe25cdee8609",
+      "claim": "RC.11 pins the exact reviewed package metadata bytes; earlier fixture pins remain immutable.",
+      "previouslyPinnedSha256": "2fa8352cbae1f566d4b21545c4f251f67418e27d723108de22cfcce0590487d4",
+      "changeAssessment": "v33 reviewed source pin refresh: package.json binds the current trust/reconciliation acceptance test-chain integration; prior fixture bytes remain immutable.",
+      "previouslyPinnedBeforeV12Sha256": "71a637102076f4619e160feb0a10871ca80f60cea43817895366c410748323f5",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json"
+    },
+    {
+      "path": "plugin/manifest.json",
+      "sha256": "1c77986e2f45122502abc91efa5926ddfdc1311896ebf6c0aa54953ca5112043",
+      "claim": "RC.11 manifest version and entry point are pinned; prior manifest identity remains in the previous hash.",
+      "previouslyPinnedSha256": "392ffd2ebdecf586c5b919a07e11b685170b0fba5a6feff0034e5955a9565491",
+      "changeAssessment": "v11 trust/onboarding integration source identity refresh; previous v10 hash retained in previouslyPinnedSha256.",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json"
+    },
+    {
+      "path": "src/runtime/adaptive-goal-knowledge-store.js",
+      "sha256": "53eeb6698d304908f157baaa3eb47fd42d980a69afbf7fa81a7be330af11069d",
+      "claim": "Snapshot reconstruction validates current node and every immutable revision, node identity/content hash, membership provenance, edge identity/contract, and canonical evidence refs.",
+      "previouslyPinnedSha256": "de9911868d54101eaff2818d76f13b2adbfebcf8861a16611489b6b69312ba65",
+      "changeAssessment": "v11 trust/onboarding integration source identity refresh; previous v10 hash retained in previouslyPinnedSha256."
+    },
+    {
+      "path": "src/runtime/adaptive-goal-knowledge-verifier.js",
+      "sha256": "e03881f1fc41458c0380307959faf0cfeaa18d73e252e655a81b58fe327777d7",
+      "claim": "RC.11 trust-boundary integration source pin.",
+      "previouslyPinnedSha256": "12c080d673115331ffd3d6c2af195cab8004083da0c7090cf8ae3576c67b089f",
+      "changeAssessment": "Strict signature canonicalization rejects ambiguous in-process JSON values before reading fields; attestation ingestion reconstructs and verifies the inert canonical JSON snapshot rather than caller-owned mutable object.",
+      "previouslyPinnedBeforeV26Sha256": "d5ed625096aa1af8dd32de1f1bf6db227c2a444b988fc8dc366b4e95c39823db"
+    },
+    {
+      "path": "src/runtime/adaptive-goal-plan-adapter.js",
+      "sha256": "79ee60654a624d5724627c456cb36a9a81297f6f6256b803ecc12f258de1aba5",
+      "claim": "RC.11 trust-boundary integration source pin.",
+      "previouslyPinnedSha256": "818d098ac6c0a6d790a8ef64e6cbc061fa0949e06107ff66d5c97ed51b4af68e",
+      "previouslyPinnedBeforeProjectionBindingSha256": "ec02cda2531a5ab1dd9b5bdfb62b5b5422e771784adc801d9c29826a805edec7",
+      "changeAssessment": "v29: authenticated Plan Graph drafts are recursively frozen; in-process authentication binds the original draft hash and exact source snapshot/attestation/evidence-manifest identity, and rechecks freshness without allowing caller mutation to replace the trusted object.",
+      "previouslyPinnedBeforeV29Sha256": "734175ebfea27aa75462fe24dd317068b306758c9ab751e63e07ab36b9dc8542",
+      "previouslyRecordedChangeAssessmentBeforeV29": "Binds projected task labels to the exact authenticated Goal/Idea snapshot in addition to IDs/types, evidence refs and edges; this is a source identity refresh and projection-integrity check, not a trust-root or claim-truth assertion. Historical fixture pins unchanged."
+    },
+    {
+      "path": "src/runtime/adaptive-goal-compatibility.js",
+      "sha256": "4d0eb5882066c7e89e640ed16edf9001f605f30044b921d7f53c56edd8725485",
+      "claim": "Compatibility validates either the exact unverified shadow envelope or the complete source-attestation metadata schema."
+    },
+    {
+      "path": "src/runtime/adaptive-goal-execution-graph-proposal.js",
+      "sha256": "0bef10299180a425a248a544a2a4d6ba81e85ebebab716bea64b5b7c8d5f24cb",
+      "claim": "RC.11 trust-boundary integration source pin. Successor v35 updates this exact source pin; prior fixture retains the previous hash. v35 final source pin refreshed after canonicalization validation and adversarial getter non-execution regression.",
+      "previouslyPinnedSha256": "33fc49804f14910286c406a30afdd1cd7182cbe5879cbabf7a902c1a2daefd78",
+      "changeAssessment": "Refreshes source identity in the v34 successor for the reviewed Execution Graph proposal integrity checks and acceptance-chain updates; this is a source identity pin, not an attestation of claim truth.",
+      "previouslyPinnedBeforeV29Sha256": "a3cea2cd1deca92ea490ffaeaf8695e27948a6690033eece81773fb046f5d6ee",
+      "previouslyRecordedChangeAssessmentBeforeV29": "Successor-only source identity; historical fixture pins unchanged."
+    },
+    {
+      "path": "src/runtime/adaptive-goal-reviewed-task-inputs.js",
+      "sha256": "df0bc254f46c46c5668c6a1c091be1015ff57d69a9896cccaa0775a66df473f4",
+      "claim": "Reviewed task inputs validate source graph status alongside typed artifacts, exact DAG ancestry, action semantics, and separate trusted reviewer authorization."
+    },
+    {
+      "path": "src/runtime/adaptive-goal-execution-plan-candidate.js",
+      "sha256": "854dae21b9b2c0d0aa85156b54e3590c12ac2f65fb8f8974725fa93f2df39fe2",
+      "claim": "Execution-plan candidate keeps its own action semantics separate from source graph attestation and requires exact trusted source plus reviewer identity before executable transitions."
+    },
+    {
+      "path": "tests/test-adaptive-goal-current-scope-producer-e2e.mjs",
+      "sha256": "64d0b1f7faeb58643a9eb5c6642637861120a0369c0aead30360550b5fb20b6a",
+      "previouslyPinnedSha256": "23dd0b42862d9287a8df6eb36a418bf1b51a2069ea5d9d86d9560674395f78e0",
+      "claim": "Isolated MCP acceptance produces nine typed artifacts, persists and externally signs the current Goal/Idea snapshot, then rechecks Plan/Execution Graph and dispatch durability through a separately opened SQLite connection; empty source refs yield one explicit STEP_EVIDENCE_MISSING blocker per step.",
+      "changeAssessment": "v29: isolated End-to-End regression mutates the Goal/Idea snapshot after approval and proves dispatch fails without creating a coordinator task; exact original event bytes are restored before the positive-path dispatch.",
+      "previouslyPinnedBeforeV29Sha256": "ef397fb07f23774b5c6272577f2ac1d7203330a2f0a02ce0c214818a21fb161e",
+      "previouslyRecordedChangeAssessmentBeforeV29": "Adds a negative nine-step readiness case proving missing evidence cannot be inferred or synthesized; only the current successor fixture pin is refreshed."
+    },
+    {
+      "path": "tests/test-adaptive-goal-knowledge-verifier.mjs",
+      "sha256": "82b6a6390a6cc05c1fd61b18530abca45ef611b94fd098fd7b5f0021b4a8d881",
+      "claim": "Source-verifier tests exercise current graph/evidence manifests, canonical trust-root fingerprints, JSON key rotation/revocation, signature/hash/replay denial and transactional persistence.",
+      "previouslyPinnedSha256": "c9f040b401451fb39429c9e0f6a074e1e0c991bc39b3453f4ec78b9c0af9b97e",
+      "changeAssessment": "Adds canonicalizer negative tests plus attestation-ingestion accessor test proving no getter execution or durable write.",
+      "previouslyPinnedBeforeV11Sha256": "339500aa3e6f78ed7bcd5a8f35ac1cb3b269da73a68af5be515abccbe601eb1a",
+      "previouslyPinnedBeforeV26Sha256": "aa542751177dbcd933e209d81d4104e33c081ecd19cfd1b5446a13b37e28b82e",
+      "previouslyPinnedBeforeV29Sha256": "b0342e2a285fa0f58000a5a90cd508e21ad5926c8052167e5496ccb958cdb5a2",
+      "previouslyRecordedChangeAssessmentBeforeV29": "Regression proves report and nested snapshot are deeply immutable, caller mutation of expiry/content/hash throws, and authenticated object identity no longer authorizes an expired report."
+    },
+    {
+      "path": "tests/test-adaptive-goal-benchmark.mjs",
+      "sha256": "58dc30f4c5ace6e6f62535ea7591459c22383a2eb6775d091b13b2bc029974b7",
+      "claim": "Benchmark provenance tests pin current source identity and keep historical fixture hashes immutable. Successor v35 updates this exact source pin; prior fixture retains the previous hash.",
+      "previouslyPinnedSha256": "fb0ed69afaaca3b9fa89ee5dcd22d3bff1fce68c69716c31fc71b649a6f693fb",
+      "changeAssessment": "v37 reviewed source identity refresh: tests/test-adaptive-goal-benchmark.mjs changed as part of release-critical source provenance completeness and regression coverage; prior v36 pin retained in previouslyPinnedBeforeV37Sha256.",
+      "previouslyPinnedBeforeV12Sha256": "4fb54e5c00cba81d48ba8978e9053feeec90ebf7e495e8ee14d6103955089ea6",
+      "previouslyPinnedBeforeV13Sha256": "a81ebb4c4e8a7eb93f3522d2af325578168a702d070de82a64d48e7e2e7abb3e",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json",
+      "previouslyPinnedBeforeV24Sha256": "14006b01b39494966e3e0583b04e3e98b62e1b2e564eb2c56a97ed01d70bec6f",
+      "previouslyPinnedBeforeV25Sha256": "c71f1847a31749ca76518cc7e2632e507b49b5d0fbac18faf7bb972cc5c863e2",
+      "previouslyPinnedBeforeV26Sha256": "9079ee0087284e6e0feb3560243dd7ae8114cae082208002823961b9582ae19d",
+      "previouslyPinnedBeforeV29Sha256": "494e134601d6f26d8cf8e80291743b0bbd4bd835cc2510a45b4594610d61c7ab",
+      "previouslyRecordedChangeAssessmentBeforeV29": "v28 selects the archive-lineage classification successor while explicitly retaining v27 as immutable historical fixture.",
+      "previouslyPinnedWhenV29FixtureCreatedSha256": "f62d9796183f7bba58dd901c3f0126d9bfa50edae546d96a6a53d36ae5b617cf",
+      "previouslyPinnedBeforeV30Sha256": "dee8ec97eb223d3cc981e172501cafc76c514e3b76991fb3b1829ea0c0c2490c",
+      "previouslyRecordedChangeAssessmentBeforeV30": "v29 harness now copies its explicitly selected active successor fixture into isolated temporary workspaces; the v28 file digest remains frozen and asserted separately.",
+      "previouslyPinnedBeforeV37Sha256": "ea078b59bfa7d4941af84307bf6efeb4a26324f154816b1feae4f22c1504ce08"
+    },
+    {
+      "path": "scripts/collect-plugin-runtime.mjs",
+      "sha256": "9e97a5650b5e5087eaa7ddbfbd8067044d886b8463a002d1333d7491e233fe63",
+      "claim": "Package collector includes the dynamic-import-only external Goal/Idea snapshot verifier in the extracted runtime dependency closure."
+    },
+    {
+      "path": "scripts/package-runalith-mcpb.sh",
+      "sha256": "52b724d9257927877978c1b759bc19c54a79be94f16d1f9e6df1d8432799447d",
+      "claim": "Successor v19 pins the exact reviewed source bytes for scripts/package-runalith-mcpb.sh; prior v18 pin retained as previouslyPinnedSha256.",
+      "previouslyPinnedSha256": "ba68f794907d9ef1aded3579d0ccfbb87e881d762a47039e557263dc20f29bbb",
+      "changeAssessment": "v13 fixes the deterministic ZIP file list to include the already-copied read-only reconciliation CLI; v12 package-script hash preserved in previouslyPinnedSha256, earlier source identities retained.",
+      "previouslyPinnedBeforeV12Sha256": "0ce19399cd6536263b71a9daf959b37924cf71f0c79e57b0702d220e22f03cfc",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1545+0700.json"
+    },
+    {
+      "path": "src/runtime/adaptive-goal-trust-configuration.js",
+      "sha256": "c51de43b1cafc9d22704f3580a33aaebf13f79c52f667bafb1c8f2ff5a38fea8",
+      "claim": "Versioned JSON trust config validates Ed25519 roots, exact domain/scope, canonical DER/SPKI fingerprints, key windows/revocation, trust-domain separation, append-only version high-water and rejection audit.",
+      "changeAssessment": "v11 canonical-SPKI trust identity / onboarding regression update; v10 source hash retained in previouslyPinnedSha256. Added to v11 as new source evidence; no historical fixture was edited.",
+      "previouslyPinnedSha256": "d4cf32ea84ac8d8bd26f50c9ca4ba5935e240e45121d9a6a8fd14f67241a84c5"
+    },
+    {
+      "path": "tests/test-adaptive-goal-trust-configuration.mjs",
+      "sha256": "eca5266abfea7debe46266f41dae55c0b7b929fae2cf7c72edf9cf7f3fbeaff3",
+      "claim": "Trust config tests cover schema, pair validation, canonical SPKI collision, rotation/revocation, validity windows, anti-rollback, transaction boundaries and final/parent symlink denial.",
+      "changeAssessment": "v24 adds a final-component symlink regression for the offline trust-config file reader; v23 and earlier pins remain recorded.",
+      "previouslyPinnedSha256": "c63660bdd801f60e565dd85bfc8a01809a658b98d0b3ebaa8c7cb411c17e7a9e",
+      "previouslyPinnedBeforeV11Sha256": "b20c7a27fa3c69d41a17e6644faa8ee0962e11004340935fe3176391575cf3b9",
+      "previouslyPinnedBeforeV24Sha256": "e567ae994a36c7dd9add03edd23a88e97c9947154ad37b9b1ce93d7648281f7a"
+    },
+    {
+      "path": "tests/test-adaptive-goal-trust-entrypoint.mjs",
+      "sha256": "c1c236e85b1036044aa9cc559ef5ab9b2df47b76a421bfb990adf3e32ed9e72a",
+      "claim": "Entry-point acceptance exercises the selected runtime via MCP tools and SQLite in isolation: valid dual trust config, source attestation and fail-closed signature/scope/staleness/replay/provenance-tamper checks.",
+      "changeAssessment": "v11 canonical-SPKI trust identity / onboarding regression update; v10 source hash retained in previouslyPinnedSha256. Added to v11 as new source evidence; no historical fixture was edited.",
+      "previouslyPinnedSha256": "078f5cef130342bf43842b3d7526301af837726bcd69892df1a8fc90d2f72127"
+    },
+    {
+      "path": "src/runtime/adaptive-goal-reviewer-identity.js",
+      "sha256": "a2b64de0cfd0a56eb8280b61833f273a2db72ae47954166e139961db029938e0",
+      "claim": "RC.10 successor v20 pins the exact reviewed source bytes for src/runtime/adaptive-goal-reviewer-identity.js; the v19 pin is preserved as previouslyPinnedSha256.",
+      "changeAssessment": "Added to v11 as new source evidence; no historical fixture was edited.",
+      "previouslyPinnedSha256": "888d1811f2f8d756fbc76c16b1a1d5b899fdf114785a738fcde1685e3c8f7891",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json"
+    },
+    {
+      "path": "scripts/validate-agg-trust-config.mjs",
+      "sha256": "93a110107e9002539768bef1667b895e553cb9df9fabbbbb839ea68cf912a873",
+      "claim": "Offline trust-config validation reads a canonical regular file through O_NOFOLLOW, checks descriptor/path identity and nanosecond metadata stability, validates exact versioned domain/scope and pair separation, and does not establish host authority.",
+      "changeAssessment": "v24 hardens administrator-supplied trust-config reads against final-symlink and path/inode swap races without mutating the supplied file.",
+      "previouslyPinnedSha256": "ee9ceff503999605f2e5b298edaaaedf1524df23d685510a4d473147eae5840e",
+      "previouslyPinnedBeforeV24Sha256": "5637b2e5068f4b49514599544c0ca03abde3ce21b41354e8ec80d6696548803e"
+    },
+    {
+      "path": "scripts/runalith-rollout.mjs",
+      "sha256": "94415fe653598a4fb14d6b1dc2e18e47d7c2d5a6d14727f3bc5fffe068677efa",
+      "claim": "Read-only host preflight reads whitelisted active-runtime trust environment and denies activation when either independent versioned JSON trust domain is missing or invalid.",
+      "changeAssessment": "v18 source identity refresh after checkpoint-gate hardening; prior digest retained in previouslyPinnedSha256. v16 successor pin includes the RC.8 versioned runtime entry-point discovery fix while retaining both legacy and versioned process discovery; host trust and activation gates remain fail-closed.",
+      "previouslyPinnedSha256": "abb2bf909e2f135434537323094a9e92dedad4c3bf4be949437019d357a2a174"
+    },
+    {
+      "path": "tests/test-runalith-rollout.mjs",
+      "sha256": "ef75869b5af50d22e2826d5c4bdf9def15ae0fcbaf32b0798ad6c9051f5e6974",
+      "claim": "Rollout regression ensures trust remains an independent blocker after jobs/tasks/leases drain and validates legacy plus versioned runtime entry-point discovery.",
+      "changeAssessment": "v18 source identity refresh after checkpoint-gate hardening; prior digest retained in previouslyPinnedSha256. v16 successor pin adds an explicit legacy server/index.js process-discovery assertion alongside the RC.8 versioned entry-point regression; no live host state is mutated.",
+      "previouslyPinnedSha256": "8c73d895be081d976df182035b1dd28bca8aa3b43825520e46a1d4d0d2a38084"
+    },
+    {
+      "path": "tests/test-agg-phase1-evidence-pack-verifier.mjs",
+      "sha256": "7b51f01c3c74f1f91cb7158689636a4964b8770985e879c32624cb80959817ae",
+      "claim": "Isolated frozen evidence-pack fixture includes all current source-alignment build inputs while retaining source-to-bundle verification semantics.",
+      "changeAssessment": "v37 reviewed source identity refresh: tests/test-agg-phase1-evidence-pack-verifier.mjs changed as part of release-critical source provenance completeness and regression coverage; prior v36 pin retained in previouslyPinnedBeforeV37Sha256.",
+      "previouslyPinnedBeforeV12Sha256": "fa31d9f56391b51094f2f7e2d2813deef3e9e99c468c9f767c95660515b8c2e3",
+      "previouslyPinnedBeforeV37Sha256": "53444d9dde5a492a8a86273367d092de258cb0a611bbc49f2e9b73ab981f31b7"
+    },
+    {
+      "path": "docs/adaptive-goal-graph.md",
+      "sha256": "14dc88e9de8b6150ea0c7fdd1d1f9d4196d971fc7817b706c218c36ed544580f",
+      "claim": "Documents canonical SPKI root fingerprints, admin JSON onboarding/rotation/revocation, legacy migration boundary, trust audit ledger, and the distinction between integrity and claim/independence verification.",
+      "changeAssessment": "Documents the paired trust-config CLI semantics and the exact host-managed external monotonic-anchor acceptance contract; no host anchor is fabricated.",
+      "previouslyPinnedSha256": "7b0e2390ca6c1f3ca9d44b04014d3010df8e8c8697cec714667108c0616efd72",
+      "previouslyPinnedBeforeV13Sha256": "a368e0fc925b2e325ef13a1ecce7659218ae3f65eac92d17d9380c52180660c9"
+    },
+    {
+      "path": "docs/runalith-rollout-rc8.md",
+      "sha256": "8107c1fb58650e98bb9c2b4387cee93ea99a757217a23e45d27e89fb2d65f468",
+      "claim": "Documents trust-aware preflight and host-managed onboarding boundary, without claiming host UI environment support is established.",
+      "changeAssessment": "Defines the host-owned external monotonic checkpoint report contract, exact release-hash binding, freshness and explicit limitation that CLI shape validation is not cryptographic verification.",
+      "previouslyPinnedSha256": "a5955d3b0952af7596a2fed3a2d4e4ae388944423d097e7b81b0c3fd2f6334ce",
+      "previouslyPinnedBeforeV12Sha256": "4ba3263bb8d887bd8b72ba3718f2d1bf031e76c91cfc19df20e7f5d843b6d566"
+    },
+    {
+      "path": "tests/test-adaptive-goal-reviewer-identity.js",
+      "sha256": "0a7621e8756726b1d1cc394e86af3aaa9ce2667c24e6e6932f6273030b2ccb5b",
+      "claim": "RC.10 successor v20 pins the exact reviewed source bytes for tests/test-adaptive-goal-reviewer-identity.js; the v19 pin is preserved as previouslyPinnedSha256.",
+      "changeAssessment": "Included in v11 to bind the hardened trust contract and its current regression coverage.",
+      "previouslyPinnedSha256": "cf69cf297d82cc70d5661dd72ced32a1d79659545ddc9f0cba3798ed9f5a61c8",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json"
+    },
+    {
+      "path": "scripts/reconcile-active-workflows.mjs",
+      "sha256": "0537ef4bf8ecac886d482e62afdb0582b1b8a4b8114a0936c6eb8e2252094449",
+      "claim": "Read-only SQLite reconciliation inventories Goal/Idea, planner evidence, and proposal records; Plan Graph readiness diagnostics count missing supporting evidence per step and distinguish missing authenticated snapshot binding from structural fingerprint integrity.",
+      "changeAssessment": "v27 source identity refresh for active/executing workflow selection completeness and explicit report truncation detection; historical pins preserved.",
+      "previouslyPinnedSha256": "8fd63150466c400f808a7f8e850dcef4d07ac774c93381dd1804292827f41d40",
+      "previouslyPinnedBeforeV25Sha256": "ba7d120937d5b039542b40d7ddd6e370480b274c137fd08bba6caa74a51db472",
+      "previouslyPinnedAfterInitialV25Sha256": "3752be684eda5c31041b813bf17d4bbb739a000e8281afbb09617f38664ace72"
+    },
+    {
+      "path": "tests/test-reconcile-active-workflows.mjs",
+      "sha256": "58f1804d9c4f009a06f9c7a5aacf690a7553d7989c8b46247b273f556540c925",
+      "claim": "Regression tests cover read-only lifecycle reconciliation, Goal/Idea provenance, durable evidence lineage, proposal fingerprints, and nine-step Plan Graph missing-evidence diagnostics.",
+      "changeAssessment": "v27 source identity refresh for active/executing workflow selection completeness and explicit report truncation detection; historical pins preserved.",
+      "previouslyPinnedSha256": "d965607c2e13c43fd0c40ecbebb77045efe28c56659ad605854291c64e44df41",
+      "previouslyPinnedBeforeV13Sha256": "097338f5545edb04651d6824fad07a31065fee148d85774be5094cef7810988b",
+      "previouslyPinnedBeforeV25Sha256": "f9a5ba68a488609fa0e15362c8b9d9bbf1b776e7e0e0ea5de9dc89b166da2686",
+      "previouslyPinnedAfterInitialV25Sha256": "8f520944e2653433716f63d4aac14db63aa38cba1f7faf8c4164e3f9d2aa6323"
+    },
+    {
+      "path": "scripts/verify-mcpb-source-alignment.mjs",
+      "sha256": "f42bdd08f5be4f66e396925c1aa4748a8e6a9586076c3decec9f3eaae0721600",
+      "claim": "Source alignment reports exact archive-entry byte identity separately from clean/dirty/unavailable Git provenance, rechecks that the named bundle path still contains the captured bytes at completion, and always blocks release eligibility without an authenticated build receipt and independent authority.",
+      "changeAssessment": "v37 reviewed source identity refresh: scripts/verify-mcpb-source-alignment.mjs changed as part of release-critical source provenance completeness and regression coverage; prior v36 pin retained in previouslyPinnedBeforeV37Sha256.",
+      "previouslyPinnedBeforeV24Sha256": "666d9ea45e17765a6739b51c57a868c2e49f2ff1bed187856a746040280ae457",
+      "previouslyPinnedBeforeV37Sha256": "9569632540f62c609d49c20dee3932acaeb1cdcfc0db271f870cf3d678065c16"
+    },
+    {
+      "path": "tests/test-mcpb-source-alignment.mjs",
+      "sha256": "faee86c44ac80edfca55cb033c4415b6c4b6f13d8d23f43f9c247966e9561eb8",
+      "claim": "Source alignment tests prove clean and dirty-but-byte-aligned trees are distinct from authenticated build provenance and release eligibility, verify final bundle-path byte identity, and reject stale source bytes, symlink entries, unsafe ZIP ambiguity and report overwrite.",
+      "changeAssessment": "v37 reviewed source identity refresh: tests/test-mcpb-source-alignment.mjs changed as part of release-critical source provenance completeness and regression coverage; prior v36 pin retained in previouslyPinnedBeforeV37Sha256.",
+      "previouslyPinnedBeforeV24Sha256": "d00a56b45e3b683d7a73e2b8ec772d1f104cc4109d52dd16c927fa2a1bbfe351",
+      "previouslyPinnedBeforeV37Sha256": "df367a713ba6d70180bf6402e1cfe8024a98dade0db48dcdd13b60305ca48a21"
+    },
+    {
+      "path": "server/index-v1.0.9-rc.9.js",
+      "sha256": "0d50fd4760fd2b6374980cc375e054562cc5b6d3f68895492b8497bb1e190e8b",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json",
+      "claim": "Versioned runtime identity server/index-v1.0.9-rc.9.js is pinned as a source identity for this successor; it is not proof of installation or production behavior."
+    },
+    {
+      "path": "server/index-v1.0.9-rc.10.js",
+      "sha256": "0d50fd4760fd2b6374980cc375e054562cc5b6d3f68895492b8497bb1e190e8b",
+      "historicalSnapshotPath": "artifacts/adaptive-goal-graph/acceptance-dossier-20261026T1615+0700-rc9.json",
+      "claim": "Versioned runtime identity server/index-v1.0.9-rc.10.js is pinned as a source identity for this successor; it is not proof of installation or production behavior."
+    },
+    {
+      "path": "tests/test-adaptive-goal-graph.js",
+      "sha256": "5a191fb5b91da8298f351b22792da63d3b8458e7d6b473cebb897acab625bb33",
+      "previouslyPinnedSha256": "a6d6f8895310a60e9106517754daacf8fe29841dcae8ed6d43122cc2ed692fc2",
+      "claim": "Adversarial tests bind signed Goal/Idea snapshot labels and evidence refs to the Plan Graph projection.",
+      "changeAssessment": "Adds label/evidence/edge substitution regressions for the authenticated snapshot projection; historical v22/v23 fixture pins remain unchanged."
+    },
+    {
+      "path": "tests/test-adaptive-goal-execution-graph-proposal.js",
+      "sha256": "517d476f16cba00d9f0bc72b5f270277396b1ee32495c0898075ad63d9469c5e",
+      "claim": "RC.11 trust-boundary integration source pin. Successor v35 updates this exact source pin; prior fixture retains the previous hash. v35 final source pin refreshed after canonicalization validation and adversarial getter non-execution regression.",
+      "changeAssessment": "Refreshes source identity in the v34 successor for the reviewed Execution Graph proposal integrity checks and acceptance-chain updates; this is a source identity pin, not an attestation of claim truth.",
+      "previouslyPinnedBeforeV29Sha256": "29c60b55651875d035fba4d751414d6208477900bb639b71bd1f3678d1326f40",
+      "previouslyRecordedChangeAssessmentBeforeV29": "Successor-only source identity; historical fixture pins unchanged.",
+      "previouslyPinnedSha256": "52bdb98347cfe8934c5bd454aa281d9f73c26d74661288b89233c8d50c5c9625"
+    },
+    {
+      "path": "server/index-v1.0.9-rc.11.js",
+      "sha256": "ae4f2c170bdc639cd6e58662011755f75fd57ca0b9d931fab957b74bf4db44f9",
+      "claim": "RC.11 trust-boundary integration source pin.",
+      "changeAssessment": "v29: wires host-owned pre-approval and pre-dispatch revalidation guards into WorkflowStore transition boundaries; production remains blocked on host provisioning/checkpoint/owner evidence.",
+      "previouslyPinnedBeforeV29Sha256": "71605082030b3ec4ea2449e64808d344d9553a05084563426f4eff365fdfdb17",
+      "previouslyRecordedChangeAssessmentBeforeV29": "Successor-only source identity; historical fixture pins unchanged."
+    },
+    {
+      "path": "benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v22.json",
+      "sha256": "c373e1e658b321f51817b906c021009bf087c4d28ecc9d96e93f3bf3ddbb87c1",
+      "claim": "Historical v22 fixture preserved byte-for-byte; its source mismatch is documented rather than silently rewritten."
+    },
+    {
+      "path": "benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v23.json",
+      "sha256": "9854e452e784dca8fcc6a2cf444832f400ff994a1afc43e37e72a4da70019588",
+      "claim": "Prior v23 benchmark fixture is preserved byte-for-byte and explicitly superseded by this source-pin successor.",
+      "changeAssessment": "Historical fixture identity pin; not an operational authorization."
+    },
+    {
+      "path": "scripts/diagnose-phase2-archive-lineage.mjs",
+      "sha256": "50b11f2be49abacd224a69717b8eace1ab254659f1c42c706eb53f42abb43e57",
+      "previouslyPinnedSha256": "3f5084f1d05649bb12fba467d95cdb8ad5bb9a2672090d1cc3e670bf097cfdfb",
+      "claim": "Read-only archive lineage diagnostics compare packaged bytes against current source and explicit Git commits, record archive SHA-256/Git blob identity, reachable-commit and all-Git-tree matches plus local object-database presence for historical mismatches, state when no single commit matches every source entry, and list missing independent evidence without changing the frozen 71-path contract.",
+      "changeAssessment": "v28 distinguishes historical README drift from mixed/unreachable source lineage and unattributed payload bytes; historical archive hashes and the 71-path contract remain unchanged."
+    },
+    {
+      "path": "tests/test-phase2-inventory-diagnostic-contract.mjs",
+      "sha256": "8bacf41a38e32b48e9b5501d016c054cb61c069be4d66366c1a3a16bf3c8e776",
+      "previouslyPinnedSha256": "74033c3977356ef5974cfa4094ddab090b2be7dde4928e80c7022aab0e443218",
+      "claim": "Frozen Phase-2 inventory and historical RC.11 source-commit lineage regression checks, including exact archived file hashes, Git blob IDs, local object presence and reachable-commit counts for source files absent from reachable commit trees.",
+      "changeAssessment": "v28 regression pins the exact hashes, entry counts, README bytes and mixed-lineage classification of all eight immutable historical candidates."
+    },
+    {
+      "path": "scripts/lib/external-trust-checkpoint-contract.mjs",
+      "sha256": "fe3f309b05eb677ef3c5e3919e45bb13b503e8da36fa50ad8ed91680e6739bc2",
+      "claim": "Canonical checkpoint schema/digest/Ed25519/nonce/release binding/continuity verification with fail-closed bounded freshness settings and no production-authority claim.",
+      "changeAssessment": "v24 bounds caller-supplied clock/age options and exposes explicit unauthenticated continuity/key-provisioning boundaries."
+    },
+    {
+      "path": "tests/test-external-trust-checkpoint-contract.mjs",
+      "sha256": "ca2c1ef1a3824d4ffbb419a71c009656958ef1d68f1671cb1a4c4a4c956b0ae8",
+      "claim": "Checkpoint contract adversarial tests for signature, scope/release binding, digest mismatch, replay, chain continuity, anti-rollback and caller-controlled freshness settings.",
+      "changeAssessment": "v24 adds invalid clock and excessive age-window rejection regressions."
+    },
+    {
+      "path": "benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v27.json",
+      "sha256": "8e873b80cfc5fce6336328f9e890591b7c29d19411ca83b3e5a54578374c7e60",
+      "claim": "Historical v27 source-provenance fixture preserved byte-for-byte as the prior successor.",
+      "changeAssessment": "v28 supersedes the v27 fixture without rewriting its historical identity."
+    },
+    {
+      "path": "benchmarks/plugin-workflow-benchmark/test-create-phase2-candidate-inventory.mjs",
+      "sha256": "ee47dccc54ed139afddc89c3c23b0c604f79cabf4dbb66fddb36f4dfe6df6bbe",
+      "claim": "The frozen 71-path inventory regression enriches historical archive lineage failures with independent forensic classification without relaxing exact source-byte matching or accepting stale candidates.",
+      "changeAssessment": "v28 integrates the read-only archive lineage report into the no-source-match failure diagnostics; historical archive hashes and inventory contract remain unchanged."
+    },
+    {
+      "path": "benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v28.json",
+      "sha256": "565eaec74b65d526dd1f7eda8087f13ea28e9a57c3a45d199a44dafad7606ba7",
+      "claim": "The v28 source-lineage benchmark remains an immutable historical record; the v29 successor does not edit its bytes or historical hashes.",
+      "changeAssessment": "Added as a byte-level historical-identity pin from the v29 successor. This is a new compatibility assertion, not an alteration of the v28 fixture."
+    },
+    {
+      "path": "src/runtime/job-store.js",
+      "sha256": "c365a27d67a6af7d2ef0b11dfa825337f3eb237c00fbd3fdfdf15845a09b9d68",
+      "claim": "v29: direct approve and dispatch state transitions revalidate an AGG execution guard inside the writer transaction and fail closed if the host guard is absent.",
+      "changeAssessment": "New v29 exact source identity pin. Older fixtures are preserved; the source hash is established only after its corresponding focused regression is run."
+    },
+    {
+      "path": "tests/test-reconcile-active-workflows-v2.mjs",
+      "sha256": "eb4f88422ae983700a94271a80b891713015bd2c5a3b8b5474c896082408495c",
+      "claim": "v29: read-only lifecycle diagnostics test missing/cross-job task parents/dependencies and dependency cycles without authorizing automatic lifecycle action.",
+      "changeAssessment": "v31 reviewed source pin refresh: tests/test-reconcile-active-workflows-v2.mjs participates in the dependency validation, reconciliation, or acceptance integration; immutable historical fixtures are preserved.",
+      "previouslyPinnedBeforeV30Sha256": "d950174d109b8c0b1b4fd833f305c3bf1d843d2962c57cb698e6cda89eaa5b3d",
+      "previouslyRecordedChangeAssessmentBeforeV30": "New v29 exact source identity pin. Older fixtures are preserved; the source hash is established only after its corresponding focused regression is run."
+    },
+    {
+      "path": "benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v29.json",
+      "sha256": "fce8c2346bfc5f2c057ac70509ca43c0cc6c68f0dfab55507ac3c23b8756b69d",
+      "claim": "The prior v29 fixture is pinned as historical evidence; the v30 successor does not mutate it.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": "scripts/lib/hosted-builder-attestation.mjs",
+      "sha256": "d8bc255b30437035616677ac8428b741f8288c153f5bbc4fb839a418c8e7b187",
+      "claim": "v30 pins the hosted builder-verification contract including independent verification of API and downloaded Sigstore bundle output.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": "scripts/lib/hosted-verification-predicate.mjs",
+      "sha256": "e2bada0f3597c9db001f9e3a62d49fbf04aa992e875316aa466e944c5cfaa613",
+      "claim": "v30 pins the strict verifier predicate which binds source/policy/candidate/inventory and raw evidence report digests.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": "scripts/verify-hosted-builder-provenance.mjs",
+      "sha256": "00e0da53878cea0cb7b18d2588301f18306ec7010c7d403842837dec627ede88",
+      "claim": "v30 pins the CLI that runs gh attestation verification with exact repo/workflow/source/issuer constraints.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": "scripts/create-hosted-candidate-verification-predicate.mjs",
+      "sha256": "9148fadd624e941f5ea73613d708ab9feffecada78b5a08d1b5970785f710679",
+      "claim": "v30 pins the stable descriptor-read CLI that emits the candidate verification predicate from exact evidence bytes.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": "scripts/runalith-hosted-build-policy.json",
+      "sha256": "86a16eba1acf77a4966fc18ab45d450638f474faa0060d2964df2915741e843e",
+      "claim": "v30 pins non-production-only hosted build policy and its fixed required-test/authority flags.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": ".github/workflows/runalith-provenance-builder.yml",
+      "sha256": "7b2193aa592500e2c2af760bded0241a4654ebff9707e47185efdff832efe3eb",
+      "claim": "v30 pins the low privilege builder job and opaque-byte attestation job workflow.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": ".github/workflows/runalith-provenance-verifier.yml",
+      "sha256": "03dc0b458cf58ef89804e448d97e1dc1cbc5685d8a507782deee67cb704876b4",
+      "claim": "v30 pins independent test/rebuild/provenance verification workflow source.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": ".github/workflows/runalith-verification-attestation-signer.yml",
+      "sha256": "c5805a1e592bee333292d5b2bee4fa138d8e4907fa7bc2b0f56744c164ddf5ad",
+      "claim": "v30 pins the separate verifier-attestation signing workflow which does not execute candidate code.",
+      "changeAssessment": "New v30 exact byte identity pin; this is a source integrity contract, not a signed production provenance claim."
+    },
+    {
+      "path": "scripts/reconcile-active-workflows-v2.mjs",
+      "sha256": "2a24a1f1e7e1fff7180394f6c2f0c8d507cd84434781fd612e88a6416beb4bb5",
+      "changeAssessment": "v31 reviewed source pin refresh: scripts/reconcile-active-workflows-v2.mjs participates in the dependency validation, reconciliation, or acceptance integration; immutable historical fixtures are preserved.",
+      "claim": "Hash-bound immutable workflow-plan dependency IDs are compared with the exact task dependency_json materialization; missing and unexpected edges are surfaced without lifecycle authorization."
+    }
+  ],
+  "groundTruth": {
+    "requiredEvidence": [
+      "verifier-implementation",
+      "regression-expectations"
+    ],
+    "validGoalPaths": [
+      [
+        "start",
+        "inspect-verifier",
+        "inspect-regression",
+        "infeasible-combined-check",
+        "cross-check-invariants",
+        "report-investigation"
+      ],
+      [
+        "start",
+        "inspect-verifier",
+        "recovery-probe",
+        "recovery-outcome-confirmed",
+        "inspect-regression",
+        "infeasible-combined-check",
+        "cross-check-invariants",
+        "report-investigation"
+      ]
+    ],
+    "recoveryOutcomeGate": {
+      "edge": {
+        "from": "recovery-probe",
+        "to": "recovery-outcome-confirmed",
+        "type": "recovers_to"
+      },
+      "requiredOutcome": "verification_failed",
+      "note": "The recovery edge is conditional on a verification_failed outcome. Current AGG records the condition and defers recovers_to edges from nominal-success search."
+    },
+    "qualityRubric": {
+      "goalReached": 2,
+      "validGroundTruthPath": 3,
+      "requiredEvidenceCoveragePerItem": 2,
+      "infeasiblePrerequisiteAvoided": 1,
+      "unsupportedLiveCauseClaimAvoided": 1,
+      "maxScore": 11
+    }
+  },
+  "tasks": [
+    {
+      "id": "task-verify-consistency",
+      "startNodeId": "start",
+      "goalNodeId": "report-investigation",
+      "recoveryOutcome": "unknown",
+      "requiredEvidence": [
+        "verifier-implementation",
+        "regression-expectations"
+      ],
+      "claimPolicy": "report static invariants and regression expectations; do not infer a live cause",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "goal",
+          "label": "Investigate recovery verifier",
+          "estimatedCost": 0,
+          "estimatedRisk": 0,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0.2,
+          "informationValue": 0
+        },
+        {
+          "id": "inspect-verifier",
+          "type": "task",
+          "label": "Inspect recovery verifier implementation",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.98,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "verifier-implementation"
+          ]
+        },
+        {
+          "id": "inspect-regression",
+          "type": "task",
+          "label": "Inspect regression expectations",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "regression-expectations"
+          ]
+        },
+        {
+          "id": "shortcut-guess",
+          "type": "idea",
+          "label": "Guess a live root cause without runtime evidence",
+          "estimatedCost": 0.1,
+          "estimatedRisk": 0.9,
+          "estimatedSuccessConfidence": 0.99,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "blocked-check",
+          "type": "experiment",
+          "label": "Check requiring unavailable recovery outcome",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.8,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "infeasible-combined-check",
+          "type": "experiment",
+          "label": "Cross-check both evidence sources",
+          "estimatedCost": 0.5,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.95,
+          "reusePotential": 0.7,
+          "informationValue": 0.9
+        },
+        {
+          "id": "recovery-probe",
+          "type": "experiment",
+          "label": "Attempt a recovery outcome probe",
+          "estimatedCost": 0.7,
+          "estimatedRisk": 0.3,
+          "estimatedSuccessConfidence": 0.8,
+          "reusePotential": 0.2,
+          "informationValue": 0.5
+        },
+        {
+          "id": "recovery-outcome-confirmed",
+          "type": "evidence",
+          "label": "Recovery outcome independently verified",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.9,
+          "reusePotential": 0.2,
+          "informationValue": 0.5,
+          "evidenceRefs": [
+            "recovery-outcome"
+          ]
+        },
+        {
+          "id": "cross-check-invariants",
+          "type": "task",
+          "label": "Cross-check invariants and avoid live-cause claims",
+          "estimatedCost": 0.4,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.94,
+          "reusePotential": 0.9,
+          "informationValue": 0.7
+        },
+        {
+          "id": "report-investigation",
+          "type": "goal",
+          "label": "Report evidence-backed investigation",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.02,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.9,
+          "informationValue": 0.8
+        }
+      ],
+      "edges": [
+        {
+          "from": "start",
+          "to": "inspect-verifier",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "shortcut-guess",
+          "type": "next_step"
+        },
+        {
+          "from": "shortcut-guess",
+          "to": "blocked-check",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "infeasible-combined-check",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-probe",
+          "to": "recovery-outcome-confirmed",
+          "type": "recovers_to",
+          "condition": {
+            "onOutcome": "verification_failed",
+            "requiresEvidenceNodeIds": [],
+            "requiresAllNodeIds": []
+          }
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "cross-check-invariants",
+          "to": "report-investigation",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "blocked-check",
+          "type": "requires_all"
+        }
+      ]
+    },
+    {
+      "id": "task-verify-tamper-regression",
+      "startNodeId": "start",
+      "goalNodeId": "report-investigation",
+      "recoveryOutcome": "verification_failed",
+      "requiredEvidence": [
+        "verifier-implementation",
+        "regression-expectations"
+      ],
+      "claimPolicy": "describe tested tamper detection and restoration behavior without extrapolating to live state",
+      "nodes": [
+        {
+          "id": "start",
+          "type": "goal",
+          "label": "Investigate tamper regression",
+          "estimatedCost": 0,
+          "estimatedRisk": 0,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0.2,
+          "informationValue": 0
+        },
+        {
+          "id": "inspect-verifier",
+          "type": "task",
+          "label": "Inspect recovery verifier implementation",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.98,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "verifier-implementation"
+          ]
+        },
+        {
+          "id": "inspect-regression",
+          "type": "task",
+          "label": "Inspect regression expectations",
+          "estimatedCost": 1,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.8,
+          "informationValue": 0.8,
+          "evidenceRefs": [
+            "regression-expectations"
+          ]
+        },
+        {
+          "id": "shortcut-guess",
+          "type": "idea",
+          "label": "Guess a live root cause without runtime evidence",
+          "estimatedCost": 0.1,
+          "estimatedRisk": 0.9,
+          "estimatedSuccessConfidence": 0.99,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "blocked-check",
+          "type": "experiment",
+          "label": "Check requiring unavailable recovery outcome",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.8,
+          "estimatedSuccessConfidence": 0.7,
+          "reusePotential": 0,
+          "informationValue": 0
+        },
+        {
+          "id": "infeasible-combined-check",
+          "type": "experiment",
+          "label": "Cross-check both evidence sources",
+          "estimatedCost": 0.5,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.95,
+          "reusePotential": 0.7,
+          "informationValue": 0.9
+        },
+        {
+          "id": "recovery-probe",
+          "type": "experiment",
+          "label": "Attempt a recovery outcome probe",
+          "estimatedCost": 0.7,
+          "estimatedRisk": 0.3,
+          "estimatedSuccessConfidence": 0.8,
+          "reusePotential": 0.2,
+          "informationValue": 0.5
+        },
+        {
+          "id": "recovery-outcome-confirmed",
+          "type": "evidence",
+          "label": "Recovery outcome independently verified",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.1,
+          "estimatedSuccessConfidence": 0.9,
+          "reusePotential": 0.2,
+          "informationValue": 0.5,
+          "evidenceRefs": [
+            "recovery-outcome"
+          ]
+        },
+        {
+          "id": "cross-check-invariants",
+          "type": "task",
+          "label": "Cross-check invariants and avoid live-cause claims",
+          "estimatedCost": 0.4,
+          "estimatedRisk": 0.05,
+          "estimatedSuccessConfidence": 0.94,
+          "reusePotential": 0.9,
+          "informationValue": 0.7
+        },
+        {
+          "id": "report-investigation",
+          "type": "goal",
+          "label": "Report evidence-backed investigation",
+          "estimatedCost": 0.2,
+          "estimatedRisk": 0.02,
+          "estimatedSuccessConfidence": 0.96,
+          "reusePotential": 0.9,
+          "informationValue": 0.8
+        }
+      ],
+      "edges": [
+        {
+          "from": "start",
+          "to": "inspect-verifier",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "shortcut-guess",
+          "type": "next_step"
+        },
+        {
+          "from": "shortcut-guess",
+          "to": "blocked-check",
+          "type": "next_step"
+        },
+        {
+          "from": "start",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "recovery-probe",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "next_step"
+        },
+        {
+          "from": "infeasible-combined-check",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-probe",
+          "to": "recovery-outcome-confirmed",
+          "type": "recovers_to",
+          "condition": {
+            "onOutcome": "verification_failed",
+            "requiresEvidenceNodeIds": [],
+            "requiresAllNodeIds": []
+          }
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "cross-check-invariants",
+          "type": "next_step"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "inspect-regression",
+          "type": "next_step"
+        },
+        {
+          "from": "cross-check-invariants",
+          "to": "report-investigation",
+          "type": "next_step"
+        },
+        {
+          "from": "inspect-verifier",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "inspect-regression",
+          "to": "infeasible-combined-check",
+          "type": "requires_all"
+        },
+        {
+          "from": "recovery-outcome-confirmed",
+          "to": "blocked-check",
+          "type": "requires_all"
+        }
+      ]
+    }
+  ],
+  "generatedAt": "2026-10-27T00:00:00.000Z",
+  "releaseNote": "v35 is a source-pin successor for strict JSON canonicalization at the Execution Graph proposal trust boundary. No scoring or acceptance criteria changed.",
+  "migration": {
+    "fromFixtureId": "recovery-verifier-investigation-v33",
+    "priorFixtureSha256": "274f5fc88c4f22e815c0ee1c6742c14b0ced08ef9e7e265336b1d2d54f745c53",
+    "reason": "v33 is preserved byte-for-byte. v34 pins the reviewed Execution Graph proposal structural-verification hardening and negative tests."
+  }
+}

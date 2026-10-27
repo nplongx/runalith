@@ -23,7 +23,11 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Configure Pages
         uses: actions/configure-pages@v6
-      - name: Validate static site
+      - name: Validate documentation and current generated site source
+        run: npm run docs:check
+      - name: Build static site from versioned source inputs
+        run: node scripts/build-static-site.mjs
+      - name: Validate deployment output
         run: npm run site:check
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
@@ -31,6 +35,14 @@ jobs:
           path: site
 
   deploy:
+    # Deliberately fail closed while Runalith's production release gates are
+    # blocked. The build job still verifies the site artifact, but passing
+    # documentation/link checks alone must not publish a release-facing site.
+    # Replace this lock only when host-owned verifier/reviewer authority,
+    # protected external monotonic checkpoint evidence, owner/provider/runtime
+    # reconciliation, frozen Phase-2 lineage, and candidate-specific alignment
+    # are wired as independently verified workflow outputs.
+    if: ${{ false }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

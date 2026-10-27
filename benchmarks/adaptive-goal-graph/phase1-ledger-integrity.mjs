@@ -23,6 +23,7 @@ const SOURCE_MAP = {
   strictJsonSha256: 'src/runtime/strict-json.js'
 };
 const HEX_256 = /^[a-f0-9]{64}$/;
+const PINNED_PHASE1_FREEZE_SHA256 = '4a2ceb6157afd9c299ccfee50695d0d0ddd1630375d49a211d68b53718fcca62';
 
 function sha256(bytes) { return crypto.createHash('sha256').update(bytes).digest('hex'); }
 function jsonBytes(value) { return Buffer.from(JSON.stringify(value)); }
@@ -368,8 +369,35 @@ export function auditPhase1Ledger(raw, {
 
   let actualHashes = {};
   const provenanceMismatches = [];
+  let pinnedProtocolWithoutSourceBytes = false;
   for (const [field, relativePath] of Object.entries(SOURCE_MAP)) {
     if (raw.schemaVersion === 4 && field === 'statisticsSha256') continue;
+    if (field === 'freezeSha256' && raw.provenance?.freezeSourceBytesObserved === false) {
+      // The offline graph benchmark may carry the immutable protocol digest
+      // while the owner-maintained document is intentionally absent from CI.
+      // This is not a source-byte match and must be reported as such; a present
+      // overlay is checked against the pin, while absence is not promoted into
+      // a synthetic current-source hash. Operational Phase-1 scoring remains
+      // strict and requires the actual freeze document bytes.
+      if (raw.provenance.freezeSha256 !== PINNED_PHASE1_FREEZE_SHA256) {
+        fail('frozen Phase-1 protocol digest differs from the immutable pin');
+        continue;
+      }
+      try {
+        const observed = actualSourceSha(root, relativePath);
+        if (observed !== PINNED_PHASE1_FREEZE_SHA256) {
+          fail('present owner-maintained Phase-1 freeze overlay differs from the immutable protocol digest');
+          continue;
+        }
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          fail(`optional owner-maintained Phase-1 freeze overlay is unsafe or unreadable: ${error.message}`);
+          continue;
+        }
+      }
+      pinnedProtocolWithoutSourceBytes = true;
+      continue;
+    }
     let actual;
     try { actual = actualSourceSha(root, relativePath); }
     catch (error) { fail(`source provenance cannot be verified (${relativePath}): ${error.message}`); continue; }
@@ -385,6 +413,9 @@ export function auditPhase1Ledger(raw, {
       sourceVersionStatus = 'SOURCE_HASH_MISMATCH';
       fail(`current source hashes differ from raw ledger: ${provenanceMismatches.map(item => item.field).join(', ')}`);
     }
+  } else if (pinnedProtocolWithoutSourceBytes) {
+    sourceVersionStatus = 'PINNED_PROTOCOL_HASH_WITHOUT_SOURCE_BYTES';
+    warnings.push('frozen Phase-1 digest is pinned, but owner-maintained document bytes were not captured by this offline benchmark; this is not current-source-byte reproduction or operational Phase-1 acceptance');
   } else sourceVersionStatus = 'CURRENT_SOURCE_HASHES_MATCH';
 
   if (raw.schemaVersion >= 5 && !allowHistoricalSource) {

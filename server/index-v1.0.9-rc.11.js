@@ -5540,6 +5540,40 @@ function verifiedAdaptiveGoalExecutionCandidateForTransition(jobId, plan = workf
   return candidate;
 }
 
+// The WorkflowStore owns the BEGIN IMMEDIATE boundary for the actual dispatch
+// transition. Install a host-runtime guard there as well as keeping the MCP
+// handler gate above it: source evidence or reviewer identity may be revoked or
+// mutate between the earlier read-only preflight and this final state change.
+// A bare WorkflowStore (including standalone/test callers) has no authority to
+// dispatch AGG action-intent plans unless this independent verifier is wired.
+workflowStore.setAdaptiveGoalExecutionDispatchGuard((jobId, plan) => {
+  const candidate = verifiedAdaptiveGoalExecutionCandidateForTransition(jobId, plan);
+  return {
+    executionReviewReady: candidate.executionReviewReady === true,
+    candidateHash: candidate.candidateHash,
+    immutablePlanHash: candidate.immutablePlanHash,
+    sourceSnapshotHash: candidate.sourceGraphVerification?.snapshotHash,
+    reviewerAttestationEventId: candidate.reviewerAttestation?.attestationEventId
+  };
+});
+
+workflowStore.setAdaptiveGoalExecutionApprovalGuard((jobId, expectedProposalHash) => {
+  const currentProposal = workflowStore.getCurrentProposal(jobId);
+  if (!currentProposal || currentProposal.proposalHash !== expectedProposalHash) return null;
+  const candidate = readAdaptiveGoalExecutionPlanCandidate(jobId);
+  if (!candidate.found || candidate.status !== 'fresh' || candidate.reviewerIdentityVerified !== true ||
+      candidate.executionReviewReady !== true || candidate.wrapperState !== 'IDLE' ||
+      candidate.immutablePlanPinned === true || !candidate.candidate?.compiler?.compilerPlanHash) return null;
+  return {
+    executionReviewReady: true,
+    proposalHash: currentProposal.proposalHash,
+    candidateHash: candidate.candidateHash,
+    immutablePlanHash: candidate.candidate.compiler.compilerPlanHash,
+    sourceSnapshotHash: candidate.sourceGraphVerification?.snapshotHash,
+    reviewerAttestationEventId: candidate.reviewerAttestation?.attestationEventId
+  };
+});
+
 function readAdaptiveGoalPlanProposal(jobId, { requireApproved = false } = {}) {
   const job = workflowStore.getJob(jobId);
   if (!job) return { found: false, reason: 'workflow_not_found', blockers: [{ code: 'SOURCE_PLAN_PROPOSAL_NOT_FOUND', message: 'source workflow job does not exist' }] };

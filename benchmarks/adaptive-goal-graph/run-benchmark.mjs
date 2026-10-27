@@ -9,7 +9,7 @@ import { createAdaptiveGoalKnowledgeStore } from '../../src/runtime/adaptive-goa
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
-const fixturePath = path.join(here, 'fixtures/recovery-verifier-v22.json');
+let fixturePath = path.join(here, 'fixtures/recovery-verifier-v59.json');
 const MAX_PINNED_SOURCE_BYTES = 2 * 1024 * 1024;
 // Frozen v6 scenario identity and oracle are duplicated as verifier constants
 // so editing the fixture cannot rewrite both the tested graph and its scoring
@@ -32,13 +32,65 @@ const args = process.argv.slice(2);
 let outputPath = null;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--output' && args[i + 1]) outputPath = path.resolve(args[++i]);
+  else if (args[i] === '--fixture' && args[i + 1]) {
+    const requested = args[++i];
+    if (path.isAbsolute(requested) || requested.includes('\\') || !requested.startsWith('fixtures/') ||
+        requested.split('/').some(part => !part || part === '.' || part === '..')) {
+      throw new Error('BENCHMARK_FIXTURE_PATH_UNSAFE');
+    }
+    fixturePath = path.resolve(here, requested);
+    const relative = path.relative(here, fixturePath);
+    if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) throw new Error('BENCHMARK_FIXTURE_PATH_OUT_OF_SCOPE');
+  }
   else if (args[i] === '--help') {
-    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
+    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--fixture fixtures/recovery-verifier-v59.json] [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
     process.exit(0);
   } else throw new Error(`Unknown or incomplete argument: ${args[i]}`);
 }
 
-const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+function readFixtureBytes(filePath) {
+  const fixturesRoot = fs.realpathSync(path.join(here, 'fixtures'));
+  const absolute = path.resolve(filePath);
+  const relative = path.relative(fixturesRoot, absolute);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    provenanceError('BENCHMARK_FIXTURE_PATH_OUT_OF_SCOPE');
+  }
+  let cursor = fixturesRoot;
+  for (const part of relative.split(path.sep)) {
+    cursor = path.join(cursor, part);
+    let stat;
+    try { stat = fs.lstatSync(cursor, { bigint: true }); }
+    catch { provenanceError('BENCHMARK_FIXTURE_MISSING'); }
+    if (stat.isSymbolicLink()) provenanceError('BENCHMARK_FIXTURE_SYMLINK');
+    if (cursor !== absolute && !stat.isDirectory()) provenanceError('BENCHMARK_FIXTURE_PATH_NOT_DIRECTORY');
+    if (cursor === absolute && !stat.isFile()) provenanceError('BENCHMARK_FIXTURE_NOT_REGULAR_FILE');
+  }
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  let fd;
+  try { fd = fs.openSync(absolute, flags); } catch { provenanceError('BENCHMARK_FIXTURE_OPEN_FAILED'); }
+  try {
+    const before = fs.fstatSync(fd, { bigint: true });
+    if (!before.isFile() || before.size < 1n || before.size > 8n * 1024n * 1024n) provenanceError('BENCHMARK_FIXTURE_SIZE_INVALID');
+    const bytes = Buffer.alloc(Number(before.size) + 1);
+    let total = 0;
+    while (total < bytes.length) {
+      const count = fs.readSync(fd, bytes, total, bytes.length - total, total);
+      if (count === 0) break;
+      total += count;
+    }
+    const after = fs.fstatSync(fd, { bigint: true });
+    const pathAfter = fs.lstatSync(absolute, { bigint: true });
+    if (total !== Number(before.size) || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size ||
+        before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs || pathAfter.isSymbolicLink() ||
+        pathAfter.dev !== before.dev || pathAfter.ino !== before.ino || pathAfter.size !== before.size ||
+        pathAfter.mtimeNs !== before.mtimeNs || pathAfter.ctimeNs !== before.ctimeNs || fs.realpathSync(absolute) !== absolute) {
+      provenanceError('BENCHMARK_FIXTURE_CHANGED_DURING_READ');
+    }
+    return bytes.subarray(0, total);
+  } finally { fs.closeSync(fd); }
+}
+
+const fixture = JSON.parse(readFixtureBytes(fixturePath).toString('utf8'));
 
 function provenanceError(code, detail = '') {
   throw new Error(`${code}${detail ? `: ${detail}` : ''}`);
@@ -179,7 +231,19 @@ function pathValidity(pathIds, task) {
 // over source files are not a substitute for binding a scenario result to its
 // declared graph, evidence requirements, and ground-truth oracle.
 function validateFixtureContract() {
-  if (!fixture || fixture.schemaVersion !== 22 || fixture.fixtureId !== 'recovery-verifier-investigation-v22' ||
+  const supportedFixtureIdentity = fixture?.schemaVersion === 47 && fixture?.fixtureId === 'recovery-verifier-investigation-v47' ||
+    fixture?.schemaVersion === 48 && fixture?.fixtureId === 'recovery-verifier-investigation-v48' ||
+    fixture?.schemaVersion === 49 && fixture?.fixtureId === 'recovery-verifier-investigation-v49' ||
+    fixture?.schemaVersion === 50 && fixture?.fixtureId === 'recovery-verifier-investigation-v50' ||
+    fixture?.schemaVersion === 51 && fixture?.fixtureId === 'recovery-verifier-investigation-v51' ||
+    fixture?.schemaVersion === 53 && fixture?.fixtureId === 'recovery-verifier-investigation-v53' ||
+    fixture?.schemaVersion === 54 && fixture?.fixtureId === 'recovery-verifier-investigation-v54' ||
+    fixture?.schemaVersion === 55 && fixture?.fixtureId === 'recovery-verifier-investigation-v55' ||
+    fixture?.schemaVersion === 56 && fixture?.fixtureId === 'recovery-verifier-investigation-v56' ||
+    fixture?.schemaVersion === 57 && fixture?.fixtureId === 'recovery-verifier-investigation-v57' ||
+    fixture?.schemaVersion === 58 && fixture?.fixtureId === 'recovery-verifier-investigation-v58' ||
+    fixture?.schemaVersion === 59 && fixture?.fixtureId === 'recovery-verifier-investigation-v59';
+  if (!fixture || !supportedFixtureIdentity ||
       !fixture.groundTruth || !Array.isArray(fixture.groundTruth.requiredEvidence) ||
       fixture.groundTruth.requiredEvidence.length === 0 ||
       new Set(fixture.groundTruth.requiredEvidence).size !== fixture.groundTruth.requiredEvidence.length ||

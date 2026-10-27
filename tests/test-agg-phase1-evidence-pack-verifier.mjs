@@ -185,6 +185,11 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       'tests/test-reconcile-active-workflows.mjs',
       'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs',
       'benchmarks/plugin-workflow-benchmark/phase2-inventory-diagnostics.mjs',
+      'benchmarks/plugin-workflow-benchmark/create-phase2-candidate-inventory.mjs',
+      'benchmarks/plugin-workflow-benchmark/test-create-phase2-candidate-inventory.mjs',
+      'scripts/diagnose-phase2-archive-lineage.mjs',
+      'tests/test-phase2-inventory-diagnostic-contract.mjs',
+      'tests/test-adaptive-goal-execution-graph-proposal.js',
       'scripts/verify-agg-phase1-phase2-package-boundary.mjs',
       'tests/test-extracted-package-tool-schemas.mjs', 'benchmarks/plugin-workflow-benchmark/phase1-protocol-runner.mjs',
       'tests/test-agg-phase1-phase2-package-boundary.mjs',
@@ -197,11 +202,51 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
       'docs/plugin-workflow-benchmark-plan.md',
       'scripts/replay-agg-phase1-finalization.mjs', 'scripts/verify-agg-phase1-evidence-pack.mjs',
-      'tests/test-agg-phase1-evidence-pack-verifier.mjs'
+      'tests/test-agg-phase1-evidence-pack-verifier.mjs',
+      // Keep the fixture source tree complete as the source-alignment verifier
+      // binds release-policy/verifier inputs in addition to packaged runtime
+      // files. These files are inputs to the trust decision even when omitted
+      // from this historical Phase 1 fixture archive.
+      'scripts/lib/runalith-release-trust-contract.mjs', 'scripts/verify-release-evidence.mjs',
+      'scripts/lib/hosted-builder-attestation.mjs', 'scripts/lib/hosted-verification-predicate.mjs',
+      'scripts/lib/phase2-custody-evidence.mjs', 'scripts/verify-phase2-custody-evidence.mjs',
+      'tests/test-phase2-custody-evidence.mjs',
+      'scripts/verify-hosted-builder-provenance.mjs', 'scripts/create-hosted-candidate-verification-predicate.mjs',
+      'scripts/runalith-hosted-build-policy.json', 'scripts/runalith-rollout.mjs',
+      'tests/test-runalith-release-trust-contract.mjs', 'tests/test-hosted-builder-attestation.mjs',
+      'tests/test-hosted-verification-predicate.mjs', 'tests/test-runalith-hosted-workflows.mjs',
+      'tests/test-runalith-rollout.mjs',
+      // Keep the synthetic source tree complete for the strengthened release
+      // source-snapshot contract. These graph-chain implementations and tests,
+      // plus the external checkpoint atomic-transition verifier, are now
+      // release-critical inputs even when absent from this historical Phase 1
+      // fixture's packaged archive.
+      'src/runtime/adaptive-goal-graph.js', 'src/runtime/adaptive-goal-knowledge-store.js',
+      'src/runtime/adaptive-goal-knowledge-verifier.js', 'src/runtime/adaptive-goal-plan-adapter.js',
+      'src/runtime/adaptive-goal-compatibility.js', 'src/runtime/adaptive-goal-execution-readiness.js',
+      'src/runtime/adaptive-goal-execution-graph-proposal.js', 'src/runtime/adaptive-goal-execution-plan-candidate.js',
+      'src/runtime/adaptive-goal-reviewed-task-inputs.js', 'src/runtime/adaptive-goal-action-intent-policy.js',
+      'src/runtime/adaptive-goal-reviewer-identity.js', 'src/runtime/adaptive-goal-source-evidence.js',
+      'src/runtime/adaptive-goal-evidence-lineage.js', 'src/runtime/adaptive-goal-sandbox-executor.js',
+      'tests/test-adaptive-goal-execution-plan-candidate.js', 'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+      'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-reviewer-identity.js',
+      'tests/test-adaptive-goal-evidence-lineage.js', 'scripts/lib/external-trust-checkpoint-contract.mjs',
+      'scripts/lib/sqlite-external-checkpoint-transition.mjs', 'tests/test-external-trust-checkpoint-contract.mjs',
+      '.github/workflows/runalith-provenance-builder.yml', '.github/workflows/runalith-provenance-verifier.yml',
+      '.github/workflows/runalith-verification-attestation-signer.yml',
+      'docs/runalith-provenance-release-trust-design.md', 'docs/runalith-hosted-builder-pipeline.md',
+      'docs/runalith-release-evidence-verifier.md', 'docs/agg-production-trust-provisioning-runbook.md'
     ];
-    for (const relative of sourceInputs.concat(ignoredProtocolDocs)) {
+    for (const relative of sourceInputs) {
       writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
     }
+    // These paths are deliberately owner-maintained, local-only source overlays.
+    // The unit test uses synthetic content to exercise archive/hash binding; it
+    // must not copy real operator evidence or assume those files exist on CI.
+    writeFile(sourceRoot, ignoredProtocolDocs[0], Buffer.from(
+      '# TEST FIXTURE ONLY — synthetic frozen protocol overlay\nNot an operational protocol, approval, or release input.\n', 'utf8'));
+    writeFile(sourceRoot, ignoredProtocolDocs[1], Buffer.from(
+      '# TEST FIXTURE ONLY — synthetic preflight overlay\nNo host observations or operational evidence are represented.\n', 'utf8'));
     execFileSync('git', ['init', '-q'], { cwd: sourceRoot });
     execFileSync('git', ['config', 'user.name', 'AGG Phase 1 verifier test'], { cwd: sourceRoot });
     execFileSync('git', ['config', 'user.email', 'agg-phase1-verifier-test@example.invalid'], { cwd: sourceRoot });
