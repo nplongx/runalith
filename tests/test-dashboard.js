@@ -5,7 +5,6 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { createDashboardServer } from '../dashboard/server.js';
 import { createAdaptiveGoalKnowledgeStore } from '../src/runtime/adaptive-goal-knowledge-store.js';
 import { createAdaptiveGoalPlannerTelemetryStore } from '../src/runtime/adaptive-goal-planner-telemetry.js';
 import { createPolicySnapshot, initializeWorkflowPolicyStore, normalizePolicyDefinition } from '../src/runtime/workflow/policy-contract.js';
@@ -179,6 +178,13 @@ db.close();
 
 const savedRunalithFilesRoot = process.env.RUNALITH_DASHBOARD_FILES_ROOT;
 const savedChatFilesRoot = process.env.CHAT_ON_STEROIDS_DASHBOARD_FILES_ROOT;
+const savedDefaultDataDir = process.env.RUNALITH_DATA_DIR;
+// Import after binding the module's default data root to this existing test
+// fixture. Clean CI runners need not have a pre-created ~/.runalith directory.
+process.env.RUNALITH_DATA_DIR = dataDir;
+const { createDashboardServer } = await import('../dashboard/server.js');
+if (savedDefaultDataDir == null) delete process.env.RUNALITH_DATA_DIR;
+else process.env.RUNALITH_DATA_DIR = savedDefaultDataDir;
 delete process.env.RUNALITH_DASHBOARD_FILES_ROOT;
 delete process.env.CHAT_ON_STEROIDS_DASHBOARD_FILES_ROOT;
 const rootOptionProbe = createDashboardServer({host:'127.0.0.1',port:0,dataDir,dbPath,filesRoot});
