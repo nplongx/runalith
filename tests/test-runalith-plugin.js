@@ -2822,6 +2822,13 @@ try {
   await completeHybridRole('product-owner');
   await completeHybridRole('researcher');
   await completeHybridRole('architect');
+  // Stage a real syntax failure before the final prerequisite completes, so
+  // eager scheduling cannot consume the validation batch before the fault exists.
+  const transientSyntaxPath = path.join(hybridWorkspace, 'server/index.js');
+  const transientSyntaxOriginal = fs.readFileSync(transientSyntaxPath);
+  let firstHybridAttempt;
+  fs.appendFileSync(transientSyntaxPath, Buffer.from('\nfunction { injected transient syntax fault\n'));
+  try {
   await completeHybridRole('engineer');
 
   // A malformed/missing child-to-plan binding must not fall through to normal
@@ -2896,16 +2903,7 @@ try {
     denialAuditDb.close();
   }
 
-  // Trigger a real item failure without altering checked-in sources. The
-  // hybrid plan has no validation fingerprint contract, so this temporary
-  // syntax fault is isolated to its disposable staged workspace and is restored
-  // byte-for-byte before retrying the same durable batch ID.
-  const transientSyntaxPath = path.join(hybridWorkspace, 'server/index.js');
-  const transientSyntaxOriginal = fs.readFileSync(transientSyntaxPath);
-  let firstHybridAttempt;
-  try {
-    fs.appendFileSync(transientSyntaxPath, Buffer.from('\nfunction { injected transient syntax fault\n'));
-    firstHybridAttempt = await tool('workflow_next_task', { job_id: hybridWorkflow.job_id });
+  firstHybridAttempt = await tool('workflow_next_task', { job_id: hybridWorkflow.job_id });
   } finally {
     fs.writeFileSync(transientSyntaxPath, transientSyntaxOriginal);
   }

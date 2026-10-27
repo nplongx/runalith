@@ -21,9 +21,11 @@
     },
     {
       "path": "tests/test-runalith-plugin.js",
-      "sha256": "27d66cdedddd3788adc0670f2eebcb0eb4d90f8cdf37415f0dcdd898b67d209e",
+      "sha256": "59710cd4d0272e931b182157e4a202736b86a1c6ab5900b0d51a25e322c06d3a",
       "previouslyPinnedSha256": "020788b68024ea8a5bb75796a9fb516290e4e4876279e1150ff8a359183ae071",
-      "changeAssessment": "CI determinism fix: the hybrid batch regression now appends an actual newline-delimited syntax fault, ensuring the injected invalid source is observed before the fixture restores bytes on both Node 22 and Node 24; previous source digest retained below.",
+      "changeAssessment": "CI determinism fix: inject the syntax fault before completing the last prerequisite, preventing eager scheduling from running the batch before the fault exists; the actual newline-delimited fault and previous source digests are preserved below.",
+      "previouslyPinnedBeforeFinalPrerequisiteTimingFixSha256": "697396bbde13a1e04f2170ef4b572e8a8bb6c3cc54891d6cf0d8a3d0fe648734",
+      "previouslyPinnedBeforeBatchTimingFixSha256": "27d66cdedddd3788adc0670f2eebcb0eb4d90f8cdf37415f0dcdd898b67d209e",
       "previouslyPinnedBeforeCiCheckoutFixSha256": "0fc54befb9b449713d2282c418fc99208edd98e5c1a6998aac8d8b2e477dbe96",
       "claim": "Integrated MCP and sandbox regressions exercise mandatory task mapping, dependency-preserving proposals, exact source attestation/reviewer trust separation, key rotation/revocation denial, tampering, idempotency and recovery; all action execution remains test-only.",
       "previouslyPinnedBeforeV11Sha256": "45bff1a3f5aa7dfee515685ec405a033888c1ee47f061f85d7c70595450414ee"
