@@ -92,7 +92,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "aadce4002bd61992947e275663395405595376756a26f1c1074beda0f18dcd90",
+      "sha256": "2231f2ce5da061266a1de53836d29c23913828e677d6b0368e240537ac43691a",
       "claim": "RC.15 package metadata pins the successor version and exact versioned runtime entry point; this is not build authority.",
       "previouslyPinnedSha256": "08cb1c2d24c6d48a0fd698e7314043b396f63d542e1cd84969a5ac67dc60c367",
       "changeAssessment": "RC.24 package metadata now keeps npm start, main, runtimeEntryPoint and MCP manifest on the same versioned runtime entry point. RC.25 source identity refresh; earlier digest preserved in previouslyPinnedBeforeRC25Sha256. RC.26 refresh: preserves the prior v67 digest in previouslyPinnedBeforeV68Sha256; this is source identity only, not independent release authority.",

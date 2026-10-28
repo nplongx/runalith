@@ -30,6 +30,7 @@
   "type": "module",
   "scripts": {
     "start": "node server/index-v1.0.9-rc.26.js",
+    "solo:graph": "node --test tests/test-adaptive-goal-current-scope-producer-e2e.mjs",
     "docs:generate-reference": "node scripts/generate-mcp-reference.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "docs:check:external": "node scripts/check-docs.mjs --check-external-links",
