@@ -1,6 +1,6 @@
 {
   "name": "runalith-agent-orchestrator",
-  "version": "1.0.9-rc.27",
+  "version": "1.0.9-rc.28",
   "description": "Runalith is a local-first MCP runtime for approval-gated durable agent workflows, typed evidence, and constrained local execution.",
   "license": "MIT",
   "repository": {
@@ -25,18 +25,18 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "main": "server/index-v1.0.9-rc.27.js",
-  "runtimeEntryPoint": "server/index-v1.0.9-rc.27.js",
+  "main": "server/index-v1.0.9-rc.28.js",
+  "runtimeEntryPoint": "server/index-v1.0.9-rc.28.js",
   "type": "module",
   "scripts": {
-    "start": "node server/index-v1.0.9-rc.27.js",
+    "start": "node server/index-v1.0.9-rc.28.js",
     "solo:graph": "node --test tests/test-adaptive-goal-current-scope-producer-e2e.mjs",
     "test:agg-readiness-dossier": "node --test tests/test-agg-readiness-dossier.mjs",
     "docs:generate-reference": "node scripts/generate-mcp-reference.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "docs:check:external": "node scripts/check-docs.mjs --check-external-links",
     "dashboard": "node dashboard/server.js",
-    "test": "node tests/test-agent-skills.js && node tests/test-agent-tool-guidance.js && node --test tests/test-mcpb-source-alignment.mjs tests/test-agg-phase1-evidence-pack-verifier.mjs tests/test-agg-phase1-phase2-package-boundary.mjs tests/test-agg-readiness-dossier.mjs && node --test tests/test-adaptive-goal-trust-configuration.mjs && node --test tests/test-adaptive-goal-trust-entrypoint.mjs && node --test tests/test-runalith-release-trust-contract.mjs tests/test-external-trust-checkpoint-contract.mjs tests/test-hosted-builder-attestation.mjs tests/test-hosted-verification-predicate.mjs tests/test-runalith-hosted-workflows.mjs tests/test-phase2-custody-evidence.mjs && node --test tests/test-adaptive-goal-knowledge-verifier.mjs && node --test tests/test-adaptive-goal-graph.js tests/test-adaptive-goal-execution-readiness.js tests/test-adaptive-goal-execution-graph-proposal.js && node --test tests/test-adaptive-goal-current-scope-producer-e2e.mjs && node --test tests/test-adaptive-goal-reviewer-identity.js && node --test tests/test-adaptive-goal-evidence-lineage.js && node --test tests/test-adaptive-goal-execution-plan-candidate.js && node --test tests/test-adaptive-goal-candidate-assessment-contract.mjs && node --test tests/test-adaptive-goal-sandbox-receipt-integrity.mjs && node --test tests/test-phase1-acceptance-protocol-freeze.mjs && node --test tests/test-phase2-inventory-diagnostic-contract.mjs && node --test tests/test-adaptive-goal-discriminator.mjs && node --test tests/test-adaptive-goal-phase3-mcts.mjs && node --test tests/test-adaptive-goal-phase2-mcp-tool.mjs && node tests/test-resource-recommender.js && node tests/test-job-liveness.js && node --test tests/test-reconcile-active-workflows.mjs tests/test-reconcile-active-workflows-v2.mjs && node tests/test-workflow-agent-usability-recovery.js && node tests/test-doc-link-parser.js && node tests/test-success-contract.js && node tests/test-policy-contract.js && node tests/test-workflow-policies-mcp.js && node --test tests/test-plugin-workflow-benchmark-phase1-protocol.mjs && node --test tests/test-phase1-execution-provenance-contract.mjs && node --test tests/test-adaptive-goal-benchmark.mjs && node --test tests/test-runalith-rollout.mjs && node tests/test-runalith-plugin.js && node tests/test-dashboard.js && npm run test:agg-telemetry",
+    "test": "node tests/test-agent-skills.js && node tests/test-agent-tool-guidance.js && node --test tests/test-mcpb-source-alignment.mjs tests/test-agg-phase1-evidence-pack-verifier.mjs tests/test-agg-phase1-phase2-package-boundary.mjs tests/test-agg-readiness-dossier.mjs && node --test tests/test-adaptive-goal-trust-configuration.mjs && node --test tests/test-adaptive-goal-trust-entrypoint.mjs && node --test tests/test-runalith-release-trust-contract.mjs tests/test-external-trust-checkpoint-contract.mjs tests/test-hosted-builder-attestation.mjs tests/test-hosted-verification-predicate.mjs tests/test-runalith-hosted-workflows.mjs tests/test-phase2-custody-evidence.mjs && node --test tests/test-adaptive-goal-knowledge-verifier.mjs && node --test tests/test-adaptive-goal-graph.js tests/test-adaptive-goal-execution-readiness.js tests/test-adaptive-goal-execution-graph-proposal.js && node --test tests/test-adaptive-goal-current-scope-producer-e2e.mjs && node --test tests/test-adaptive-goal-reviewer-identity.js && node --test tests/test-adaptive-goal-evidence-lineage.js && node --test tests/test-adaptive-goal-execution-plan-candidate.js && node --test tests/test-adaptive-goal-candidate-assessment-contract.mjs && node --test tests/test-adaptive-goal-sandbox-receipt-integrity.mjs && node --test tests/test-phase1-acceptance-protocol-freeze.mjs && node --test tests/test-phase2-inventory-diagnostic-contract.mjs && node --test tests/test-adaptive-goal-discriminator.mjs && node --test tests/test-adaptive-goal-phase3-mcts.mjs && node --test tests/test-adaptive-goal-phase2-mcp-tool.mjs && node tests/test-resource-recommender.js && node tests/test-job-liveness.js && node --test tests/test-reconcile-active-workflows.mjs tests/test-reconcile-active-workflows-v2.mjs && node tests/test-workflow-agent-usability-recovery.js && node tests/test-doc-link-parser.js && node tests/test-success-contract.js && node tests/test-policy-contract.js && node tests/test-workflow-policies-mcp.js && node --test tests/test-plugin-workflow-benchmark-phase1-protocol.mjs && node --test tests/test-phase1-execution-provenance-contract.mjs && node --test tests/test-adaptive-goal-benchmark.mjs && node --test tests/test-runalith-rollout.mjs && node tests/test-runalith-plugin.js && node tests/test-dashboard.js && npm run test:agg-codegraph-regression && npm run test:agg-telemetry",
     "test:dashboard": "node tests/test-dashboard.js",
     "test:agg-telemetry": "node tests/test-adaptive-goal-planner-telemetry.js && node --test tests/test-adaptive-goal-planner-telemetry-runtime.mjs",
     "test:phase2-security-regressions": "node tests/test-secure-filesystem-boundary.js && node tests/test-worker-filesystem-boundary.js && node tests/test-execution-verifier.js && node tests/test-execution-verifier-output-commit-binding-20261017.js && node tests/test-github-actions-provider.js && node --test tests/test-phase2-inventory-diagnostic-contract.mjs && node benchmarks/plugin-workflow-benchmark/test-create-phase2-candidate-inventory.mjs && node tests/test-dispatch-lease-quarantine.js && node tests/test-provider-pre-send-recovery.js && node tests/test-provider-run-quarantine-reconciliation.js && node tests/test-provider-status-quarantine-sqlite-integration-20261018.js && node tests/test-execution-contract.js && node tests/test-execution-control-process-boundary.js && node tests/test-github-actions-dispatch-concurrency.js && node tests/test-github-actions-lifecycle-boundary.js && node tests/test-task-lease-expiry-race.js && node tests/test-strict-json-safe-integer.js && node tests/test-openclaw-message-receipt.js && node tests/test-openclaw-transport-byte-contract.js && node tests/test-slack-projection-uncertain.js && node tests/test-m12-runner-agent.js && node tests/test-mcp-eof-shutdown-framing-20261017.js",
@@ -83,7 +83,8 @@
     "pack:runalith-mcpb": "bash scripts/package-runalith-mcpb.sh",
     "site:check": "node scripts/check-static-site.mjs",
     "test:runalith-rollout": "node --test tests/test-runalith-rollout.mjs",
-    "validate:agg-trust-config": "node scripts/validate-agg-trust-config.mjs"
+    "validate:agg-trust-config": "node scripts/validate-agg-trust-config.mjs",
+    "test:agg-codegraph-regression": "node --test tests/test-adaptive-goal-benchmark-integrity.mjs tests/test-adaptive-goal-compatibility.js tests/test-adaptive-goal-knowledge-capture-mcp.mjs tests/test-adaptive-goal-knowledge-capture.mjs tests/test-adaptive-goal-knowledge-store.js tests/test-adaptive-goal-local-llm-failure.mjs tests/test-adaptive-goal-sandbox-executor.mjs tests/test-adaptive-goal-source-evidence.js"
   },
   "dependencies": {
     "@langchain/langgraph": "^1.4.21"

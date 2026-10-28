@@ -9,7 +9,7 @@ import { createAdaptiveGoalKnowledgeStore } from '../../src/runtime/adaptive-goa
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
-let fixturePath = path.join(here, 'fixtures/recovery-verifier-v69.json');
+let fixturePath = path.join(here, 'fixtures/recovery-verifier-v70.json');
 const MAX_PINNED_SOURCE_BYTES = 2 * 1024 * 1024;
 // Frozen v6 scenario identity and oracle are duplicated as verifier constants
 // so editing the fixture cannot rewrite both the tested graph and its scoring
@@ -43,7 +43,7 @@ for (let i = 0; i < args.length; i++) {
     if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) throw new Error('BENCHMARK_FIXTURE_PATH_OUT_OF_SCOPE');
   }
   else if (args[i] === '--help') {
-    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--fixture fixtures/recovery-verifier-v69.json] [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
+    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--fixture fixtures/recovery-verifier-v70.json] [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
     process.exit(0);
   } else throw new Error(`Unknown or incomplete argument: ${args[i]}`);
 }
@@ -252,7 +252,7 @@ function validateFixtureContract() {
     fixture?.schemaVersion === 66 && fixture?.fixtureId === 'recovery-verifier-investigation-v66' ||
     fixture?.schemaVersion === 67 && fixture?.fixtureId === 'recovery-verifier-investigation-v67' ||
     fixture?.schemaVersion === 68 && fixture?.fixtureId === 'recovery-verifier-investigation-v68' ||
-    fixture?.schemaVersion === 69 && fixture?.fixtureId === 'recovery-verifier-investigation-v69';
+    fixture?.schemaVersion === 70 && fixture?.fixtureId === 'recovery-verifier-investigation-v70';
   if (!fixture || !supportedFixtureIdentity ||
       !fixture.groundTruth || !Array.isArray(fixture.groundTruth.requiredEvidence) ||
       fixture.groundTruth.requiredEvidence.length === 0 ||

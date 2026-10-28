@@ -129,6 +129,16 @@ try {
     'scripts/build-agg-readiness-dossier.mjs',
     'tests/test-agg-readiness-dossier.mjs',
     'tests/test-package-no-overwrite.js',
+    'tests/test-adaptive-goal-benchmark-integrity.mjs',
+    'tests/test-adaptive-goal-compatibility.js',
+    'tests/test-adaptive-goal-knowledge-capture-mcp.mjs',
+    'tests/test-adaptive-goal-knowledge-capture.mjs',
+    'tests/test-adaptive-goal-knowledge-store.js',
+    'tests/test-adaptive-goal-local-llm-failure.mjs',
+    'tests/test-adaptive-goal-sandbox-executor.mjs',
+    'tests/test-adaptive-goal-source-evidence.js',
+    'docs/runalith-rollout-rc28-20261028.md',
+    'docs/goal-plan-execution-acceptance-rc28-20261028.md',
   ]) {
     writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
   }

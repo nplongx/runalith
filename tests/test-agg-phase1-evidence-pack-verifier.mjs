@@ -236,7 +236,12 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       '.github/workflows/runalith-verification-attestation-signer.yml',
       'docs/runalith-provenance-release-trust-design.md', 'docs/runalith-hosted-builder-pipeline.md',
       'docs/runalith-release-evidence-verifier.md', 'docs/agg-production-trust-provisioning-runbook.md',
-      'scripts/build-agg-readiness-dossier.mjs', 'tests/test-agg-readiness-dossier.mjs', 'tests/test-package-no-overwrite.js'
+      'scripts/build-agg-readiness-dossier.mjs', 'tests/test-agg-readiness-dossier.mjs', 'tests/test-package-no-overwrite.js',
+      'tests/test-adaptive-goal-benchmark-integrity.mjs', 'tests/test-adaptive-goal-compatibility.js',
+      'tests/test-adaptive-goal-knowledge-capture-mcp.mjs', 'tests/test-adaptive-goal-knowledge-capture.mjs',
+      'tests/test-adaptive-goal-knowledge-store.js', 'tests/test-adaptive-goal-local-llm-failure.mjs',
+      'tests/test-adaptive-goal-sandbox-executor.mjs', 'tests/test-adaptive-goal-source-evidence.js',
+      'docs/runalith-rollout-rc28-20261028.md', 'docs/goal-plan-execution-acceptance-rc28-20261028.md'
     ];
     for (const relative of sourceInputs) {
       writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));

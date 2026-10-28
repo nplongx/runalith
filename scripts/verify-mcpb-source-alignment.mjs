@@ -116,6 +116,19 @@ const BUILD_INPUT_PATHS = Object.freeze([
   'scripts/build-agg-readiness-dossier.mjs',
   'tests/test-agg-readiness-dossier.mjs',
   'tests/test-package-no-overwrite.js',
+  // CodeGraph 1.6.0 traced the AGG evidence/trust path and identified these
+  // tests as acceptance dependencies. Keep their exact bytes in the source
+  // snapshot, not merely their invocation in package.json.
+  'tests/test-adaptive-goal-benchmark-integrity.mjs',
+  'tests/test-adaptive-goal-compatibility.js',
+  'tests/test-adaptive-goal-knowledge-capture-mcp.mjs',
+  'tests/test-adaptive-goal-knowledge-capture.mjs',
+  'tests/test-adaptive-goal-knowledge-store.js',
+  'tests/test-adaptive-goal-local-llm-failure.mjs',
+  'tests/test-adaptive-goal-sandbox-executor.mjs',
+  'tests/test-adaptive-goal-source-evidence.js',
+  'docs/runalith-rollout-rc28-20261028.md',
+  'docs/goal-plan-execution-acceptance-rc28-20261028.md',
 ]);
 
 function fail(message) {

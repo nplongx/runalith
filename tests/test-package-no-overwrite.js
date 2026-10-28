@@ -115,7 +115,7 @@ try {
   const schemaSourceRoot = path.join(temp, 'symlink-schema-test-project');
   for (const directory of ['scripts', 'tests', 'plugin', 'server', 'benchmarks/plugin-workflow-benchmark']) fs.mkdirSync(path.join(schemaSourceRoot, directory), { recursive: true });
   for (const relative of [
-    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.27.js',
+    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.28.js',
     'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js', 'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
     'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs', 'tests/test-adaptive-goal-reviewer-identity.js', 'tests/test-reconcile-active-workflows.mjs',
@@ -148,7 +148,7 @@ try {
   const externalTest = path.join(temp, 'external-package-test.js');
   fs.writeFileSync(externalTest, "throw new Error('external package test must never execute');\n", { flag: 'wx', mode: 0o600 });
   const preflightInputs = [
-    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.27.js',
+    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.28.js',
     'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js', 'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
     'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs', 'tests/test-adaptive-goal-reviewer-identity.js', 'tests/test-reconcile-active-workflows.mjs',
@@ -195,7 +195,7 @@ try {
   fs.mkdirSync(path.join(symlinkRuntimeRoot, 'server'), { recursive: true });
   fs.mkdirSync(symlinkRuntimeStage);
   fs.copyFileSync(path.join(root, 'package.json'), path.join(symlinkRuntimeRoot, 'package.json'));
-  fs.copyFileSync(path.join(root, 'server/index-v1.0.9-rc.27.js'), path.join(symlinkRuntimeRoot, 'server/index-v1.0.9-rc.27.js'));
+  fs.copyFileSync(path.join(root, 'server/index-v1.0.9-rc.28.js'), path.join(symlinkRuntimeRoot, 'server/index-v1.0.9-rc.28.js'));
   fs.symlinkSync(externalReadme, path.join(symlinkRuntimeRoot, 'server/index.js'));
   const symlinkRuntimeBuild = spawnSync(process.execPath, [collector, symlinkRuntimeRoot, symlinkRuntimeStage], { cwd: root, encoding: 'utf8' });
   assert.notEqual(symlinkRuntimeBuild.status, 0, 'runtime collector must reject symlinked source dependencies');
