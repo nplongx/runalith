@@ -69,6 +69,8 @@ const reviewerKey = generateKeyPairSync('ed25519');
 const wrongSignerKey = generateKeyPairSync('ed25519');
 const sourceVerifierPem = publicKeyPem(sourceVerifierKey);
 const reviewerPem = publicKeyPem(reviewerKey);
+const sourceEvidencePath = path.join(packageRoot, 'src/runtime/adaptive-goal-knowledge-store.js');
+const sourceEvidenceRef = `file:src/runtime/adaptive-goal-knowledge-store.js#sha256=${sha(fs.readFileSync(sourceEvidencePath))}`;
 const providerId = 'entrypoint-test-independent-source-verifier';
 const reviewerProviderId = 'entrypoint-test-independent-action-reviewer';
 const env = {
@@ -171,7 +173,8 @@ try {
   const saved = await call('adaptive_goal_knowledge_node_save', {
     goal_id: 'entrypoint-test-goal', stable_key: 'goal-root', node_type: 'goal',
     content: { statement: 'isolated signed-snapshot fixture' },
-    provenance: { source: 'isolated-entrypoint-test', actor: 'fixture-producer', reference: 'test-only' }
+    provenance: { source: 'isolated-entrypoint-test', actor: 'fixture-producer', reference: 'test-only' },
+    evidence_refs: [sourceEvidenceRef]
   });
   assert.equal(saved.failed, false, saved.errorText);
   assert.equal(saved.data.verified, false, 'knowledge creation API never self-verifies caller-authored content');
@@ -190,7 +193,8 @@ try {
     goal_id: 'entrypoint-test-goal', stable_key: 'goal-root', node_type: 'goal',
     content: { statement: 'revised after the first snapshot request' },
     provenance: { source: 'isolated-entrypoint-test', actor: 'fixture-producer', reference: 'test-only-revision-2' },
-    expected_revision: 1
+    expected_revision: 1,
+    evidence_refs: [sourceEvidenceRef]
   });
   assert.equal(revised.failed, false, revised.errorText);
   const staleProof = createAttestation(requestPayload1, { keyPair: sourceVerifierKey, providerId, pem: sourceVerifierPem });
@@ -239,7 +243,8 @@ try {
     goal_id: 'entrypoint-test-goal', stable_key: 'goal-root', node_type: 'goal',
     content: { statement: 'revision drift after attestation' },
     provenance: { source: 'isolated-entrypoint-test', actor: 'fixture-producer', reference: 'test-only-revision-3' },
-    expected_revision: 2
+    expected_revision: 2,
+    evidence_refs: [sourceEvidenceRef]
   });
   assert.equal(revisedAgain.failed, false, revisedAgain.errorText);
   const request3 = await call('adaptive_goal_knowledge_snapshot_get', { goal_id: 'entrypoint-test-goal' });

@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "runalith-agent-orchestrator",
   "display_name": "Runalith",
-  "version": "1.0.9-rc.16",
+  "version": "1.0.9-rc.25",
   "description": "Local-first durable agent workflow orchestration with immutable plans, versioned policies, typed evidence, and approval-gated execution.",
   "long_description": "Runalith is a local-first MCP workflow runtime. It persists workflow state in SQLite, compiles explicitly approved proposals into immutable plans, schedules dependency-aware specialist tasks, executes approved deterministic commands locally, validates typed artifacts and provenance, and records recovery and audit events. The MCPB is a standard package container for compatible clients; Runalith does not provide a hosted model service or remote execution fleet.",
   "author": {
@@ -10,16 +10,18 @@
   },
   "server": {
     "type": "node",
-    "entry_point": "server/index-v1.0.9-rc.16.js",
+    "entry_point": "server/index-v1.0.9-rc.25.js",
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/server/index-v1.0.9-rc.16.js"
+        "${__dirname}/server/index-v1.0.9-rc.25.js"
       ],
       "env": {
         "AGG_PHASE2_SHADOW_TOOL_ENABLED": "1",
         "AGG_PHASE3_MCTS_TOOL_ENABLED": "1",
-        "AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED": "1"
+        "AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED": "1",
+        "AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON": "${user_config.goal_idea_verifier_trust_config_json}",
+        "AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON": "${user_config.action_intent_reviewer_trust_config_json}"
       }
     }
   },
@@ -330,6 +332,24 @@
     ],
     "runtimes": {
       "node": ">=22.13.0"
+    }
+  },
+  "user_config": {
+    "goal_idea_verifier_trust_config_json": {
+      "type": "string",
+      "title": "Goal/Idea Graph verifier trust configuration (JSON)",
+      "description": "Optional host-managed trust config supplied and approved by your security administrator. Use the versioned goal_idea_verifier config with scope agg.goal_idea_graph.verify. Public Ed25519 keys only; never paste a private key. Leaving this blank keeps verified Goal/Idea Graph planning blocked.",
+      "default": "",
+      "required": false,
+      "sensitive": false
+    },
+    "action_intent_reviewer_trust_config_json": {
+      "type": "string",
+      "title": "Action-intent reviewer trust configuration (JSON)",
+      "description": "Optional host-managed trust config supplied by your security administrator and approved by a separately administered reviewer authority. Use the versioned action_intent_reviewer config with scope agg.action_intent.review and public roots disjoint from the verifier roots. Public Ed25519 keys only; never paste a private key. Leaving this blank keeps trusted review and approval blocked.",
+      "default": "",
+      "required": false,
+      "sensitive": false
     }
   }
 }

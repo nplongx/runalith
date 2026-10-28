@@ -203,6 +203,77 @@ test('requires configured verifier and verifies exact snapshot, revisions, membe
     error => error.code === 'KNOWLEDGE_GRAPH_SNAPSHOT_STALE');
 });
 
+test('blank optional reviewer user_config does not disable the independently configured Goal/Idea verifier', t => {
+  withVerifierEnvironment(t);
+  const envKeys = ['AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', 'AGG_REVIEW_IDENTITY_PROVIDER_ID', 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM'];
+  const previous = Object.fromEntries(envKeys.map(key => [key, process.env[key]]));
+  process.env.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON = '';
+  // Legacy values, if inherited from an operator shell, must not override the
+  // explicitly blank optional JSON field for peer-domain checking.
+  process.env.AGG_REVIEW_IDENTITY_PROVIDER_ID = 'ignored-because-json-field-is-blank';
+  process.env.AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM = publicKeyPem;
+  t.after(() => {
+    for (const key of envKeys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  });
+  const f = fixture();
+  t.after(() => { f.db.close(); f.trustDb.close(); });
+  const request = f.verifier.getAttestationRequest(goalId);
+  assert.equal(request.eligibleForAttestation, true,
+    'an empty optional reviewer config only disables reviewer functionality, not source snapshot verification');
+  assert.ok(request.requiredSignedFields.length > 0);
+});
+
+test('empty evidence remains diagnosable but can never be externally attested or become planning-authoritative', t => {
+  const f = fixture(); t.after(() => { f.db.close(); f.trustDb.close(); }); withVerifierEnvironment(t);
+  const emptyGoalId = 'goal-empty-evidence-manifest';
+  const emptyStart = f.store.saveNode({
+    goalId: emptyGoalId, stableKey: 'empty-start', type: 'idea', content: { title: 'No admissible evidence yet' },
+    provenance, evidenceRefs: [], expectedRevision: 0
+  });
+  const emptyGoal = f.store.saveNode({
+    goalId: emptyGoalId, stableKey: 'empty-finish', type: 'goal', content: { title: 'Must remain blocked without evidence' },
+    provenance, evidenceRefs: [], expectedRevision: 0
+  });
+  f.store.addEdge({ goalId: emptyGoalId, fromId: emptyStart.id, toId: emptyGoal.id, type: 'enables', provenance, evidenceRefs: [] });
+
+  const request = f.verifier.getAttestationRequest(emptyGoalId);
+  assert.equal(request.snapshot.integrity_valid, true, 'the diagnostic snapshot is still available');
+  assert.equal(request.snapshot.nodes.length, 2);
+  assert.deepEqual(request.evidenceManifest, []);
+  assert.equal(request.eligibleForAttestation, false);
+  assert.deepEqual(request.requiredSignedFields, []);
+  assert.ok(request.attestationBlockers.some(item => item.code === 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY'));
+
+  const unusableSignedPayload = signedAttestation(request);
+  assert.throws(() => f.verifier.attest(unusableSignedPayload),
+    error => error.code === 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications WHERE goal_id=?').get(emptyGoalId).n, 0,
+    'an empty manifest must not be persisted as verified, even if a well-formed test signature is supplied');
+  const emptyVerification = f.verifier.getCurrentVerification(emptyGoalId);
+  assert.equal(emptyVerification.verified, false);
+  assert.equal(emptyVerification.status, 'evidence_ineligible');
+  assert.ok(emptyVerification.blockers.some(item => item.code === 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY'));
+
+  const missingActionEvidenceGoalId = 'goal-action-node-missing-evidence';
+  const actionStart = f.store.saveNode({
+    goalId: missingActionEvidenceGoalId, stableKey: 'action-empty-start', type: 'idea',
+    content: { title: 'Source action has not produced evidence yet' }, provenance, evidenceRefs: [], expectedRevision: 0
+  });
+  const action = f.store.saveNode({
+    goalId: missingActionEvidenceGoalId, stableKey: 'action-empty-experiment', type: 'experiment',
+    content: { title: 'Experiment with no artifact binding' }, provenance, evidenceRefs: [], expectedRevision: 0
+  });
+  f.store.addEdge({ goalId: missingActionEvidenceGoalId, fromId: actionStart.id, toId: action.id, type: 'enables', provenance, evidenceRefs: [] });
+  const malformedRequest = f.verifier.getAttestationRequest(missingActionEvidenceGoalId);
+  assert.equal(malformedRequest.snapshot.integrity_valid, true);
+  assert.equal(malformedRequest.eligibleForAttestation, false);
+  assert.ok(malformedRequest.attestationBlockers.some(item => item.code === 'KNOWLEDGE_ACTION_EVIDENCE_MISSING'));
+  assert.equal(f.verifier.getCurrentVerification(missingActionEvidenceGoalId).verified, false);
+});
+
 test('attestation ingestion rejects accessor-backed signed fields before invoking them or persisting anything', t => {
   const f = fixture(); t.after(() => { f.db.close(); f.trustDb.close(); }); withVerifierEnvironment(t);
   const request = f.verifier.getAttestationRequest(goalId);
@@ -307,7 +378,11 @@ test('administered multi-key trust config is used for signatures and key revocat
 
 test('rejects false evidence lineage, signatures from another key, forged hashes and verifier nonce replay', t => {
   const f = fixture({ evidenceValid: false }); t.after(() => { f.db.close(); f.trustDb.close(); }); withVerifierEnvironment(t);
-  assert.throws(() => f.verifier.getAttestationRequest(goalId), error => error.code === 'KNOWLEDGE_EVIDENCE_LINEAGE_INVALID');
+  const invalidEvidenceRequest = f.verifier.getAttestationRequest(goalId);
+  assert.equal(invalidEvidenceRequest.eligibleForAttestation, false);
+  assert.ok(invalidEvidenceRequest.attestationBlockers.some(item => item.code === 'KNOWLEDGE_EVIDENCE_LINEAGE_INVALID'));
+  assert.throws(() => f.verifier.attest(signedAttestation(invalidEvidenceRequest)),
+    error => error.code === 'KNOWLEDGE_EVIDENCE_LINEAGE_INVALID');
 
   const clean = fixture(); t.after(() => { clean.db.close(); clean.trustDb.close(); });
   const request = clean.verifier.getAttestationRequest(goalId);

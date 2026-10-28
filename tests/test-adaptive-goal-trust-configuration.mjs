@@ -13,6 +13,7 @@ import {
   adaptiveGoalTrustConfigurationStatus,
   assertAdaptiveGoalTrustDomainsDisjoint,
   findAdaptiveGoalTrustedRoot,
+  isAdaptiveGoalTrustConfigurationProvided,
   inspectAdaptiveGoalTrustConfigurationHistory,
   loadAdaptiveGoalTrustConfiguration
 } from '../src/runtime/adaptive-goal-trust-configuration.js';
@@ -114,9 +115,43 @@ test('fails closed on absent, empty, malformed or duplicate-key JSON config and 
   process.env[KNOWLEDGE.configJsonEnv] = '';
   process.env[KNOWLEDGE.providerEnv] = 'legacy-provider';
   process.env[KNOWLEDGE.publicKeyEnv] = root().pem;
-  assert.throws(() => load(), error => error.code === 'AGG_TRUST_CONFIG_SCHEMA_INVALID');
+  assert.throws(() => load(), error => error.code === 'AGG_TRUST_CONFIG_NOT_CONFIGURED',
+    'a blank optional host-config field must report missing administration input and must not fall back to the legacy public root');
+  process.env[KNOWLEDGE.configJsonEnv] = '${user_config.goal_idea_verifier_trust_config_json}';
+  assert.throws(() => load(), error => error.code === 'AGG_TRUST_CONFIG_NOT_CONFIGURED',
+    'a host that fails to interpolate the MCPB user_config token must be diagnosed as missing configuration, not as a valid config or an allowed legacy fallback');
   process.env[KNOWLEDGE.configJsonEnv] = '{"schema_version":1,"schema_version":1}';
   assert.throws(() => load(), /duplicate decoded object key/);
+});
+
+test('optional host JSON fields are absent for blank or unresolved placeholders without enabling legacy fallback', t => {
+  const oldJson = process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON;
+  const oldProvider = process.env.AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID;
+  const oldPem = process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM;
+  t.after(() => {
+    if (oldJson === undefined) delete process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON;
+    else process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON = oldJson;
+    if (oldProvider === undefined) delete process.env.AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID;
+    else process.env.AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID = oldProvider;
+    if (oldPem === undefined) delete process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM;
+    else process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM = oldPem;
+  });
+  const options = { configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
+    providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID', publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM' };
+  process.env[options.configJsonEnv] = '';
+  process.env[options.providerEnv] = 'legacy-provider-must-not-fallback';
+  process.env[options.publicKeyEnv] = root().pem;
+  assert.equal(isAdaptiveGoalTrustConfigurationProvided(options), false,
+    'blank optional user_config is not a supplied peer domain');
+  assert.throws(() => load({ ...KNOWLEDGE, configJsonEnv: options.configJsonEnv,
+    providerEnv: options.providerEnv, publicKeyEnv: options.publicKeyEnv }),
+  error => error.code === 'AGG_TRUST_CONFIG_NOT_CONFIGURED', 'the domain loader must still suppress legacy fallback');
+  process.env[options.configJsonEnv] = '${user_config.goal_idea_verifier_trust_config_json}';
+  assert.equal(isAdaptiveGoalTrustConfigurationProvided(options), true,
+    'a non-empty unresolved placeholder must trigger fail-closed peer validation instead of being silently ignored');
+  process.env[options.configJsonEnv] = '{';
+  assert.equal(isAdaptiveGoalTrustConfigurationProvided(options), true,
+    'non-empty malformed JSON is supplied input and must cause a fail-closed peer validation');
 });
 
 test('rejects unknown fields, invalid Ed25519 roots, repeated IDs/fingerprints, wrong scope and windows', t => {

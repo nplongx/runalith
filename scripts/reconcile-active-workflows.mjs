@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { validateAdaptiveGoalProducerLineage } from '../src/runtime/adaptive-goal-evidence-lineage.js';
 import { resolveAdaptiveGoalSourceEvidence } from '../src/runtime/adaptive-goal-source-evidence.js';
 import { getAgentContract } from '../src/runtime/workflow/agent-contracts.js';
+import { artifactSchemaForType, validateArtifactContent } from '../src/runtime/workflow/artifacts.js';
 
 const DEFAULT_DB = path.join(process.env.HOME || '/tmp', '.chat-on-steroids', 'agent-orchestrator', 'workflow.db');
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
@@ -32,7 +33,11 @@ const RECONCILIATION_FINDING_GUIDANCE = Object.freeze({
   ACTIVE_TASK_POINTER_NOT_RUNNING: ['jobs,tasks', 'Verify the active-task pointer and exact task lifecycle record; do not infer dispatch or completion.'],
   RUNNING_TASKS_WITHOUT_ACTIVE_LEASES: ['tasks,task_leases', 'Confirm host/provider worker identity and lease fencing; absent leases do not prove the worker is dead.'],
   ACTIVE_TASK_POINTER_MISSING_OR_UNRESOLVED: ['jobs,tasks', 'Resolve the active task pointer from authoritative workflow state and retain HOLD until the owner confirms lineage.'],
-  WORKFLOW_RUNTIME_HAS_LAST_ERROR: ['workflow_runtime_state', 'Inspect the runtime error and correlated event/attempt/result lineage; do not automatically retry or terminalize.']
+  WORKFLOW_RUNTIME_HAS_LAST_ERROR: ['workflow_runtime_state', 'Inspect the runtime error and correlated event/attempt/result lineage; do not automatically retry or terminalize.'],
+  TASK_LINEAGE_INVENTORY_TRUNCATED: ['tasks,attempts,results,artifacts,task_leases', 'The diagnostic inventory is bounded and incomplete; re-run a scoped report and inspect the full authoritative records before any lifecycle decision.'],
+  TASK_DEPENDENCY_JSON_INVALID: ['tasks', 'Validate the persisted dependency_json bytes and recover only through an owner-approved workflow repair; do not infer task ordering.'],
+  TASK_DEPENDENCY_REFERENCE_INVALID: ['tasks', 'Resolve every parent/dependency reference to a task in the same job and preserve the existing DAG until the workflow owner authorizes repair.'],
+  TASK_DEPENDENCY_CYCLE: ['tasks', 'Inspect the complete same-job task DAG and correct it only through an approved workflow migration; do not dispatch a cyclic graph.']
 });
 
 function fail(code, message) { throw Object.assign(new Error(`${code}: ${message}`), { code }); }
@@ -187,6 +192,17 @@ export function revalidatePlannerEvidenceLineage(db, evidenceRow) {
       artifact.metadata_json !== JSON.stringify({ schema_version: artifact.schema_version })) {
     add('PLANNER_EVIDENCE_ARTIFACT_METADATA_INVALID');
   }
+  // Recompute the typed producer contract from current durable bytes. A caller
+  // can rewrite both content and content_hash consistently, so a matching hash
+  // alone must not make a schema-invalid artifact eligible for graph evidence.
+  try {
+    const schema = artifactSchemaForType(artifact.kind);
+    const content = typeof artifact.content === 'string' ? JSON.parse(artifact.content) : null;
+    if (artifact.schema_version !== schema.schema_version) add('PLANNER_EVIDENCE_ARTIFACT_SCHEMA_VERSION_UNSUPPORTED');
+    validateArtifactContent(artifact.kind, content);
+  } catch {
+    add('PLANNER_EVIDENCE_ARTIFACT_SCHEMA_INVALID');
+  }
   let roleContract = null;
   try { roleContract = getAgentContract(artifact.producer_role); } catch {}
   const producerTask = db.prepare('SELECT task_id,job_id,role,status FROM tasks WHERE task_id=?').get(artifact.task_id);
@@ -308,7 +324,7 @@ export function revalidatePlannerEvidenceLineage(db, evidenceRow) {
  * It deliberately does not verify signatures or trust roots: those require
  * independently administered host configuration, not a diagnostic report.
  */
-export function buildAdaptiveGoalGraphIntegrityReport(db) {
+export function buildAdaptiveGoalGraphIntegrityReport(db, { includeSensitiveSourceIdentifiers = false } = {}) {
   const graphTables = [
     'adaptive_goal_knowledge_nodes', 'adaptive_goal_knowledge_revisions',
     'adaptive_goal_knowledge_memberships', 'adaptive_goal_knowledge_edges', 'adaptive_goal_knowledge_verifications'
@@ -533,6 +549,92 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
         memberships: snapshotMemberships, edges: snapshotEdges };
       if (!graphInventoryTruncated) snapshotHash = hash(canonicalJson(snapshot));
     } catch { addFinding('KNOWLEDGE_SNAPSHOT_CANONICALIZATION_FAILED', 'goal', goalId); }
+    // Evidence readiness is intentionally separate from structural integrity.
+    // A structurally well-formed graph with zero or stale evidence must not
+    // look planning-ready merely because its canonical snapshot hash matches.
+    const declaredEvidenceRefs = [...new Set([
+      ...snapshotNodes.flatMap(node => Array.isArray(node.evidence_refs) ? node.evidence_refs : []),
+      ...snapshotEdges.flatMap(edge => [
+        ...(Array.isArray(edge.evidence_refs) ? edge.evidence_refs : []),
+        ...(Array.isArray(edge.outcome?.evidenceRefs) ? edge.outcome.evidenceRefs : [])
+      ])
+    ])].sort();
+    const evidenceBlockers = [];
+    const addEvidenceBlocker = (code, message, reference = undefined) => {
+      if (!evidenceBlockers.some(item => item.code === code && item.reference === reference)) {
+        evidenceBlockers.push({ code, message, ...(reference ? { reference } : {}) });
+      }
+    };
+    const evidenceAssessments = [];
+    if (graphInventoryTruncated) addEvidenceBlocker('KNOWLEDGE_EVIDENCE_INVENTORY_INCOMPLETE',
+      'Graph inventory was truncated; evidence eligibility cannot be established from a partial snapshot.');
+    if (declaredEvidenceRefs.length === 0) addEvidenceBlocker('KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY',
+      'Goal/Idea Graph has no durable evidence references; create fresh producer-bound artifact:// evidence before requesting attestation.');
+    if (declaredEvidenceRefs.length > 2048) addEvidenceBlocker('KNOWLEDGE_EVIDENCE_REFERENCE_LIMIT_EXCEEDED',
+      'Evidence reference inventory exceeds the bounded read-only assessment limit of 2048 references.');
+    const boundedEvidenceRefs = declaredEvidenceRefs.slice(0, 2048);
+    const artifactRefs = boundedEvidenceRefs.filter(reference => typeof reference === 'string' && reference.startsWith('artifact://'));
+    const sourceRefs = boundedEvidenceRefs.filter(reference => typeof reference === 'string' && reference.startsWith('file:'));
+    const unsupportedRefs = boundedEvidenceRefs.filter(reference => typeof reference !== 'string' ||
+      (!reference.startsWith('artifact://') && !reference.startsWith('file:')));
+    for (const reference of unsupportedRefs) addEvidenceBlocker('KNOWLEDGE_EVIDENCE_REFERENCE_UNSUPPORTED',
+      'Evidence reference is neither a durable artifact:// URI nor a content-addressed file: reference.', String(reference));
+    const sourceAssessments = new Map();
+    if (sourceRefs.length) {
+      try {
+        for (const item of resolveAdaptiveGoalSourceEvidence(sourceRefs, { root: REPO_ROOT })) sourceAssessments.set(item.reference, item);
+      } catch (error) {
+        addEvidenceBlocker('KNOWLEDGE_SOURCE_EVIDENCE_ASSESSMENT_FAILED',
+          `Content-addressed source evidence assessment failed closed: ${String(error?.message || error)}`);
+      }
+    }
+    for (const reference of boundedEvidenceRefs) {
+      let assessment;
+      if (typeof reference !== 'string') {
+        assessment = { reference: String(reference), status: 'invalid_reference', valid: false, blockers: ['KNOWLEDGE_EVIDENCE_REFERENCE_UNSUPPORTED'] };
+      } else if (reference.startsWith('artifact://')) {
+        const artifactId = reference.slice('artifact://'.length);
+        const artifact = tableExists(db, 'artifacts') && artifactId
+          ? db.prepare('SELECT artifact_id,job_id,content_hash FROM artifacts WHERE artifact_id=?').get(artifactId) : null;
+        if (!artifact || reference !== `artifact://${artifact.artifact_id}` || typeof artifact.job_id !== 'string' || !artifact.job_id) {
+          assessment = { reference, status: 'artifact_missing_or_unbound', valid: false,
+            blockers: ['KNOWLEDGE_ARTIFACT_EVIDENCE_UNRESOLVED'] };
+        } else {
+          const lineage = revalidatePlannerEvidenceLineage(db, { reference, artifact_id: artifact.artifact_id,
+            source_job_id: artifact.job_id, content_hash: artifact.content_hash });
+          assessment = { reference, status: lineage.valid ? 'durable_artifact_lineage_verified_claim_unverified' : 'durable_artifact_lineage_invalid',
+            valid: lineage.valid === true, artifactId: artifact.artifact_id, sourceJobId: artifact.job_id,
+            producerTaskId: lineage.producerTaskId ?? null, producerAttemptId: lineage.producerAttemptId ?? null,
+            producerResultId: lineage.producerResultId ?? null, producerCompletionEventId: lineage.producerCompletionEventId ?? null,
+            blockers: (lineage.blockers || []).map(item => item.code) };
+        }
+      } else if (reference.startsWith('file:')) {
+        const source = sourceAssessments.get(reference);
+        const valid = source?.classification === 'source_bytes_verified_claim_unverified' && source.integrityVerified === true &&
+          source.claimVerified === false && source.independenceVerified === false && source.expectedSha256 === source.observedSha256;
+        assessment = { reference, status: valid ? 'source_bytes_verified_claim_unverified' : (source?.classification || 'source_unresolved'),
+          valid, expectedSha256: source?.expectedSha256 ?? null, observedSha256: source?.observedSha256 ?? null,
+          blockers: valid ? [] : ['KNOWLEDGE_SOURCE_BYTES_INVALID'] };
+      } else {
+        assessment = { reference, status: 'unsupported_reference', valid: false, blockers: ['KNOWLEDGE_EVIDENCE_REFERENCE_UNSUPPORTED'] };
+      }
+      evidenceAssessments.push(assessment);
+      if (!assessment.valid) for (const code of assessment.blockers.length ? assessment.blockers : ['KNOWLEDGE_EVIDENCE_LINEAGE_INVALID']) {
+        addEvidenceBlocker(code, `Evidence reference did not pass current durable byte/producer-lineage checks: ${reference}`, reference);
+      }
+    }
+    for (const node of snapshotNodes) {
+      if (node.type === 'experiment' && !node.evidence_refs.some(reference => typeof reference === 'string' && reference.startsWith('artifact://'))) {
+        addEvidenceBlocker('KNOWLEDGE_ACTION_EVIDENCE_MISSING',
+          `Action/experiment node ${node.id} has no durable artifact:// evidence reference.`, node.id);
+      }
+      if (node.type === 'evidence' && !node.evidence_refs.some(reference => typeof reference === 'string' &&
+          (reference.startsWith('artifact://') || reference.startsWith('file:')))) {
+        addEvidenceBlocker('KNOWLEDGE_EVIDENCE_NODE_EMPTY', `Evidence node ${node.id} has no durable source reference.`, node.id);
+      }
+    }
+    const evidenceEligible = !evidenceBlockers.length && evidenceAssessments.length > 0 &&
+      evidenceAssessments.every(item => item.valid === true);
     const goalFindings = findings.filter(item => (item.recordType === 'goal' && item.recordId === goalId) ||
       item.recordType === 'inventory' ||
       (item.recordType === 'attestation' && goalAttestations.some(attestation => attestation.attestationId === item.recordId)) ||
@@ -560,6 +662,12 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
     return { goalId, nodeCount: goalNodeIds.size, edgeCount: snapshotEdges.length,
       membershipCount: goalMemberships.length, snapshotHash,
       graphIntegrity: graphInventoryTruncated ? 'INCOMPLETE_INVENTORY' : goalFindings.length ? 'INVALID' : 'NO_STRUCTURAL_FINDINGS',
+      evidenceAssessment: { status: evidenceEligible ? 'EVIDENCE_MATERIAL_ELIGIBLE_FOR_EXTERNAL_ATTESTATION' : 'BLOCKED',
+        declaredReferenceCount: declaredEvidenceRefs.length, assessedReferenceCount: evidenceAssessments.length,
+        artifactReferenceCount: artifactRefs.length, sourceReferenceCount: sourceRefs.length,
+        invalidReferenceCount: evidenceAssessments.filter(item => item.valid !== true).length,
+        eligibleForExternalAttestation: evidenceEligible, claimTruthVerified: false, independenceVerified: false,
+        cryptographicSignatureVerificationAttempted: false, references: evidenceAssessments, blockers: evidenceBlockers },
       findingCount: goalFindings.length, attestationCount: goalAttestations.length,
       currentSnapshotBindingCount: currentBindings, staleAttestationCount: goalAttestations.filter(row => row.bindingStatus === 'stale_snapshot').length,
       attestations: goalAttestations, planningAuthority: 'NOT_ESTABLISHED_BY_READ_ONLY_DIAGNOSTICS' };
@@ -612,9 +720,25 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
           try { resolved = resolveAdaptiveGoalSourceEvidence([row.reference], { root: REPO_ROOT })[0]; }
           catch { resolved = { classification: 'source_resolver_failed', integrityVerified: false }; }
           const details = parseJsonForIntegrity(row.details_json) || {};
+          const uriHash = (row.reference.match(/#sha256=([a-f0-9]{64})$/) || [])[1] || null;
           const detailHash = typeof details.sourceBytesSha256 === 'string' ? details.sourceBytesSha256
             : typeof details.expectedSha256 === 'string' ? details.expectedSha256 : null;
-          const digestMatches = detailHash === null ? null : detailHash === resolved.observedSha256 && resolved.integrityVerified === true;
+          const declaredDigestConflict = Boolean(uriHash && detailHash && uriHash !== detailHash);
+          const expectedHash = detailHash || uriHash;
+          const digestMatches = expectedHash === null ? null
+            : !declaredDigestConflict && expectedHash === resolved.observedSha256 && resolved.integrityVerified === true;
+          // Historical source references are redacted by default because they
+          // may disclose workspace paths. Explicit operator opt-in exposes the
+          // exact URI and both digests so a mismatch can be remediated without
+          // editing the immutable historical row or guessing which file failed.
+          if (includeSensitiveSourceIdentifiers) {
+            item.sourceReference = row.reference;
+            item.expectedSourceSha256 = expectedHash;
+            item.uriSourceSha256 = uriHash;
+            item.detailSourceSha256 = detailHash;
+            item.observedSourceSha256 = resolved.observedSha256 ?? null;
+            item.sourceResolutionStatus = resolved.classification || 'source_revalidation_unavailable';
+          }
           item.revalidation = resolved.classification || 'source_revalidation_unavailable';
           item.revalidatedSourceIntegrity = resolved.integrityVerified === true;
           item.revalidatedSourceHashMatchesObservedManifest = digestMatches;
@@ -622,11 +746,16 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
           item.independenceVerified = false;
           if (resolved.integrityVerified === true && digestMatches !== false) sourceBytesCurrentCount += 1;
           else sourceBytesInvalidCount += 1;
-          if (row.classification === 'source_bytes_verified_claim_unverified' && resolved.integrityVerified !== true) {
+          if (row.classification === 'source_bytes_verified_claim_unverified' &&
+              (resolved.integrityVerified !== true || digestMatches === false)) {
             addFinding('PLANNER_SOURCE_BYTES_REPORTED_VERIFIED_BUT_CURRENT_SOURCE_INVALID', 'planner_evidence',
-              `${run.run_id}/${item.evidenceReferenceSha256}`, String(resolved.classification));
+              `${run.run_id}/${item.evidenceReferenceSha256}`, declaredDigestConflict
+                ? 'immutable URI digest conflicts with the historical detail digest'
+                : String(resolved.classification));
           }
-          item.blockers = resolved.integrityVerified === true ? [] : [String(resolved.classification || 'SOURCE_INTEGRITY_UNVERIFIED')];
+          item.blockers = digestMatches === false
+            ? [declaredDigestConflict ? 'PLANNER_SOURCE_EVIDENCE_DECLARED_DIGEST_CONFLICT' : 'PLANNER_SOURCE_EVIDENCE_EXPECTED_DIGEST_MISMATCH']
+            : resolved.integrityVerified === true ? [] : [String(resolved.classification || 'SOURCE_INTEGRITY_UNVERIFIED')];
         } else if (row.observation_source === 'runtime_resolver' && typeof row.reference === 'string' && row.reference.startsWith('artifact://')) {
           item.revalidation = 'not_revalidated_missing_durable_artifact_identity';
           item.blockers = ['PLANNER_EVIDENCE_ARTIFACT_IDENTITY_MISSING'];
@@ -799,6 +928,17 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
         }
         const stepIdBySourceNodeId = new Map(draftSteps.filter(step => isRecord(step) && typeof step.id === 'string' &&
           typeof step.sourceNodeId === 'string').map(step => [step.sourceNodeId, step.id]));
+        // A Plan Graph must cover every actionable Goal/Idea source node, not
+        // merely ensure that each step it happens to contain points somewhere
+        // valid. Otherwise a proposal can silently omit an action and its
+        // prerequisite chain while every remaining step looks locally valid.
+        const actionableSourceNodeIds = new Set([...sourceNodeById.entries()]
+          .filter(([, node]) => ['task', 'experiment'].includes(node.type)).map(([nodeId]) => nodeId));
+        for (const sourceNodeId of actionableSourceNodeIds) {
+          if (!stepIdBySourceNodeId.has(sourceNodeId)) sourceLineageFindings.push({
+            reason: 'SOURCE_ACTION_NODE_NOT_PROJECTED', sourceNodeId
+          });
+        }
         const sourceGraphEdges = Array.isArray(sourceGraph.edges) ? sourceGraph.edges : [];
         for (const [index, edge] of sourceGraphEdges.entries()) {
           if (!isRecord(edge) || !['requires_all', 'depends_on'].includes(edge.type) ||
@@ -807,6 +947,14 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
           const dependentNodeId = edge.type === 'requires_all' ? edge.to : edge.from;
           const prerequisiteStepId = stepIdBySourceNodeId.get(prerequisiteNodeId);
           const dependentStepId = stepIdBySourceNodeId.get(dependentNodeId);
+          const prerequisiteIsActionable = actionableSourceNodeIds.has(prerequisiteNodeId);
+          const dependentIsActionable = actionableSourceNodeIds.has(dependentNodeId);
+          if ((prerequisiteIsActionable && !prerequisiteStepId) || (dependentIsActionable && !dependentStepId)) {
+            sourceLineageFindings.push({ reason: 'SOURCE_GRAPH_PREREQUISITE_NOT_PROJECTED', index,
+              prerequisiteNodeId, dependentNodeId, prerequisiteStepId: prerequisiteStepId ?? null,
+              dependentStepId: dependentStepId ?? null });
+            continue;
+          }
           if (!prerequisiteStepId || !dependentStepId) continue;
           const dependentStep = stepById.get(dependentStepId);
           if (!Array.isArray(dependentStep?.dependencies) || !dependentStep.dependencies.includes(prerequisiteStepId)) {
@@ -907,6 +1055,11 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
           sourceCandidatePlanId: typeof source.candidate_plan_id === 'string' ? source.candidate_plan_id : null,
           sourceGraphHash: typeof source.graph_hash === 'string' ? source.graph_hash : null,
           draftHash: typeof source.draft_hash === 'string' ? source.draft_hash : null,
+          sourceGoalId: typeof knowledgeSnapshot?.goal_id === 'string' ? knowledgeSnapshot.goal_id : null,
+          knowledgeSnapshotHash: typeof knowledgeSnapshot?.snapshot_hash === 'string' ? knowledgeSnapshot.snapshot_hash : null,
+          knowledgeAttestationId: typeof knowledgeSnapshot?.attestation_id === 'string' ? knowledgeSnapshot.attestation_id : null,
+          knowledgeEvidenceManifestHash: typeof knowledgeSnapshot?.evidence_manifest_hash === 'string' ? knowledgeSnapshot.evidence_manifest_hash : null,
+          planStepIds: draftSteps.map(step => isRecord(step) && typeof step.id === 'string' ? step.id : null).filter(Boolean),
           bindingHash: typeof plan.binding_hash === 'string' ? plan.binding_hash : null,
           sourceVerificationStatus, checks,
           readinessAssessment: {
@@ -948,6 +1101,15 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
           proposalHash: typeof snapshot.proposal_hash === 'string' ? snapshot.proposal_hash : null,
           sourcePlanProposalJobId: snapshot.source_plan_proposal_job_id ?? null,
           sourceCandidatePlanId: graph.source?.candidatePlanId ?? null,
+          sourcePlanFingerprint: graph.source?.planProposalFingerprint ?? null,
+          sourceGraphHash: graph.source?.graphHash ?? null,
+          sourceDraftHash: graph.source?.draftHash ?? null,
+          sourceVerificationSnapshotHash: graph.source?.verification?.snapshotHash ?? null,
+          sourceVerificationAttestationId: graph.source?.verification?.attestationId ?? null,
+          taskBindingStepIds: Array.isArray(snapshot.task_bindings)
+            ? snapshot.task_bindings.map(binding => isRecord(binding) ? binding.step_id : null) : [],
+          graphNodeSourceStepIds: Array.isArray(graph.nodes)
+            ? graph.nodes.map(node => isRecord(node) ? node.sourceStepId : null) : [],
           checks, humanApprovalRequired: true, authorizationGranted: false,
           graphFlags: isRecord(graph.gates) ? { dispatchAllowed: graph.gates.dispatchAllowed === true,
             executionAuthorized: graph.gates.executionAuthorized === true, immutableExecutionPlanCreated: graph.gates.immutableExecutionPlanCreated === true } : null });
@@ -965,12 +1127,63 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
     }
     if (proposalEventInventoryTruncated) proposalFindings.push({ code: 'AGG_PROPOSAL_EVENT_INVENTORY_TRUNCATED', inspected: 5000, observedAtLeast: proposalEventCount });
   }
+  // Reconcile the complete Plan → Execution Graph hand-off, rather than
+  // treating a non-empty source job ID and an array-shaped task_bindings field
+  // as sufficient linkage. These are integrity checks only; no signature or
+  // reviewer authority is inferred from unkeyed fingerprints.
+  const planProposalsByJobId = new Map();
+  for (const record of proposalRecords.filter(item => item.kind === 'plan_graph_proposal')) {
+    const list = planProposalsByJobId.get(record.jobId) || [];
+    list.push(record);
+    planProposalsByJobId.set(record.jobId, list);
+  }
+  const currentGoalById = new Map(goalReports.map(goal => [goal.goalId, goal]));
+  for (const record of proposalRecords.filter(item => item.kind === 'execution_graph_proposal')) {
+    const sourceMatches = planProposalsByJobId.get(record.sourcePlanProposalJobId) || [];
+    const sourcePlan = sourceMatches.length === 1 ? sourceMatches[0] : null;
+    const uniqueBindingIds = new Set(record.taskBindingStepIds.filter(id => typeof id === 'string' && id.trim()));
+    const uniqueGraphStepIds = new Set(record.graphNodeSourceStepIds.filter(id => typeof id === 'string' && id.trim()));
+    const planStepIds = new Set(sourcePlan?.planStepIds || []);
+    const exactBindings = Boolean(sourcePlan && record.taskBindingStepIds.length === sourcePlan.planStepIds.length &&
+      uniqueBindingIds.size === record.taskBindingStepIds.length &&
+      [...planStepIds].every(id => uniqueBindingIds.has(id)) &&
+      record.graphNodeSourceStepIds.length === sourcePlan.planStepIds.length &&
+      uniqueGraphStepIds.size === record.graphNodeSourceStepIds.length &&
+      [...planStepIds].every(id => uniqueGraphStepIds.has(id)));
+    const currentGoal = sourcePlan?.sourceGoalId ? currentGoalById.get(sourcePlan.sourceGoalId) : null;
+    const checks = {
+      sourcePlanProposalResolvedUniquely: sourceMatches.length === 1,
+      sourcePlanFingerprintMatches: Boolean(sourcePlan && record.sourcePlanFingerprint === sourcePlan.fingerprint),
+      sourceCandidatePlanIdMatches: Boolean(sourcePlan && record.sourceCandidatePlanId === sourcePlan.sourceCandidatePlanId),
+      sourceGraphHashMatches: Boolean(sourcePlan && record.sourceGraphHash === sourcePlan.sourceGraphHash),
+      sourceDraftHashMatches: Boolean(sourcePlan && record.sourceDraftHash === sourcePlan.draftHash),
+      sourceVerificationSnapshotMatchesPlan: Boolean(sourcePlan && record.sourceVerificationSnapshotHash === sourcePlan.knowledgeSnapshotHash),
+      sourceVerificationAttestationMatchesPlan: Boolean(sourcePlan && record.sourceVerificationAttestationId === sourcePlan.knowledgeAttestationId),
+      taskBindingsExactlyCoverPlanSteps: exactBindings,
+      currentGoalSnapshotMatchesPlanBinding: Boolean(sourcePlan && currentGoal && sourcePlan.knowledgeSnapshotHash &&
+        currentGoal.snapshotHash === sourcePlan.knowledgeSnapshotHash),
+      signatureVerificationPerformed: false,
+      reviewerAuthorityVerified: false
+    };
+    record.crossGraphConsistency = { status: Object.entries(checks).filter(([key, value]) =>
+      !['signatureVerificationPerformed', 'reviewerAuthorityVerified'].includes(key) && value !== true).length ? 'BLOCKED' : 'INTERNAL_BINDINGS_CONSISTENT_ONLY',
+      checks, sourcePlanEventId: sourcePlan?.eventId ?? null,
+      currentGoalSnapshotHash: currentGoal?.snapshotHash ?? null,
+      planningAuthorityEstablished: false, reviewerAuthorityVerified: false };
+    const failedChecks = Object.entries(checks).filter(([key, value]) =>
+      !['signatureVerificationPerformed', 'reviewerAuthorityVerified'].includes(key) && value !== true).map(([key]) => key);
+    if (failedChecks.length) proposalFindings.push({ code: 'AGG_EXECUTION_GRAPH_SOURCE_PLAN_LINKAGE_INVALID',
+      eventId: record.eventId, jobId: record.jobId, sourcePlanProposalJobId: record.sourcePlanProposalJobId,
+      failedChecks, authorityEstablished: false });
+  }
   const proposalSummary = {
     proposalEventsObserved: proposalEventCount,
     proposalRecordsObserved: proposalRecords.length,
     planGraphProposals: proposalRecords.filter(item => item.kind === 'plan_graph_proposal').length,
     executionGraphProposals: proposalRecords.filter(item => item.kind === 'execution_graph_proposal').length,
     executionPlanCandidateEvents: proposalRecords.filter(item => item.kind === 'execution_plan_candidate_event').length,
+    executionGraphProposalsWithInvalidSourcePlanLinkage: proposalRecords.filter(item => item.kind === 'execution_graph_proposal')
+      .filter(item => item.crossGraphConsistency?.status === 'BLOCKED').length,
     planGraphStepsObserved: proposalRecords.filter(item => item.kind === 'plan_graph_proposal')
       .reduce((sum, item) => sum + (item.readinessAssessment?.stepCount || 0), 0),
     planGraphStepsMissingEvidence: proposalRecords.filter(item => item.kind === 'plan_graph_proposal')
@@ -994,12 +1207,16 @@ export function buildAdaptiveGoalGraphIntegrityReport(db) {
     summary: { findingCount: findings.length, findingCounts,
       goalsWithCurrentSnapshotBindingOnly: goalReports.filter(goal => goal.currentSnapshotBindingCount > 0).length,
       goalsWithoutAnyAttestation: goalReports.filter(goal => goal.attestationCount === 0).length,
+      goalsWithEvidenceIneligible: goalReports.filter(goal => goal.evidenceAssessment?.eligibleForExternalAttestation !== true).length,
+      goalEvidenceReferenceCount: goalReports.reduce((sum, goal) => sum + (goal.evidenceAssessment?.declaredReferenceCount || 0), 0),
       planningAuthorityEstablished: false },
     goals: goalReports, findings, plannerSummary, plannerRuns: plannerRunRecords,
     proposalSummary, proposalRecords, proposalFindings,
     policy: { readOnly: true, signatureVerificationAttempted: false, selfAssertedVerificationFlagsAreNotAuthority: true,
       currentSnapshotBindingDoesNotProveSignatureValidity: true, missingAttestationBlocksPlanning: true,
-      trustConfigAndExternalAnchorRequiredForPlanningAuthority: true } };
+      trustConfigAndExternalAnchorRequiredForPlanningAuthority: true,
+      sensitiveSourceIdentifiersIncluded: includeSensitiveSourceIdentifiers,
+      sensitiveSourceIdentifiersRequireExplicitOptIn: true } };
 }
 
 function summarizePayload(value, result = {}, depth = 0) {
@@ -1055,18 +1272,38 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
     'execution_attempt', 'execution_pid', 'execution_exit_code', 'execution_started_at', 'execution_finished_at'
   ], 'WHERE job_id=?', [jobId], 'ORDER BY created_at, task_id');
   return tasks.map(task => {
+    const observedCounts = {
+      attempts: db.prepare('SELECT COUNT(*) AS n FROM attempts WHERE task_id=?').get(task.task_id).n,
+      results: db.prepare('SELECT COUNT(*) AS n FROM results WHERE task_id=?').get(task.task_id).n,
+      artifacts: db.prepare('SELECT COUNT(*) AS n FROM artifacts WHERE task_id=?').get(task.task_id).n,
+      leases: db.prepare('SELECT COUNT(*) AS n FROM task_leases WHERE task_id=?').get(task.task_id).n,
+      activeLeases: db.prepare("SELECT COUNT(*) AS n FROM task_leases WHERE task_id=? AND UPPER(state)='ACTIVE'").get(task.task_id).n
+    };
     const attempts = selectAvailable(db, 'attempts', ['attempt_id', 'task_id', 'status', 'openclaw_run_id', 'started_at', 'finished_at', 'error'],
       'WHERE task_id=?', [task.task_id], 'ORDER BY started_at DESC, rowid DESC', 'LIMIT 5');
     const results = selectAvailable(db, 'results', ['result_id', 'task_id', 'outcome', 'created_at'],
       'WHERE task_id=?', [task.task_id], 'ORDER BY created_at DESC, rowid DESC', 'LIMIT 5');
     const artifacts = selectAvailable(db, 'artifacts', ['artifact_id', 'job_id', 'task_id', 'kind', 'created_at', 'schema_version',
       'producer_role', 'status', 'supersedes', 'content_hash'], 'WHERE task_id=?', [task.task_id], 'ORDER BY created_at DESC, rowid DESC', 'LIMIT 8');
-    const leases = selectAvailable(db, 'task_leases', ['lease_id', 'task_id', 'job_id', 'attempt', 'worker_id', 'state', 'issued_at',
-      'heartbeat_at', 'expires_at', 'released_at', 'last_error', 'owner_epoch'], 'WHERE task_id=?', [task.task_id], 'ORDER BY rowid DESC', 'LIMIT 5');
+    const leaseColumns = ['lease_id', 'task_id', 'job_id', 'attempt', 'worker_id', 'state', 'issued_at',
+      'heartbeat_at', 'expires_at', 'released_at', 'last_error', 'owner_epoch'];
+    const recentLeases = selectAvailable(db, 'task_leases', leaseColumns, 'WHERE task_id=?', [task.task_id], 'ORDER BY rowid DESC', 'LIMIT 5');
+    // Inspect active leases independently of the recent-history display window;
+    // otherwise an older active lease can be hidden behind five newer released
+    // rows and the report can falsely claim that a running task has no lease.
+    const activeLeaseRows = selectAvailable(db, 'task_leases', leaseColumns,
+      "WHERE task_id=? AND UPPER(state)='ACTIVE'", [task.task_id], 'ORDER BY rowid DESC', 'LIMIT 1001');
+    const activeLeaseInventoryTruncated = activeLeaseRows.length > 1000;
+    const activeLeases = activeLeaseRows.slice(0, 1000);
+    const leasesById = new Map([...recentLeases, ...activeLeases].map(lease => [lease.lease_id, lease]));
+    const leases = [...leasesById.values()].sort((a, b) => String(b.issued_at || '').localeCompare(String(a.issued_at || '')));
     const latestAttempt = attempts[0] || null;
-    const activeLeases = leases.filter(lease => String(lease.state || '').toUpperCase() === 'ACTIVE');
     const updatedAge = ageMs(task.updated_at, nowMs);
     const flags = [];
+    const truncated = { attempts: observedCounts.attempts > attempts.length, results: observedCounts.results > results.length,
+      artifacts: observedCounts.artifacts > artifacts.length,
+      leases: observedCounts.activeLeases > activeLeases.length || activeLeaseInventoryTruncated || observedCounts.leases > leases.length };
+    if (Object.values(truncated).some(Boolean)) flags.push('TASK_LINEAGE_INVENTORY_TRUNCATED');
     if (task.status === 'running' && Number(task.execution_attempt ?? 0) === 0 && !task.execution_started_at && task.execution_pid == null && !task.execution_session_id) {
       flags.push('RUNNING_TASK_WITHOUT_EXECUTION_METADATA');
     }
@@ -1099,12 +1336,6 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
       ? latestAttempt.openclaw_run_id : null;
     if (taskRunId && attemptRunId && taskRunId !== attemptRunId) flags.push('TASK_ATTEMPT_PROVIDER_RUN_ID_MISMATCH');
     if ((taskRunId && !attemptRunId) || (!taskRunId && attemptRunId)) flags.push('TASK_ATTEMPT_PROVIDER_RUN_ID_BINDING_INCOMPLETE');
-    const observedCounts = {
-      attempts: selectAvailable(db, 'attempts', ['attempt_id'], 'WHERE task_id=?', [task.task_id]).length,
-      results: selectAvailable(db, 'results', ['result_id'], 'WHERE task_id=?', [task.task_id]).length,
-      artifacts: selectAvailable(db, 'artifacts', ['artifact_id'], 'WHERE task_id=?', [task.task_id]).length,
-      leases: selectAvailable(db, 'task_leases', ['lease_id'], 'WHERE task_id=?', [task.task_id]).length
-    };
     return {
       task: {
         taskId: task.task_id, role: task.role, status: task.status, updatedAt: task.updated_at, ageSinceUpdateMs: updatedAge,
@@ -1152,9 +1383,9 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
         latestAttemptProviderRunId: attemptRunId,
         providerRunIdentityBinding: taskRunId && attemptRunId ? (taskRunId === attemptRunId ? 'matching' : 'mismatch')
           : taskRunId || attemptRunId ? 'incomplete' : 'unavailable',
+        activeLeaseCountObserved: observedCounts.activeLeases,
         observedCounts,
-        truncated: { attempts: observedCounts.attempts > attempts.length, results: observedCounts.results > results.length,
-          artifacts: observedCounts.artifacts > artifacts.length, leases: observedCounts.leases > leases.length },
+        truncated,
         ownerAuthority: 'not_persisted_in_supported_workflow_schema',
         providerIdentity: 'not_persisted_in_supported_workflow_schema'
       },
@@ -1165,6 +1396,36 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
 
 function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   const tasks = listTaskRows(db, job.job_id, { nowMs, procRoot });
+  const taskById = new Map(tasks.map(entry => [entry.task.taskId, entry]));
+  for (const entry of tasks) {
+    const task = entry.task;
+    const dependencies = task.dependencyIds;
+    if (!Array.isArray(dependencies) || dependencies.some(id => typeof id !== 'string' || !id.trim()) ||
+        new Set(dependencies).size !== dependencies.length) {
+      entry.flags.push('TASK_DEPENDENCY_JSON_INVALID');
+      continue;
+    }
+    if (task.parentTaskId && !taskById.has(task.parentTaskId)) entry.flags.push('TASK_DEPENDENCY_REFERENCE_INVALID');
+    if (dependencies.some(id => !taskById.has(id))) entry.flags.push('TASK_DEPENDENCY_REFERENCE_INVALID');
+  }
+  // Check the full same-job dependency graph for cycles, not just individual
+  // references. Dependency order is durable workflow data and must not be
+  // repaired automatically by a diagnostic tool.
+  const visitState = new Map();
+  const cyclicTaskIds = new Set();
+  const visitTask = (taskId, stack = []) => {
+    const state = visitState.get(taskId) || 0;
+    if (state === 2) return;
+    if (state === 1) { for (const id of stack.slice(stack.indexOf(taskId))) cyclicTaskIds.add(id); cyclicTaskIds.add(taskId); return; }
+    visitState.set(taskId, 1);
+    const entry = taskById.get(taskId);
+    for (const dependencyId of Array.isArray(entry?.task.dependencyIds) ? entry.task.dependencyIds : []) {
+      if (taskById.has(dependencyId)) visitTask(dependencyId, [...stack, taskId]);
+    }
+    visitState.set(taskId, 2);
+  };
+  for (const taskId of taskById.keys()) visitTask(taskId);
+  for (const taskId of cyclicTaskIds) taskById.get(taskId)?.flags.push('TASK_DEPENDENCY_CYCLE');
   // The compact latestEvents window is useful for display, but must not be
   // used as the complete event identity for reconciliation. Correlate every
   // durable event that names a task, retaining identifiers and bounded payload
@@ -1201,6 +1462,7 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   const approvals = selectAvailable(db, 'approvals', ['approval_id', 'job_id', 'decision', 'actor', 'proposal_hash', 'created_at'],
     'WHERE job_id=?', [job.job_id], 'ORDER BY created_at DESC, rowid DESC', 'LIMIT 8');
   const activeLeases = tasks.flatMap(entry => entry.leases).filter(lease => String(lease.state || '').toUpperCase() === 'ACTIVE');
+  const activeLeaseCountObserved = tasks.reduce((sum, entry) => sum + (entry.lineageAssessment.activeLeaseCountObserved || 0), 0);
   const runningTasks = tasks.filter(entry => String(entry.task.status).toLowerCase() === 'running');
   const currentTaskEntry = tasks.find(entry => entry.task.taskId === job.active_task_id) || null;
   const taskTimes = tasks.map(entry => entry.task.updatedAt);
@@ -1223,7 +1485,7 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   if (activeTaskCompletionAfterUpdate) flags.push('COMPLETION_EVENT_NEWER_THAN_ACTIVE_TASK_ROW');
   if (state === 'EXECUTING' && runningTasks.length === 0) flags.push('EXECUTING_JOB_WITHOUT_RUNNING_TASKS');
   if (state === 'EXECUTING' && currentTaskEntry && currentTaskEntry.task.status !== 'running') flags.push('ACTIVE_TASK_POINTER_NOT_RUNNING');
-  if (state === 'EXECUTING' && runningTasks.length && !activeLeases.length) flags.push('RUNNING_TASKS_WITHOUT_ACTIVE_LEASES');
+  if (state === 'EXECUTING' && runningTasks.length && activeLeaseCountObserved === 0) flags.push('RUNNING_TASKS_WITHOUT_ACTIVE_LEASES');
   if (state === 'EXECUTING' && !currentTaskEntry) flags.push('ACTIVE_TASK_POINTER_MISSING_OR_UNRESOLVED');
   if (runtime?.last_error) flags.push('WORKFLOW_RUNTIME_HAS_LAST_ERROR');
 
@@ -1286,7 +1548,7 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
         ? Number(runtime.attempt) === Number(currentTaskEntry.task.executionAttempt) : null,
       providerIdentity: 'not_persisted_in_workflow_runtime_state_schema' } : { status: 'missing' },
     taskCounts: tasks.reduce((acc, entry) => { acc[entry.task.status] = (acc[entry.task.status] || 0) + 1; return acc; }, {}),
-    runningTaskCount: runningTasks.length, activeLeaseCount: activeLeases.length,
+    runningTaskCount: runningTasks.length, activeLeaseCount: activeLeaseCountObserved,
     resultCount: selectAvailable(db, 'results', ['result_id'], 'WHERE task_id IN (SELECT task_id FROM tasks WHERE job_id=?)', [job.job_id]).length,
     artifactCount: selectAvailable(db, 'artifacts', ['artifact_id'], 'WHERE job_id=? AND (status IS NULL OR status<>?)', [job.job_id, 'inactive']).length,
     latestApproval: approvals[0] ? { decision: approvals[0].decision, actor: approvals[0].actor, createdAt: approvals[0].created_at,
@@ -1301,7 +1563,7 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
 }
 
 export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limit = 200, staleAfterMs = 900_000,
-  now = new Date().toISOString(), procRoot = '/proc' } = {}) {
+  now = new Date().toISOString(), procRoot = '/proc', includeSensitiveSourceIdentifiers = false } = {}) {
   if (!db || typeof db.prepare !== 'function') fail('RECONCILIATION_DB_REQUIRED', 'a SQLite read-only connection is required');
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_REPORT_JOBS) fail('RECONCILIATION_LIMIT_INVALID', `limit must be 1..${MAX_REPORT_JOBS}`);
   if (!Number.isSafeInteger(staleAfterMs) || staleAfterMs < 60_000 || staleAfterMs > 7 * 24 * 60 * 60 * 1000) fail('RECONCILIATION_STALE_AFTER_INVALID', 'stale_after_ms must be 60,000..604,800,000');
@@ -1374,7 +1636,7 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
   const countBy = key => diagnostics.reduce((counts, item) => { counts[item[key]] = (counts[item[key]] || 0) + 1; return counts; }, {});
   const tableSummary = Object.fromEntries(['jobs', 'events', 'tasks', 'results', 'artifacts', 'attempts', 'task_leases', 'approvals']
     .map(table => [table, tableExists(db, table) ? db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get().count : null]));
-  const adaptiveGoalGraph = buildAdaptiveGoalGraphIntegrityReport(db);
+  const adaptiveGoalGraph = buildAdaptiveGoalGraphIntegrityReport(db, { includeSensitiveSourceIdentifiers });
   return {
     schemaVersion: 1, generatedAt: new Date(nowMs).toISOString(), readOnly: true,
     purpose: 'owner-guided reconciliation; diagnostic report only; no lifecycle changes, lease changes, retries, approvals, or dispatch',
@@ -1386,6 +1648,7 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
       staleCandidates: diagnostics.filter(item => item.classification === 'stale_candidate' || item.classification === 'stale_candidate_reconciliation_required').length,
       jobsWithRunningTasksButNoActiveLeases: diagnostics.filter(item => item.runningTaskCount > 0 && item.activeLeaseCount === 0).length },
     policy: { staleCandidateIsNotProofOfWorkerDeath: true, missingLeaseDoesNotAuthorizeTerminalization: true,
+      sensitiveSourceIdentifiersIncluded: includeSensitiveSourceIdentifiers,
       callerMustVerifyHostAndProviderState: true, noAutomaticRecovery: true },
     adaptiveGoalGraph,
     diagnostics,
@@ -1394,10 +1657,11 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
 }
 
 function parseArgs(argv) {
-  const args = { db: DEFAULT_DB, jobId: null, limit: 200, staleAfterMs: 900_000, out: null };
+  const args = { db: DEFAULT_DB, jobId: null, limit: 200, staleAfterMs: 900_000, out: null, includeSensitiveSourceIdentifiers: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--help' || arg === '-h') { args.help = true; continue; }
+    if (arg === '--include-sensitive-source-identifiers') { args.includeSensitiveSourceIdentifiers = true; continue; }
     const key = ({ '--db': 'db', '--job-id': 'jobId', '--limit': 'limit', '--stale-after-ms': 'staleAfterMs', '--out': 'out' })[arg];
     if (!key) fail('RECONCILIATION_ARGUMENT_INVALID', `unknown argument: ${arg}`);
     const value = argv[++index];
@@ -1424,7 +1688,7 @@ function writeExclusive(outPath, contents) {
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   if (args.help) {
-    process.stdout.write('Usage: node scripts/reconcile-active-workflows.mjs [--db PATH] [--job-id ID] [--limit 1..200] [--stale-after-ms 60000..604800000] [--out NEW_PATH]\nRead-only diagnostics for active job/task lineage plus Goal/Idea graph integrity, attestation freshness, and planner evidence inventory. Never mutates workflow state or attempts recovery; age or missing lease is not proof a worker is dead.\n');
+    process.stdout.write('Usage: node scripts/reconcile-active-workflows.mjs [--db PATH] [--job-id ID] [--limit 1..200] [--stale-after-ms 60000..604800000] [--out NEW_PATH] [--include-sensitive-source-identifiers]\nRead-only diagnostics for active job/task lineage plus Goal/Idea graph integrity, attestation freshness, and planner evidence inventory. Never mutates workflow state or attempts recovery; age or missing lease is not proof a worker is dead. The opt-in sensitive flag includes historical file: references and expected/observed digests in the report; keep such output in access-controlled storage.\n');
     return 0;
   }
   const dbPath = path.resolve(args.db);

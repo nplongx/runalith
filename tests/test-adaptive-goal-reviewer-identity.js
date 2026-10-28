@@ -159,6 +159,28 @@ test('reviewer configuration diagnostics report unavailable without anti-rollbac
   assert.ok(status.blockers.some(item => item.code === 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE'));
 });
 
+test('blank optional Goal/Idea verifier user_config does not disable independently configured reviewer identity status', t => {
+  environment(t);
+  const names = ['AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
+    'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON = '';
+  process.env.AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID = 'ignored-because-json-field-is-blank';
+  process.env.AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM = publicKeyPem;
+  t.after(() => {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  });
+  const store = storeFixture();
+  t.after(() => closeStore(store));
+  const status = getAdaptiveGoalReviewerConfigurationStatus({ now, trustConfigurationDb: store.trustDb });
+  assert.equal(status.available, true, JSON.stringify(status));
+  assert.equal(status.providerId, PROVIDER_ID);
+  assert.equal(status.configurationSource, 'legacy_single_key_environment');
+});
+
 test('administered reviewer trust configuration loads a rotated key and revocation disables persisted reviewer identity', t => {
   const oldConfig = process.env.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON;
   const oldProvider = process.env.AGG_REVIEW_IDENTITY_PROVIDER_ID;

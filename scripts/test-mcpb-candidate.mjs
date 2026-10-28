@@ -270,6 +270,27 @@ async function main() {
     assert.equal(packageMetadata.type, 'module');
     assert.equal(packageMetadata.version, manifest.version);
     assert.ok(Array.isArray(manifest.tools) && manifest.tools.length > 0, 'manifest tools must be a non-empty array');
+    const rcVersion = /^1\.0\.9-rc\.(\d+)$/.exec(manifest.version)?.[1];
+    const requiresRuntimeIdentity = (rcVersion !== undefined && Number(rcVersion) >= 17) ||
+      Object.keys(manifest.user_config || {}).length > 0;
+    if (requiresRuntimeIdentity) {
+      const trustConfigUserFields = {
+        goal_idea_verifier_trust_config_json: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
+        action_intent_reviewer_trust_config_json: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON'
+      };
+      assert.deepEqual(Object.keys(manifest.user_config || {}).sort(), Object.keys(trustConfigUserFields).sort(),
+        'current candidate must expose only the two administrator-managed AGG trust configuration inputs');
+      for (const [configKey, environmentName] of Object.entries(trustConfigUserFields)) {
+        const config = manifest.user_config[configKey];
+        assert.equal(config.type, 'string', configKey + ': config must be a JSON string');
+        assert.equal(config.default, '', configKey + ': optional trust input must default to blank, never to a baked-in root');
+        assert.equal(config.required, false, configKey + ': unconfigured installation must start fail-closed');
+        assert.match(config.description || '', /public Ed25519 keys only/i,
+          configKey + ': manifest must warn against supplying private keys');
+        assert.equal(manifest.server?.mcp_config?.env?.[environmentName], '${user_config.' + configKey + '}',
+          environmentName + ': host must inject the value from installed config UI');
+      }
+    }
 
     const safePath = p => {
       const resolved = path.resolve(extracted, p);
@@ -358,6 +379,17 @@ async function main() {
     const health = healthCall.result?.structuredContent ?? responseText(healthCall.result);
     assert.equal(health?.status, 'ok', `packaged runtime health is not ok: ${JSON.stringify(health)}`);
     assert.equal(health?.mode, 'local-only-mcp', `unexpected runtime mode: ${JSON.stringify(health)}`);
+    if (requiresRuntimeIdentity) {
+      assert.equal(health?.runtime_identity?.entry_point, manifestEntryPoint,
+        'health must identify the exact entry point selected by the manifest');
+      assert.equal(health?.runtime_identity?.entry_point_sha256_at_startup,
+        crypto.createHash('sha256').update(fs.readFileSync(entryPoint)).digest('hex'),
+        'health entry-point SHA-256 must match exact bytes extracted from candidate archive');
+      assert.equal(health?.runtime_identity?.manifest_sha256_at_startup,
+        crypto.createHash('sha256').update(fs.readFileSync(path.join(extracted, 'manifest.json'))).digest('hex'),
+        'health manifest SHA-256 must match the exact manifest bytes extracted from candidate archive');
+      assert.equal(health?.runtime_identity?.semantics, 'startup_file_hashes_only_not_package_digest_or_signed_provenance');
+    }
     assert.equal(path.resolve(health?.database || ''), path.join(dataDir, 'workflow.db'), 'runtime database did not stay inside the disposable test directory');
     assertSnapshotStillMatches();
 

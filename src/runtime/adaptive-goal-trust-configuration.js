@@ -107,7 +107,16 @@ export function loadAdaptiveGoalTrustConfiguration({
 
   const rawConfig = environment[configJsonEnv];
   if (rawConfig !== undefined) {
-    if (typeof rawConfig !== 'string' || !rawConfig.trim()) fail('AGG_TRUST_CONFIG_SCHEMA_INVALID', `${configJsonEnv} is set but empty; refusing to fall back to a legacy trust root`);
+    if (typeof rawConfig !== 'string') fail('AGG_TRUST_CONFIG_SCHEMA_INVALID', `${configJsonEnv} must contain a JSON string; refusing to fall back to a legacy trust root`);
+    if (rawConfig.includes('${user_config.')) {
+      fail('AGG_TRUST_CONFIG_NOT_CONFIGURED', `${configJsonEnv} contains an unresolved host user_config placeholder; configure this field through the supported host mechanism, and legacy fallback remains disabled`);
+    }
+    // Optional MCPB user_config values are commonly interpolated as an empty
+    // string when the administrator has not populated the field. Treat blank
+    // input as absent (while still refusing legacy fallback) so status exposes
+    // the actionable NOT_CONFIGURED code rather than misdiagnosing malformed
+    // JSON. Non-empty invalid JSON remains a schema/configuration failure.
+    if (!rawConfig.trim()) fail('AGG_TRUST_CONFIG_NOT_CONFIGURED', `${configJsonEnv} is blank; no administrator trust config was supplied, and legacy fallback is disabled while the JSON field is present`);
     const parsed = parseStrictJson(rawConfig, 'AGG public trust configuration', { maxBytes: 128 * 1024 });
     const topKeys = ['schema_version', 'domain', 'provider_id', 'config_version', 'updated_at', 'updated_by', 'change_reference', 'keys'];
     exactKeys(parsed, topKeys, 'trust configuration');
@@ -231,9 +240,19 @@ export function findAdaptiveGoalTrustedRoot(configuration, fingerprint, { issued
 }
 
 export function isAdaptiveGoalTrustConfigurationProvided({ configJsonEnv, providerEnv, publicKeyEnv }) {
-  return process.env[configJsonEnv] !== undefined ||
-    (typeof process.env[providerEnv] === 'string' && process.env[providerEnv].trim() !== '' &&
-     typeof process.env[publicKeyEnv] === 'string' && process.env[publicKeyEnv].trim() !== '');
+  const jsonValue = process.env[configJsonEnv];
+  // Hosts interpolate optional MCPB user_config fields as empty strings. An
+  // empty field is not a supplied peer trust domain and must not make an
+  // otherwise independently configured verifier/reviewer fail. Non-empty JSON
+  // and unresolved placeholders count as supplied: the peer loader will reject
+  // malformed/unexpanded input, preventing host interpolation errors from
+  // being silently ignored. The domain's own loader never falls back to legacy
+  // roots when its JSON variable is present.
+  if (typeof jsonValue === 'string') {
+    return jsonValue.trim() !== '';
+  }
+  return typeof process.env[providerEnv] === 'string' && process.env[providerEnv].trim() !== '' &&
+    typeof process.env[publicKeyEnv] === 'string' && process.env[publicKeyEnv].trim() !== '';
 }
 
 export function assertAdaptiveGoalTrustDomainsDisjoint(sourceVerifier, actionReviewer) {

@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "recordType": "runalith.goal-plan-execution.integration-acceptance",
+  "generatedAt": "2026-10-28T13:09:17+07:00",
+  "decision": {
+    "status": "BLOCKED",
+    "productionReady": false,
+    "canActivateNow": false,
+    "reason": "Archive/source bytes and local tests validate, but independent release authority, host-managed trust, external checkpoint continuity, Phase 2's owner-signed 71-path contract, and live workflow/task drain remain unproven."
+  },
+  "candidate": {
+    "version": "1.0.9-rc.25",
+    "path": "dist/runalith-1.0.9-rc.25-runtime-trust-ledger-and-evidence-integrity-20261028.mcpb",
+    "sha256": "84d8ddf1fe3c55ad0d1e47a91e3fa11c7267209ffc48cc162f3e915ea03b017e",
+    "sizeBytes": 854080,
+    "archiveEntryCount": 93,
+    "uniqueArchiveEntryCount": 93,
+    "manifestToolCount": 74,
+    "runtimeToolCount": 74,
+    "versionedEntryPoint": "server/index-v1.0.9-rc.25.js",
+    "entryPointSha256": "2f791884c8d2e3caf5740dedb77f1c9c26d7d0132eeb3fc4f01170e59d3fe4d1",
+    "sourceManifestSha256": "b23aac638199102c19064f5e9df73fd0484dbefedae581d7eea0393e673c4591",
+    "embeddedPackageJsonSha256": "b858f0b4502d87cb41e62f4494a8338c69a9edc5405f93416d77b907065040ef",
+    "archiveIntegrity": "PASS",
+    "sourceToBundleByteAlignment": "PASS_EXACT_ARCHIVE_ENTRY_BYTES",
+    "sourceSnapshotSha256": "16db7a4667a7c6280260c8dd063debed8ea79d4ecdc2832cea29ec4f07e4564a",
+    "sourceAlignmentReport": {
+      "path": "/tmp/runalith-source-alignment-rc25-runtime-trust-ledger-and-evidence-integrity-20261028.json",
+      "sha256": "d22c2a656d4e5c1e4056355f77d4fcc5146122f84583d9c926e97ca81601a9a4",
+      "exitCode": 0,
+      "releaseEligibility": "BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED"
+    },
+    "releasedArchivesPreserved": {
+      "rc23": {
+        "path": "dist/runalith-1.0.9-rc.23-actionable-source-mismatch-recovery-20261028.mcpb",
+        "sha256": "00804c9599454533a45418c7fe733a3ced85b07219dee71c02eb19bcc0dbdd3e"
+      },
+      "rc24": {
+        "path": "dist/runalith-1.0.9-rc.24-runtime-entrypoint-consistency-20261028.mcpb",
+        "sha256": "125d785b897dee1b6758c8f6d3508c7930d2a87f357d1b953616e7043fb596c8"
+      }
+    }
+  },
+  "historicalFixtureCompatibility": {
+    "immutableV66": {
+      "path": "benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v66.json",
+      "sha256": "c300d1c2d79c1ec40a02d0a312547ec39fb77bb6f3d3aee5b90fd0e479f3ae7c"
+    },
+    "successorV67": {
+      "path": "benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v67.json",
+      "sha256": "217c86983b17636e9ed3d14c3eae064d76ca69a158210ed0eb78e1d8871570a1",
+      "provenancePinCount": 64,
+      "allPinsMatchCurrentBytes": true,
+      "frozenGraphAndOracleChanged": false
+    }
+  },
+  "validation": [
+    {
+      "command": "npm test",
+      "exitCode": 0,
+      "status": "PASS",
+      "evidencePath": "/tmp/runalith-npm-test-rc25-integrated-trust-ledger-v67-20261028.log",
+      "evidenceBytes": 46525,
+      "evidenceSha256": "8109de931ef1a3ad6ed143784462fd2ff2251eeb2d9c251085923a5daac6a92f"
+    },
+    {
+      "command": "npm run pack:runalith-mcpb (PLUGIN_BUNDLE_OUT set to the unique RC.25 archive path)",
+      "exitCode": 0,
+      "status": "PASS",
+      "assertions": ["archive source byte alignment", "MCP initialize/tools-list smoke", "74/74 manifest schemas", "extracted trust tests", "extracted reconciliation tests", "producer-to-Plan-to-Execution Graph E2E", "negative controls"]
+    },
+    {
+      "command": "npm run test:mcpb-candidate -- dist/runalith-1.0.9-rc.25-runtime-trust-ledger-and-evidence-integrity-20261028.mcpb",
+      "exitCode": 0,
+      "status": "MCPB_FAST_TEST_PASS",
+      "archiveSha256": "84d8ddf1fe3c55ad0d1e47a91e3fa11c7267209ffc48cc162f3e915ea03b017e"
+    },
+    {
+      "command": "npm run test:package-reproducibility",
+      "exitCode": 0,
+      "status": "PASS"
+    },
+    {
+      "command": "node --test tests/test-adaptive-goal-benchmark.mjs",
+      "exitCode": 0,
+      "status": "PASS",
+      "testsPassed": 15,
+      "testsFailed": 0
+    },
+    {
+      "command": "npm run docs:check",
+      "exitCode": 0,
+      "status": "PASS",
+      "markdownFiles": 117,
+      "localLinks": 336,
+      "mcpToolsDocumented": 74
+    },
+    {
+      "command": "npm run docs:check:external",
+      "exitCode": 0,
+      "status": "PASS",
+      "markdownFiles": 117,
+      "localLinks": 336,
+      "uniqueExternalUrls": 31,
+      "externalUrlsPassed": 31
+    },
+    {
+      "command": "node scripts/build-static-site.mjs && node scripts/check-static-site.mjs --check-external-links",
+      "exitCode": 0,
+      "status": "PASS",
+      "localLinks": 12,
+      "uniqueExternalUrls": 16,
+      "externalUrlsPassed": 16
+    },
+    {
+      "command": "npm run site:check",
+      "exitCode": 0,
+      "status": "PASS",
+      "version": "1.0.9-rc.25",
+      "acceptanceFile": "docs/goal-plan-execution-acceptance-rc25-20261028.md"
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0,
+      "status": "PASS"
+    }
+  ],
+  "liveState": {
+    "reportPath": "/tmp/runalith-live-reconcile-rc25-sensitive-20261028.json",
+    "reportSha256": "22bdae48cfecbfd82d81d5beba2e2804ad9c9fb20f22d169fc2b9ffe4289d6fe",
+    "generatedAt": "2026-10-28T06:01:26.529Z",
+    "readOnly": true,
+    "mode": "0600",
+    "counts": {
+      "jobs": 137,
+      "tasks": 1277,
+      "events": 5308,
+      "results": 908,
+      "artifacts": 867,
+      "attempts": 982,
+      "approvals": 119,
+      "taskLeaseRows": 0
+    },
+    "jobClassifications": {
+      "staleCandidateReconciliationRequired": 60,
+      "awaitingProposalOrApproval": 18,
+      "awaitingDispatch": 7,
+      "selectionTruncated": false
+    },
+    "runningTasks": 61,
+    "jobsWithRunningTasksWithoutActiveLeases": 60,
+    "goalIdeaGraph": {
+      "goals": 2,
+      "nodes": 15,
+      "edges": 16,
+      "attestations": 0,
+      "graphsWithEmptyEvidenceManifest": 2,
+      "independentSignatureVerificationAttempted": false
+    },
+    "plannerEvidence": {
+      "runs": 63,
+      "evidenceRecords": 373,
+      "reportedLineageVerified": 28,
+      "claimsVerified": 0,
+      "sourceInvalidFindings": 4
+    },
+    "proposals": {
+      "planGraphProposals": 3,
+      "planGraphSteps": 22,
+      "stepsMissingSupportingEvidence": 22,
+      "proposalsWithoutAuthenticatedCurrentSnapshotBinding": 3,
+      "proposalsWithUnverifiedSource": 3,
+      "persistedExecutionGraphProposals": 0,
+      "executionPlanCandidateEvents": 0
+    },
+    "writesPerformed": false,
+    "lifecycleTransitionsPerformed": false
+  },
+  "preflight": {
+    "reportPath": "/tmp/runalith-preflight-rc25-runtime-trust-ledger-and-evidence-integrity-20261028-v2.json",
+    "reportSha256": "6db5158aac375ce3c068d4065c3ef02e7332405adf74aa2abc44f07c0a1e8437",
+    "reportBytes": 552230,
+    "exitCode": 3,
+    "status": "BLOCKED",
+    "canActivateNow": false,
+    "readOnly": true,
+    "liveMutationPerformed": false,
+    "externalCheckpointTransition": "NOT_REQUESTED",
+    "rollback": {
+      "version": "1.0.9-rc.17",
+      "sha256": "3ca54ac58c397695bde770ef979315b5f996abf25c9628602fefa7e41c69bc64",
+      "verified": true,
+      "installedFileParity": "93_OF_93_MATCH"
+    }
+  },
+  "openGates": [
+    {
+      "code": "PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED",
+      "status": "BLOCKED",
+      "ownerAction": "Phase 2 contract owner supplies the exact owner-signed canonical 71-path manifest and candidate-bound builder receipt."
+    },
+    {
+      "code": "INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED",
+      "status": "BLOCKED",
+      "ownerAction": "Independent builder/release authority supplies signed provenance, independent verification and approval bound to candidate, installed baseline/rollback bytes and one-time host nonce."
+    },
+    {
+      "code": "PRODUCTION_AGG_TRUST_CONFIGURATION_NOT_VERIFIED",
+      "status": "BLOCKED",
+      "ownerAction": "Host security administrator provisions and verifies both versioned JSON trust domains, disjoint roots/providers, actual runtime effective configuration and active anti-rollback ledger."
+    },
+    {
+      "code": "PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED",
+      "status": "BLOCKED",
+      "ownerAction": "Security authority provisions a distinct external monotonic checkpoint store and trust config, then supplies signed continuity/CAS evidence."
+    },
+    {
+      "code": "ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN",
+      "status": "BLOCKED",
+      "ownerAction": "Workflow owners/providers reconcile every executing job against current event/attempt/result/artifact/owner/provider/runtime/lease lineage and perform only authorized normal lifecycle handling."
+    },
+    {
+      "code": "RUNNING_TASKS_MUST_DRAIN",
+      "status": "BLOCKED",
+      "ownerAction": "Owner/provider/runtime authorities account for all running tasks; missing leases alone are not evidence of worker death."
+    }
+  ],
+  "safety": {
+    "hostRegistryOrConfigChanged": false,
+    "liveWorkflowDatabaseWritten": false,
+    "ProductionPackageInstalledOrActivated": false,
+    "HostProcessRestartedOrKilled": false,
+    "ExternalCheckpointAdvanced": false,
+    "BulkResetOrTerminalizationPerformed": false,
+    "ProductionDispatchPerformed": false
+  },
+  "dossiers": {
+    "acceptance": {
+      "path": "docs/goal-plan-execution-acceptance-rc25-20261028.md",
+      "sha256": "a1ab67b14bbf22031fdba06d5469f060b38bfb3db7387ac5d2ab10d021836b29"
+    },
+    "rollout": {
+      "path": "docs/runalith-rollout-rc25-20261028.md",
+      "sha256": "a69140e1d384ab58823ddc4ac2cf1ede10a222c49628d484a5b497459d9e98e8"
+    }
+  }
+}

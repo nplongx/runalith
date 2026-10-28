@@ -25,6 +25,28 @@ if (typeof runtimeEntryPoint !== 'string' || !runtimeEntryPoint || path.isAbsolu
   throw new Error('runtime manifest entry point is unsafe or missing');
 }
 const runtimePath = path.join(root, runtimeEntryPoint);
+const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+assert.equal(packageMetadata.main, runtimeEntryPoint, 'package main must match the manifest entry point');
+if (packageMetadata.runtimeEntryPoint !== undefined) {
+  assert.equal(packageMetadata.runtimeEntryPoint, runtimeEntryPoint, 'source package runtimeEntryPoint must match the manifest entry point');
+}
+assert.equal(packageMetadata.scripts?.start, `node ${runtimeEntryPoint}`, 'npm start must launch the exact versioned runtime entry point');
+const trustConfigUserFields = {
+  goal_idea_verifier_trust_config_json: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
+  action_intent_reviewer_trust_config_json: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON'
+};
+assert.deepEqual(Object.keys(runtimeManifest.user_config || {}).sort(), Object.keys(trustConfigUserFields).sort(),
+  'the current MCPB must expose the two optional, host-managed trust configuration fields');
+for (const [configKey, environmentName] of Object.entries(trustConfigUserFields)) {
+  const config = runtimeManifest.user_config[configKey];
+  assert.equal(config.type, 'string', configKey + ' must accept the administrator-provisioned JSON document');
+  assert.equal(config.default, '', configKey + ' must default to blank, never to a locally generated or baked-in trust root');
+  assert.equal(config.required, false, configKey + ' must remain optional so trusted features can stay fail-closed');
+  assert.match(config.description || '', /administrator/i);
+  assert.match(config.description || '', /public Ed25519 keys only/i);
+  assert.equal(runtimeManifest.server?.mcp_config?.env?.[environmentName], '${user_config.' + configKey + '}',
+    environmentName + ' must be injected from host-managed MCPB configuration');
+}
 
 const expectedDefaultValidationTests = [
   ['standard-batch-test-execution-batch', 'tests/test-execution-batch.js'],
@@ -2183,6 +2205,14 @@ try {
   assert.equal(health.cloud_execution, false);
   assert.equal(health.github_actions_dispatch, false);
   assert.equal(health.external_model_api, false);
+  assert.deepEqual(health.runtime_identity, {
+    entry_point: path.relative(root, runtimePath).split(path.sep).join('/'),
+    entry_point_sha256_at_startup: crypto.createHash('sha256').update(fs.readFileSync(runtimePath)).digest('hex'),
+    manifest_sha256_at_startup: crypto.createHash('sha256').update(fs.readFileSync(runtimeManifestPath)).digest('hex'),
+    captured_at: health.runtime_identity?.captured_at,
+    semantics: 'startup_file_hashes_only_not_package_digest_or_signed_provenance'
+  }, 'health must expose hashes that can be reconciled against exact installed archive entries');
+  assert.ok(Number.isFinite(Date.parse(health.runtime_identity.captured_at)), 'runtime identity timestamp must be a date');
   assert.ok(fs.statSync(dataDir).mode & 0o700);
   const proposalCountDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
   const proposalsBeforeInfeasibleRequest = proposalCountDb.prepare('SELECT COUNT(*) AS n FROM jobs').get().n;

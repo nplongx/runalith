@@ -88,21 +88,21 @@
           <article><span>02</span><div><h3>Verify claims and evidence</h3><p>Bind an external verifier's signed decision to the exact snapshot and evidence manifest; recheck durable producer/result/attempt/completion lineage.</p></div></article>
           <article><span>03</span><div><h3>Review before execution</h3><p>Map steps to existing workflow roles, check typed inputs and dependencies, verify the separate reviewer identity, then use normal preflight and approval.</p></div></article>
         </div>
-        <div class="agg-status"><span class="status-dot status-warn"></span><p><strong>Testing-only boundary.</strong> The current candidate is experimental and is not production-certified. Production remains blocked until host-owned trust is effectively verified, an independently protected external checkpoint is verified, and authoritative owner/provider reconciliation resolves active jobs and tasks.</p><a href="https://github.com/nplongx/runalith/blob/main/docs/goal-plan-execution-acceptance-rc16-20261027.md">Current 1.0.9-rc.16 acceptance status <span aria-hidden="true">→</span></a><span aria-hidden="true"> · </span><a href="#release-status">Current integration and release-gate status <span aria-hidden="true">→</span></a></div>
+        <div class="agg-status"><span class="status-dot status-warn"></span><p><strong>Testing-only boundary.</strong> The current candidate is experimental and is not production-certified. Production remains blocked until host-owned trust is effectively verified, an independently protected external checkpoint is verified, and authoritative owner/provider reconciliation resolves active jobs and tasks.</p><a href="#release-status">Current 1.0.9-rc.25 integration and release-gate status <span aria-hidden="true">→</span></a><span aria-hidden="true"> · </span><span>Local acceptance dossier: <code>goal-plan-execution-acceptance-rc25-20261028.md</code> (not published)</span></div>
       </div>
     </section>
 
     <section class="content-section section-wrap" id="release-status">
       <div class="section-heading">
-        <div><div class="eyebrow">RELEASE READINESS / 2026-10-27</div><h2>Verified gates.<br><span>Release still blocked.</span></h2></div>
-        <p>Local integration and package checks are evidence about this worktree—not proof of independent production authority. This status is generated into the local site; publication is intentionally disabled. The detailed worktree dossier is <code>docs/goal-plan-execution-integration-followup-20261026.md</code>.</p>
+        <div><div class="eyebrow">RELEASE READINESS / 2026-10-28</div><h2>Verified gates.<br><span>Release still blocked.</span></h2></div>
+        <p>Local integration and package checks are evidence about this worktree—not proof of independent production authority. This status is generated into the local site; publication is intentionally disabled. Current evidence and owner actions are recorded in <code>docs/goal-plan-execution-acceptance-rc25-20261028.md</code> and <code>docs/runalith-rollout-rc25-20261028.md</code>.</p>
       </div>
       <div class="feature-grid">
         <article class="feature-card"><div class="feature-label">PASS</div><h3>Offline integration</h3><p>Full <code>npm test</code>, Goal/Idea → Plan Graph → Execution Graph E2E, package reproducibility, and local docs/site validation pass in the recorded run.</p></article>
-        <article class="feature-card"><div class="feature-label">FAIL</div><h3>Frozen Phase-2 lineage</h3><p>Eight historical archives do not match current source bytes. No exact source snapshot is proven, and no archive satisfies the frozen 71-path inventory. Historical archives and expected hashes remain unchanged.</p></article>
+        <article class="feature-card"><div class="feature-label">BLOCKED</div><h3>Frozen Phase-2 lineage</h3><p>The RC.25 archive matches current source bytes, but this does not satisfy the owner-signed frozen 71-path contract or provide an authenticated builder receipt. Historical archives and expected hashes remain unchanged.</p></article>
         <article class="feature-card"><div class="feature-label">BLOCKED</div><h3>Production authority</h3><p>Host-owned effective verifier/reviewer configuration, independently protected monotonic checkpoint evidence, authenticated reviewer/provider authority, and owner/provider/runtime reconciliation remain unproven.</p></article>
       </div>
-      <p><strong>Release decision:</strong> an RC.16 review candidate exists, but no production-authorized release, installation, activation, or publication is permitted. The Pages deploy job remains fail-closed until all mandatory independent gates are wired and pass.</p>
+      <p><strong>Release decision:</strong> RC.25 is an experimental review candidate with source-to-bundle byte alignment; no production-authorized release, installation, activation, or publication is permitted. The Pages deploy job remains fail-closed until all mandatory independent gates are wired and pass.</p>
     </section>
 
     <section class="process-section" id="how-it-works">
@@ -126,7 +126,7 @@
     <span class="code-key">"runalith"</span><span class="code-punct">: {</span>
       <span class="code-key">"command"</span><span class="code-punct">: </span><span class="code-string">"node"</span><span class="code-punct">,</span>
       <span class="code-key">"args"</span><span class="code-punct">: [</span>
-        <span class="code-string">"/path/to/runalith/server/index-v1.0.9-rc.16.js"</span>
+        <span class="code-string">"/path/to/runalith/server/index-v1.0.9-rc.25.js"</span>
       <span class="code-punct">],</span>
       <span class="code-key">"env"</span><span class="code-punct">: {</span>
         <span class="code-key">"RUNALITH_WORKSPACE"</span><span class="code-punct">: </span><span class="code-string">"/path/to/workspace"</span>
