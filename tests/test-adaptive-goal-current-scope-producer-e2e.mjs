@@ -12,6 +12,7 @@ import { artifactSchemaForType, validateArtifactContent } from '../src/runtime/w
 import { canonicalJson } from '../src/runtime/workflow/plan.js';
 import { getAgentContract } from '../src/runtime/workflow/agent-contracts.js';
 import { ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_SCOPE } from '../src/runtime/adaptive-goal-knowledge-verifier.js';
+import { adaptiveGoalPublicKeyFingerprint } from '../src/runtime/adaptive-goal-trust-configuration.js';
 import { canonicalAdaptiveGoalActionIntentDescription, getAdaptiveGoalActionIntentSemanticPolicy } from '../src/runtime/adaptive-goal-action-intent-policy.js';
 import { expectedAdaptiveGoalReviewerAttestationCandidate, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT,
   ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE } from '../src/runtime/adaptive-goal-reviewer-identity.js';
@@ -40,6 +41,45 @@ const knowledgeVerifierPublicPem = knowledgeVerifierKeys.publicKey.export({ type
 const REVIEWER_IDENTITY_PROVIDER = 'isolated-agg-reviewer-identity-e2e';
 const reviewerIdentityKeys = crypto.generateKeyPairSync('ed25519');
 const reviewerIdentityPublicPem = reviewerIdentityKeys.publicKey.export({ type: 'spki', format: 'pem' });
+// Exercise the same versioned JSON configuration surface that RC.17 exposes
+// through MCPB user_config. The private keys remain test-process-only and the
+// public roots are isolated disposable fixtures, never production trust roots.
+const testTrustConfigUpdatedAt = new Date().toISOString();
+const testTrustConfigChangeReference = `isolated-e2e-${crypto.randomUUID()}`;
+const knowledgeVerifierTrustConfigJson = JSON.stringify({
+  schema_version: 1,
+  domain: 'goal_idea_verifier',
+  provider_id: KNOWLEDGE_VERIFIER_PROVIDER,
+  config_version: 1,
+  updated_at: testTrustConfigUpdatedAt,
+  updated_by: 'isolated-e2e-test-harness',
+  change_reference: testTrustConfigChangeReference,
+  keys: [{
+    key_id: 'isolated-knowledge-verifier-v1',
+    public_key_pem: knowledgeVerifierPublicPem,
+    scopes: ['agg.goal_idea_graph.verify'],
+    not_before: '2020-01-01T00:00:00.000Z',
+    not_after: null,
+    revoked_at: null
+  }]
+});
+const reviewerTrustConfigJson = JSON.stringify({
+  schema_version: 1,
+  domain: 'action_intent_reviewer',
+  provider_id: REVIEWER_IDENTITY_PROVIDER,
+  config_version: 1,
+  updated_at: testTrustConfigUpdatedAt,
+  updated_by: 'isolated-e2e-test-harness',
+  change_reference: testTrustConfigChangeReference,
+  keys: [{
+    key_id: 'isolated-reviewer-identity-v1',
+    public_key_pem: reviewerIdentityPublicPem,
+    scopes: ['agg.action_intent.review'],
+    not_before: '2020-01-01T00:00:00.000Z',
+    not_after: null,
+    revoked_at: null
+  }]
+});
 
 const ROLE_SPECS = [
   { taskId: 'standard-product-owner', role: 'product-owner', capability: 'product.requirements', nodeId: 'define-policy-invariants', type: 'requirements' },
@@ -204,10 +244,8 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       PATH: process.env.PATH || '/usr/bin:/bin', HOME: home, NODE_ENV: 'test', LANG: 'C.UTF-8', TMPDIR: temp, TEMP: temp, TMP: temp,
-      AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID: KNOWLEDGE_VERIFIER_PROVIDER,
-      AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM: knowledgeVerifierPublicPem,
-      AGG_REVIEW_IDENTITY_PROVIDER_ID: REVIEWER_IDENTITY_PROVIDER,
-      AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM: reviewerIdentityPublicPem,
+      AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: knowledgeVerifierTrustConfigJson,
+      AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: reviewerTrustConfigJson,
       RUNALITH_DATA_DIR: data, RUNALITH_WORKFLOW_DB: dbPath, RUNALITH_WORKSPACE: workspace, RUNALITH_EXECUTION_TMP_DIR: path.join(temp, 'execution-tmp'),
       CHAT_ON_STEROIDS_DATA_DIR: data, CHAT_ON_STEROIDS_WORKFLOW_DB: dbPath, CHAT_ON_STEROIDS_WORKSPACE: workspace,
       CHAT_ON_STEROIDS_EXECUTION_TMP_DIR: path.join(temp, 'execution-tmp'), WORKFLOW_DATA_DIR: data, WORKFLOW_DB: dbPath,
@@ -276,6 +314,19 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
     assert.equal(response.error, undefined, `${name} RPC failed: ${JSON.stringify(response.error)}`);
     return response.result;
   };
+
+  const trustStatus = await tool('adaptive_goal_trust_configuration_status');
+  assert.equal(trustStatus.status, 'configured', JSON.stringify(trustStatus.blockers, null, 2));
+  assert.equal(trustStatus.domains.goal_idea_verifier.available, true);
+  assert.equal(trustStatus.domains.action_intent_reviewer.available, true);
+  assert.equal(trustStatus.domains.goal_idea_verifier.providerId, KNOWLEDGE_VERIFIER_PROVIDER);
+  assert.equal(trustStatus.domains.action_intent_reviewer.providerId, REVIEWER_IDENTITY_PROVIDER);
+  assert.equal(trustStatus.separation.providerIdsDistinct, true);
+  assert.equal(trustStatus.separation.publicRootsDisjoint, true);
+  assert.equal(trustStatus.domains.goal_idea_verifier.roots[0].trustRootSha256,
+    adaptiveGoalPublicKeyFingerprint(knowledgeVerifierKeys.publicKey));
+  assert.equal(trustStatus.domains.action_intent_reviewer.roots[0].trustRootSha256,
+    adaptiveGoalPublicKeyFingerprint(reviewerIdentityKeys.publicKey));
 
   const created = await tool('workflow_create', {
     title: 'Software Development: AGG current-scope producer contract test only',
@@ -623,7 +674,7 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
     schema_version: 1,
     kind: 'adaptive_goal_verified_knowledge_graph_attestation',
     provider_id: KNOWLEDGE_VERIFIER_PROVIDER,
-    trust_root_sha256: crypto.createHash('sha256').update(knowledgeVerifierPublicPem, 'utf8').digest('hex'),
+    trust_root_sha256: adaptiveGoalPublicKeyFingerprint(knowledgeVerifierKeys.publicKey),
     nonce: crypto.randomUUID(),
     issued_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 25 * 60_000).toISOString(),
@@ -663,6 +714,10 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.ok(verifiedDraft, `verified persisted Goal/Idea Graph must produce nine Plan Graph steps: ${JSON.stringify(verifiedKnowledgeSearch.unprojectableCandidates)}`);
   assert.equal(verifiedDraft.source.verification.verified, true);
   assert.equal(verifiedDraft.source.verification.snapshotHash, knowledgeSnapshotRequest.snapshot.snapshot_hash);
+  assert.equal(verifiedDraft.steps.every(step => step.supportingEvidenceRefs.length > 0), true,
+    'every projected Plan Graph action must retain its persisted source-node evidence references');
+  assert.equal(verifiedDraft.steps.every(step => step.supportingEvidenceRefs.every(ref => ref.startsWith('artifact://'))), true,
+    'the verified persisted graph projection must carry durable producer artifacts, not placeholders');
   const verifiedStepByRole = new Map(ROLE_SPECS.map(spec => [spec.taskId,
     verifiedDraft.steps.find(step => step.sourceNodeId === knowledgeNodeIds.get(spec.nodeId))]));
   assert.equal([...verifiedStepByRole.values()].every(Boolean), true);
@@ -712,10 +767,8 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
     cwd: root, stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       PATH: process.env.PATH || '/usr/bin:/bin', HOME: home, NODE_ENV: 'test', LANG: 'C.UTF-8', TMPDIR: temp, TEMP: temp, TMP: temp,
-      AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID: KNOWLEDGE_VERIFIER_PROVIDER,
-      AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM: knowledgeVerifierPublicPem,
-      AGG_REVIEW_IDENTITY_PROVIDER_ID: REVIEWER_IDENTITY_PROVIDER,
-      AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM: reviewerIdentityPublicPem,
+      AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: knowledgeVerifierTrustConfigJson,
+      AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: reviewerTrustConfigJson,
       RUNALITH_DATA_DIR: data, RUNALITH_WORKFLOW_DB: dbPath, RUNALITH_WORKSPACE: workspace, RUNALITH_EXECUTION_TMP_DIR: path.join(temp, 'execution-tmp'),
       CHAT_ON_STEROIDS_DATA_DIR: data, CHAT_ON_STEROIDS_WORKFLOW_DB: dbPath, CHAT_ON_STEROIDS_WORKSPACE: workspace,
       CHAT_ON_STEROIDS_EXECUTION_TMP_DIR: path.join(temp, 'execution-tmp'), WORKFLOW_DATA_DIR: data, WORKFLOW_DB: dbPath,
@@ -1011,6 +1064,60 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(preReviewerWorkflow.plan, null);
   assert.equal(preReviewerWorkflow.tasks.length, 0);
 
+  // Adversarial cross-boundary regression: forge a serialized source.verification
+  // object, then recompute every unkeyed Execution Graph source-verification,
+  // fingerprint, proposal and wrapper hash. Structural hashes must not turn the
+  // caller-authored trust label into an authenticated verifier result, and both
+  // candidate consumption and lifecycle approval/dispatch must re-build source.
+  const forgedGraphDb = new DatabaseSync(dbPath);
+  const forgedGraphEvent = forgedGraphDb.prepare("SELECT event_id,payload_json FROM events WHERE job_id=? AND type='job.proposal_requested'")
+    .get(executionProposal.job_id);
+  assert.ok(forgedGraphEvent);
+  const originalForgedGraphEventBytes = forgedGraphEvent.payload_json;
+  const forgedGraphPayload = JSON.parse(originalForgedGraphEventBytes);
+  const forgedGraphSnapshot = forgedGraphPayload.adaptive_goal_execution_graph_proposal;
+  const forgedGraph = forgedGraphSnapshot.execution_graph_proposal;
+  forgedGraph.source.verification = {
+    status: 'verified', verified: true, providerId: 'caller-forged-provider',
+    attestationId: 'a'.repeat(64), snapshotHash: 'b'.repeat(64), evidenceManifestHash: 'c'.repeat(64),
+    trustRootSha256: 'd'.repeat(64), claimVerified: true, independenceVerified: true,
+    expiresAt: new Date(Date.now() + 60_000).toISOString()
+  };
+  const hashJson = value => crypto.createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex');
+  forgedGraph.hashes.sourceVerificationHash = hashJson(forgedGraph.source.verification);
+  forgedGraph.fingerprint = hashJson({ schemaVersion: forgedGraph.schemaVersion,
+    sourcePlanProposalJobId: forgedGraph.source.planProposalJobId, candidatePlanId: forgedGraph.source.candidatePlanId,
+    workflowId: forgedGraph.workflowTemplate.id, workflowVersion: forgedGraph.workflowTemplate.version, hashes: forgedGraph.hashes });
+  forgedGraph.proposalId = `agg-eg-${forgedGraph.fingerprint.slice(0, 24)}`;
+  const { proposalHash: _discardedProposalHash, ...forgedGraphUnsigned } = forgedGraph;
+  forgedGraph.proposalHash = hashJson(forgedGraphUnsigned);
+  forgedGraphSnapshot.fingerprint = forgedGraph.fingerprint;
+  forgedGraphSnapshot.proposal_hash = forgedGraph.proposalHash;
+  forgedGraphDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
+    .run(JSON.stringify(forgedGraphPayload), forgedGraphEvent.event_id);
+  forgedGraphDb.close();
+
+  const forgedGraphRead = await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionProposal.job_id });
+  assert.equal(forgedGraphRead.status, 'stale', 'recomputed unkeyed hashes must not authenticate a forged source verification object');
+  const forgedCandidateRead = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(forgedCandidateRead.status, 'stale', 'candidate readback must revalidate the rebuilt source graph');
+  const forgedApproval = await rawTool('workflow_approve', { job_id: executionProposal.job_id,
+    confirmation: 'TEST ONLY: caller-forged serialized verifier metadata must not authorize approval.' });
+  assert.equal(forgedApproval.isError, true);
+  const forgedDispatch = await rawTool('workflow_dispatch', { job_id: executionProposal.job_id });
+  assert.equal(forgedDispatch.isError, true);
+  const heldAfterForgedVerification = await tool('workflow_get', { job_id: executionProposal.job_id });
+  assert.equal(heldAfterForgedVerification.job.state, 'IDLE');
+  assert.equal(heldAfterForgedVerification.plan, null);
+  assert.equal(heldAfterForgedVerification.tasks.length, 0);
+
+  const restoreForgedGraphDb = new DatabaseSync(dbPath);
+  restoreForgedGraphDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
+    .run(originalForgedGraphEventBytes, forgedGraphEvent.event_id);
+  restoreForgedGraphDb.close();
+  assert.equal((await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionProposal.job_id })).status, 'fresh');
+  assert.equal((await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id })).status, 'fresh');
+
   // Simulate the separately deployed identity provider in this disposable
   // test only. The runtime receives no private key and independently verifies
   // the signed subject, scope, freshness, nonce, candidate and exact plan hash.
@@ -1019,7 +1126,7 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
     schema_version: 1,
     kind: 'adaptive_goal_verified_reviewer_attestation',
     provider_id: REVIEWER_IDENTITY_PROVIDER,
-    trust_root_sha256: crypto.createHash('sha256').update(reviewerIdentityPublicPem, 'utf8').digest('hex'),
+    trust_root_sha256: adaptiveGoalPublicKeyFingerprint(reviewerIdentityKeys.publicKey),
     nonce: crypto.randomUUID(),
     issued_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 8 * 60_000).toISOString(),

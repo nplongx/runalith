@@ -8,12 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const fixturePath = path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v59.json');
+const fixturePath = path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v67.json');
 const runnerPath = path.join(root, 'benchmarks/adaptive-goal-graph/run-benchmark.mjs');
 const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 
 function run() {
-  const result = spawnSync(process.execPath, [runnerPath, '--fixture', 'fixtures/recovery-verifier-v59.json'], { cwd: root, encoding: 'utf8', timeout: 15000 });
+  const result = spawnSync(process.execPath, [runnerPath, '--fixture', 'fixtures/recovery-verifier-v67.json'], { cwd: root, encoding: 'utf8', timeout: 15000 });
   assert.equal(result.status, 0, result.stderr || `runner exited ${result.status}`);
   return JSON.parse(result.stdout);
 }
@@ -72,6 +72,14 @@ function createIsolatedRunnerWorkspace() {
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v57.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v58.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v59.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v60.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v61.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v62.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v63.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v64.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v65.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v66.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v67.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v17.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v15.json',
     'src/runtime/adaptive-goal-graph.js',
@@ -95,11 +103,11 @@ function createIsolatedRunnerWorkspace() {
 }
 
 function isolatedFixturePath(workspace) {
-  return path.join(workspace, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v59.json');
+  return path.join(workspace, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v67.json');
 }
 
 function runIsolated(workspace) {
-  return spawnSync(process.execPath, [path.join(workspace, 'benchmarks/adaptive-goal-graph/run-benchmark.mjs'), '--fixture', 'fixtures/recovery-verifier-v59.json'], {
+  return spawnSync(process.execPath, [path.join(workspace, 'benchmarks/adaptive-goal-graph/run-benchmark.mjs'), '--fixture', 'fixtures/recovery-verifier-v67.json'], {
     cwd: workspace, encoding: 'utf8', timeout: 15000
   });
 }
@@ -113,9 +121,23 @@ function saveFixture(workspace, value) {
 }
 
 test('versioned provenance pins current sources and preserves the previous artifact identities', () => {
-  assert.equal(fixture.schemaVersion, 59);
-  assert.equal(fixture.fixtureId, 'recovery-verifier-investigation-v59');
-  assert.equal(fixture.supersedesFixtureId, 'recovery-verifier-investigation-v58');
+  assert.equal(fixture.schemaVersion, 67);
+  const historicalV66 = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v66.json'));
+  assert.equal(createHash('sha256').update(historicalV66).digest('hex'), 'c300d1c2d79c1ec40a02d0a312547ec39fb77bb6f3d3aee5b90fd0e479f3ae7c',
+    'v66 remains byte-for-byte preserved as the RC.24 source identity fixture');
+  const historicalV65 = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v65.json'));
+  assert.equal(createHash('sha256').update(historicalV65).digest('hex'), '40acdf4ac7cb4ab9b403b53702ee0e79744ec5bdc4b9b095ced85445bae4a19c', 'v65 remains byte-for-byte preserved as the source-mismatch recovery fixture');
+  assert.equal(fixture.fixtureId, 'recovery-verifier-investigation-v67');
+  assert.equal(fixture.supersedesFixtureId, 'recovery-verifier-investigation-v66');
+  const historicalV64 = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v64.json'));
+  assert.equal(createHash('sha256').update(historicalV64).digest('hex'), '497e6a91e17fe3b052be6c109e64b16cc377d334a294f5b1bd18f41deb5f3641',
+    'v64 remains byte-for-byte preserved as the first actionable historical source-mismatch recovery fixture');
+  const historicalV63 = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v63.json'));
+  assert.equal(createHash('sha256').update(historicalV63).digest('hex'), '9012aeca46569d9c8851150cf92f1be9a4903cb97baa0c2895cbf88526874868',
+    'v63 remains byte-for-byte preserved as the prior actionable source-coverage fixture');
+  const historicalV59 = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v59.json'));
+  assert.equal(createHash('sha256').update(historicalV59).digest('hex'), '0728a350c32908857a959cfef7e3287d5ec26469239cf1806ceae7abc572443e',
+    'v59 remains byte-for-byte preserved as the prior immutable source-pinning fixture');
   const historicalV52 = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v52.json'));
   assert.equal(createHash('sha256').update(historicalV52).digest('hex'), '9d0ea027868a9af05a6dc47f8d257f4d286e054c5de1bdf847a9604a9c95d717',
     'v52 remains byte-for-byte preserved as the prior atomic checkpoint lineage fixture');

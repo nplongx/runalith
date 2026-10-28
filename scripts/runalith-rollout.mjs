@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { isSafePortableArchivePath, validateZipEntryTypes } from '../benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs';
 import { assertAdaptiveGoalTrustDomainsDisjoint, adaptiveGoalTrustConfigurationStatus,
-  loadAdaptiveGoalTrustConfiguration } from '../src/runtime/adaptive-goal-trust-configuration.js';
+  inspectAdaptiveGoalTrustConfigurationHistory, loadAdaptiveGoalTrustConfiguration } from '../src/runtime/adaptive-goal-trust-configuration.js';
 import { parseStrictJson } from '../src/runtime/strict-json.js';
 import { canonicalExternalCheckpointPayload, verifyExternalTrustCheckpointResponse } from './lib/external-trust-checkpoint-contract.mjs';
 import { verifyPhase2CustodyEvidence } from './lib/phase2-custody-evidence.mjs';
@@ -648,6 +648,7 @@ export function inspectBundle(bundlePath, { requireCurrentSource = false } = {})
   const entry = manifest.server?.entry_point;
   if (manifest.name !== 'runalith-agent-orchestrator' || manifest.server?.type !== 'node' ||
       typeof manifest.version !== 'string' || packageJson.version !== manifest.version || packageJson.main !== entry ||
+      packageJson.scripts?.start !== `node ${entry}` ||
       packageJson.type !== 'module' || typeof entry !== 'string' || !files.has(entry) || !/^[A-Za-z0-9._/-]+$/.test(entry) ||
       entry.startsWith('/') || entry.split('/').some(part => !part || part === '.' || part === '..') ||
       manifest.server?.mcp_config?.command !== 'node' ||
@@ -749,7 +750,9 @@ export function workflowDbSummary(dbPath) {
     for (const table of ['jobs', 'events', 'tasks', 'artifacts', 'results']) result[table] = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
     result.stateCounts = db.prepare('SELECT state,status,COUNT(*) AS n FROM jobs GROUP BY state,status ORDER BY state,status').all();
     result.taskStatusCounts = db.prepare('SELECT status,COUNT(*) AS n FROM tasks GROUP BY status ORDER BY status').all();
-    result.executingJobs = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE UPPER(state)='EXECUTING' AND lower(status)='active'").get().n;
+    // Lifecycle drain is keyed to the durable execution state, not the status
+    // column: inconsistent status metadata must never hide an EXECUTING job.
+    result.executingJobs = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE UPPER(state)='EXECUTING'").get().n;
     result.runningTasks = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE lower(status)='running'").get().n;
     const leaseStates = db.prepare('SELECT state,expires_at FROM task_leases').all();
     const nowMs = Date.now();
@@ -788,6 +791,123 @@ function readRuntimeTrustEnvironment(pid, procRoot) {
   return environment;
 }
 
+function inspectRuntimeTrustLedger(pid, { procRoot = '/proc', configurations = [] } = {}) {
+  const blocked = (code, message, details = {}) => ({ available: false, status: 'BLOCKED', source: 'active_runtime_open_file_descriptor',
+    blockers: [{ code, message }], ...details });
+  const fdDirectory = path.join(procRoot, String(pid), 'fd');
+  let descriptors;
+  try { descriptors = fs.readdirSync(fdDirectory); }
+  catch {
+    return blocked('AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', 'cannot inspect the active runtime file descriptors for its separate trust ledger');
+  }
+  const candidates = [];
+  const workflowCandidates = [];
+  for (const descriptor of descriptors) {
+    const descriptorPath = path.join(fdDirectory, descriptor);
+    let target;
+    try { target = fs.readlinkSync(descriptorPath); } catch { continue; }
+    if (path.basename(target) !== 'agg-trust-configuration.db' || target.endsWith(' (deleted)')) continue;
+    candidates.push({ descriptor, descriptorPath, target });
+  }
+  for (const descriptor of descriptors) {
+    const descriptorPath = path.join(fdDirectory, descriptor);
+    let target;
+    try { target = fs.readlinkSync(descriptorPath); } catch { continue; }
+    if (path.basename(target) === 'workflow.db' && !target.endsWith(' (deleted)')) {
+      workflowCandidates.push({ descriptor, descriptorPath, target });
+    }
+  }
+  if (candidates.length !== 1) {
+    return blocked('AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE',
+      `expected exactly one open agg-trust-configuration.db file descriptor in active runtime; found ${candidates.length}`,
+      { matchingDescriptorCount: candidates.length });
+  }
+
+  const candidate = candidates[0];
+  let ledgerPath;
+  let descriptorStat;
+  let pathStat;
+  try {
+    ledgerPath = fs.realpathSync(candidate.target);
+    descriptorStat = fs.statSync(candidate.descriptorPath, { bigint: true });
+    pathStat = fs.statSync(ledgerPath, { bigint: true });
+  } catch {
+    return blocked('AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', 'active runtime trust-ledger descriptor does not resolve to a readable canonical file');
+  }
+  if (!path.isAbsolute(ledgerPath) || path.basename(ledgerPath) !== 'agg-trust-configuration.db' ||
+      !descriptorStat.isFile() || !pathStat.isFile() || descriptorStat.dev !== pathStat.dev || descriptorStat.ino !== pathStat.ino ||
+      fs.realpathSync(candidate.target) !== ledgerPath) {
+    return blocked('AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', 'trust-ledger path no longer matches the exact inode opened by the active runtime');
+  }
+  if (workflowCandidates.length !== 1) {
+    return blocked('AGG_TRUST_CONFIG_LEDGER_WORKFLOW_SEPARATION_UNVERIFIED',
+      `expected exactly one open workflow.db descriptor to prove trust-ledger separation; found ${workflowCandidates.length}`,
+      { workflowDescriptorCount: workflowCandidates.length });
+  }
+  try {
+    const workflowStat = fs.statSync(workflowCandidates[0].descriptorPath, { bigint: true });
+    if (!workflowStat.isFile() || descriptorStat.dev === workflowStat.dev && descriptorStat.ino === workflowStat.ino) {
+      return blocked('AGG_TRUST_CONFIG_LEDGER_WORKFLOW_SEPARATION_UNVERIFIED',
+        'the active runtime trust-ledger descriptor is the same inode as its workflow database');
+    }
+  } catch {
+    return blocked('AGG_TRUST_CONFIG_LEDGER_WORKFLOW_SEPARATION_UNVERIFIED', 'cannot verify distinct active workflow and trust-ledger database inodes');
+  }
+
+  let db;
+  try {
+    db = new DatabaseSync(ledgerPath, { readOnly: true });
+    db.exec('PRAGMA query_only=ON');
+    db.exec('BEGIN');
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
+    if (!tables.has('adaptive_goal_trust_configuration_history')) {
+      return blocked('AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', 'active runtime trust ledger has no anti-rollback configuration history table');
+    }
+    const domains = {};
+    const blockers = [];
+    for (const configuration of configurations) {
+      const history = inspectAdaptiveGoalTrustConfigurationHistory(db, configuration.domain, configuration);
+      const latest = history.latest || null;
+      const exactCurrent = history.status === 'current_or_forward' && latest !== null &&
+        configuration.configVersion === latest.config_version &&
+        configuration.configurationFingerprint === latest.configuration_fingerprint &&
+        configuration.providerId === latest.provider_id;
+      domains[configuration.domain] = {
+        status: exactCurrent ? 'CURRENT_VERSION_FINGERPRINT_AND_PROVIDER_MATCH' : history.status,
+        currentConfigVersion: configuration.configVersion,
+        currentConfigurationFingerprint: configuration.configurationFingerprint,
+        currentProviderId: configuration.providerId,
+        latestRecordedConfigVersion: latest?.config_version ?? null,
+        latestRecordedConfigurationFingerprint: latest?.configuration_fingerprint ?? null,
+        latestRecordedProviderId: latest?.provider_id ?? null,
+        observedAt: latest?.observed_at ?? null,
+        verified: exactCurrent,
+        ...(history.code ? { code: history.code } : {})
+      };
+      if (!exactCurrent) {
+        const code = history.code || (history.status === 'not_yet_observed'
+          ? 'AGG_TRUST_CONFIG_LEDGER_CONFIG_NOT_RECORDED' : 'AGG_TRUST_CONFIG_LEDGER_NOT_CURRENT');
+        blockers.push({ code,
+          message: `trust domain ${configuration.domain} is not proven to match its latest durable anti-rollback record (${history.status})` });
+      }
+    }
+    return {
+      available: blockers.length === 0,
+      status: blockers.length ? 'BLOCKED' : 'CURRENT_FOR_ALL_DOMAINS',
+      source: 'active_runtime_open_file_descriptor',
+      ledgerPath,
+      historySnapshot: 'read_only_sqlite_transaction',
+      descriptor: candidate.descriptor,
+      domains,
+      blockers
+    };
+  } catch (error) {
+    return blocked('AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', `cannot inspect active runtime trust-ledger state read-only: ${String(error?.message || error)}`);
+  } finally {
+    try { db?.close(); } catch {}
+  }
+}
+
 function externalAntiRollbackAnchorNotConfigured() {
   return { verified: false, status: 'NOT_CONFIGURED',
     contract: 'host-monotonic-trust-ledger-checkpoint/v1',
@@ -822,6 +942,25 @@ export function inspectRuntimeTrustConfiguration(pid, { procRoot = '/proc', now 
       throw Object.assign(new Error('one or both trust domains have no currently usable, non-revoked root inside its validity window'),
         { code: 'PRODUCTION_AGG_TRUST_ROOT_NOT_CURRENT' });
     }
+    const trustLedger = inspectRuntimeTrustLedger(pid, { procRoot, configurations: [sourceVerifier, reviewer] });
+    if (!trustLedger.available) {
+      return {
+        available: false,
+        status: 'BLOCKED',
+        source: 'active_runtime_process_environment',
+        domains: {
+          goal_idea_verifier: adaptiveGoalTrustConfigurationStatus(sourceVerifier),
+          action_intent_reviewer: adaptiveGoalTrustConfigurationStatus(reviewer)
+        },
+        separation: { providerIdsDistinct: sourceVerifier.providerId !== reviewer.providerId,
+          publicRootsDisjoint: !sourceVerifier.roots.some(root => reviewer.roots.some(other => other.trustRootSha256 === root.trustRootSha256)) },
+        trustLedger,
+        externalAntiRollbackAnchor: externalAntiRollbackAnchorNotConfigured(),
+        blockers: [{ code: 'PRODUCTION_AGG_TRUST_CONFIGURATION_LEDGER_NOT_CURRENT',
+          message: 'effective host JSON config does not have exact current version/fingerprint/provider evidence in the active runtime trust ledger',
+          details: trustLedger.blockers }]
+      };
+    }
     return {
       available: true,
       status: 'CONFIGURED_IN_ACTIVE_RUNTIME_ENVIRONMENT',
@@ -832,6 +971,7 @@ export function inspectRuntimeTrustConfiguration(pid, { procRoot = '/proc', now 
       },
       separation: { providerIdsDistinct: sourceVerifier.providerId !== reviewer.providerId,
         publicRootsDisjoint: !sourceVerifier.roots.some(root => reviewer.roots.some(other => other.trustRootSha256 === root.trustRootSha256)) },
+      trustLedger,
       externalAntiRollbackAnchor: externalAntiRollbackAnchorNotConfigured(),
       blockers: []
     };

@@ -49,7 +49,7 @@ function writeFixture(dbPath) {
     released_at,last_error,owner_epoch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
   const activeStale = 'job-stale';
   insertJob.run(activeStale, 'conversation:stale', 'stale job with running task but no worker identity', 'EXECUTING', 'active', 'task-stale', 0, OLD, OLD);
-  insertTask.run('task-stale', activeStale, 'researcher', 'running', null, null, null, '[]', '{}', OLD, OLD, null, null, 0, null, null, null);
+  insertTask.run('task-stale', activeStale, 'researcher', 'running', null, null, null, '["task-stale","task-missing"]', '{}', OLD, OLD, null, null, 0, null, null, null);
   insertEvent.run('event-stale', activeStale, 'task.dispatched', JSON.stringify({ taskId: 'task-stale', role: 'researcher' }), OLD);
   insertArtifact.run('artifact-stale-mismatch', 'other-job', 'task-stale', 'architecture', 'artifact://mismatch', '{}', OLD, 1, 'architect',
     '{"components":[]}', '[]', 'active', null, sha('mismatched-artifact'));
@@ -87,6 +87,10 @@ function writeFixture(dbPath) {
   insertAttempt.run('attempt-live-good', 'task-live-good', 'started', 'run-live-good', NOW, null, null);
   insertLease.run('lease-live-good', 'task-live-good', 'job-live-lease-good', 1, 'worker-local-good', 'ACTIVE', NOW, NOW,
     '2099-10-26T06:10:00.000Z', null, null, 4);
+  // Six newer released rows push the still-active lease outside the historical
+  // LIMIT 5 window. Reconciliation must independently discover that active row.
+  for (let i = 1; i <= 6; i += 1) insertLease.run(`lease-live-good-released-${i}`, 'task-live-good', 'job-live-lease-good', 1,
+    null, 'RELEASED', `2026-10-26T05:${String(40 + i).padStart(2, '0')}:00.000Z`, NOW, NOW, NOW, null, 4);
   insertEvent.run('event-live-good', 'job-live-lease-good', 'attempt.started', JSON.stringify({ taskId: 'task-live-good', attemptId: 'attempt-live-good' }), NOW);
 
   insertJob.run('job-approved', 'conversation:approved', 'approved but not dispatched', 'APPROVED', 'active', null, 0, NOW, NOW);
@@ -133,6 +137,8 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   assert.equal(stale.classification, 'stale_candidate_reconciliation_required');
   assert.ok(stale.flags.includes('RUNNING_TASK_WITHOUT_EXECUTION_METADATA'));
   assert.ok(stale.flags.includes('RUNNING_TASKS_WITHOUT_ACTIVE_LEASES'));
+  assert.ok(stale.flags.includes('TASK_DEPENDENCY_REFERENCE_INVALID'));
+  assert.ok(stale.flags.includes('TASK_DEPENDENCY_CYCLE'));
   assert.equal(stale.tasks[0].latestAttempt, null);
   assert.ok(stale.flags.includes('ARTIFACT_JOB_TASK_LINEAGE_MISMATCH'));
   assert.ok(stale.flags.includes('ARTIFACT_PRODUCER_ROLE_MISMATCH'));
@@ -185,7 +191,13 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   assert.equal(jobs.get('job-live-lease').tasks[0].lineageAssessment.providerRunIdentityBinding, 'mismatch');
   assert.equal(jobs.get('job-live-lease').runtimeObservation.activeTaskAttemptMatchesRuntime, false);
   assert.equal(jobs.get('job-live-lease').activeLeaseCount, 1);
-  assert.equal(jobs.get('job-live-lease-good').classification, 'live_lease_heartbeat');
+  assert.equal(jobs.get('job-live-lease-good').classification, 'lifecycle_reconciliation_required',
+    'truncated history is an explicit reconciliation hold even when the active lease itself is found');
+  assert.equal(jobs.get('job-live-lease-good').activeLeaseCount, 1,
+    'an active lease older than five newer released rows must still be observed');
+  assert.ok(!jobs.get('job-live-lease-good').flags.includes('RUNNING_TASKS_WITHOUT_ACTIVE_LEASES'));
+  assert.ok(jobs.get('job-live-lease-good').flags.includes('TASK_LINEAGE_INVENTORY_TRUNCATED'),
+    'truncated historical lease inventory is an explicit HOLD, not an implicit complete reconciliation');
   assert.equal(jobs.get('job-approved').classification, 'awaiting_dispatch');
   const plan = report.recoveryPlan.find(item => item.jobId === 'job-stuck-terminal');
   assert.equal(plan.action, 'HOLD_FOR_OWNER_RECONCILIATION');
@@ -232,8 +244,27 @@ test('Goal/Idea diagnostics reproduce the canonical live snapshot hash but never
   assert.equal(report.goals[0].snapshotHash, expected.snapshot_hash,
     'read-only diagnostics must independently reproduce the canonical store snapshot hash byte-for-byte');
   assert.equal(report.goals[0].planningAuthority, 'NOT_ESTABLISHED_BY_READ_ONLY_DIAGNOSTICS');
+  assert.equal(report.goals[0].evidenceAssessment.status, 'BLOCKED');
+  assert.equal(report.goals[0].evidenceAssessment.declaredReferenceCount, 0);
+  assert.equal(report.goals[0].evidenceAssessment.eligibleForExternalAttestation, false);
+  assert.ok(report.goals[0].evidenceAssessment.blockers.some(item => item.code === 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY'));
+  assert.equal(report.summary.goalsWithEvidenceIneligible, 1);
   assert.equal(report.policy.signatureVerificationAttempted, false);
   assert.equal(report.summary.planningAuthorityEstablished, false);
+
+  const sourcePath = path.join(ROOT, 'src/runtime/adaptive-goal-knowledge-store.js');
+  const sourceRef = `file:src/runtime/adaptive-goal-knowledge-store.js#sha256=${sha(fs.readFileSync(sourcePath))}`;
+  store.saveNode({ goalId: 'goal-source-evidence', stableKey: 'source-backed-goal', type: 'goal',
+    content: { label: 'Source-backed diagnostic fixture' }, provenance, evidenceRefs: [sourceRef] });
+  const sourceEvidenceReport = buildAdaptiveGoalGraphIntegrityReport(db);
+  const sourceEvidenceGoal = sourceEvidenceReport.goals.find(item => item.goalId === 'goal-source-evidence');
+  assert.equal(sourceEvidenceGoal.evidenceAssessment.status, 'EVIDENCE_MATERIAL_ELIGIBLE_FOR_EXTERNAL_ATTESTATION');
+  assert.equal(sourceEvidenceGoal.evidenceAssessment.eligibleForExternalAttestation, true,
+    'matching content-addressed source bytes establish evidence material integrity only, not claim truth or independence');
+  assert.equal(sourceEvidenceGoal.evidenceAssessment.references[0].status, 'source_bytes_verified_claim_unverified');
+  assert.equal(sourceEvidenceGoal.evidenceAssessment.claimTruthVerified, false);
+  assert.equal(sourceEvidenceGoal.evidenceAssessment.independenceVerified, false);
+  assert.equal(sourceEvidenceGoal.evidenceAssessment.cryptographicSignatureVerificationAttempted, false);
 
   const fakePayload = { evidence_manifest_hash: 'a'.repeat(64), goal_id: 'goal-a', nonce: 'fixture-nonce',
     provider_id: 'fixture-provider', signature: 'intentionally-not-verified', snapshot_hash: '0'.repeat(64) };
@@ -248,6 +279,67 @@ test('Goal/Idea diagnostics reproduce the canonical live snapshot hash but never
   assert.equal(stale.snapshotFresh, false);
   assert.equal(stale.bindingStatus, 'stale_snapshot');
   assert.equal(stale.signatureVerification, 'not_attempted_requires_host_owned_trust_configuration');
+});
+
+test('historical planner source mismatches stay redacted by default and become exactly actionable only with explicit sensitive-output opt-in', t => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  createAdaptiveGoalKnowledgeStore(db);
+  db.exec(`
+    CREATE TABLE adaptive_goal_planner_runs(run_id TEXT PRIMARY KEY,tool_name TEXT,status TEXT,started_at TEXT,finished_at TEXT,
+      goal_id TEXT,input_graph_sha256 TEXT,graph_hash TEXT,candidate_count INTEGER,partial_candidate_count INTEGER,
+      search_event_count_recorded INTEGER,search_event_count_omitted INTEGER,search_events_truncated INTEGER,error_code TEXT,
+      provenance_json TEXT,process_instance_id TEXT,schema_version INTEGER,goal_node_id TEXT,observed_node_count INTEGER,observed_edge_count INTEGER);
+    CREATE TABLE adaptive_goal_planner_run_evidence(run_id TEXT,artifact_id TEXT,source_job_id TEXT,classification TEXT,
+      lineage_verified INTEGER,claim_verified INTEGER,content_hash TEXT,reference TEXT,source_node_id TEXT,observation_source TEXT,
+      kind TEXT,details_json TEXT);
+  `);
+  const sourcePath = path.join(ROOT, 'src/runtime/adaptive-goal-knowledge-store.js');
+  const sourceRef = `file:src/runtime/adaptive-goal-knowledge-store.js#sha256=${'0'.repeat(64)}`;
+  db.prepare(`INSERT INTO adaptive_goal_planner_runs(run_id,tool_name,status,started_at,finished_at,goal_id,input_graph_sha256,
+    graph_hash,candidate_count,partial_candidate_count,search_event_count_recorded,search_event_count_omitted,search_events_truncated,
+    error_code,provenance_json,process_instance_id,schema_version,goal_node_id,observed_node_count,observed_edge_count)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run('planner-source-mismatch', 'adaptive_goal_graph_search', 'completed',
+      NOW, NOW, null, sha('input'), sha('graph'), 0, 0, 0, 0, 0, null, '{}', null, 2, 'fixture', 0, 0);
+  db.prepare(`INSERT INTO adaptive_goal_planner_run_evidence(run_id,artifact_id,source_job_id,classification,lineage_verified,
+    claim_verified,content_hash,reference,source_node_id,observation_source,kind,details_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run('planner-source-mismatch', null, null, 'source_bytes_verified_claim_unverified', 0, 0, null, sourceRef, null,
+      'runtime_resolver', 'source', '{}');
+  const observedSourceHash = sha(fs.readFileSync(sourcePath));
+  const conflictingDetailsRef = `file:src/runtime/adaptive-goal-knowledge-store.js#sha256=${observedSourceHash}`;
+  db.prepare(`INSERT INTO adaptive_goal_planner_run_evidence(run_id,artifact_id,source_job_id,classification,lineage_verified,
+    claim_verified,content_hash,reference,source_node_id,observation_source,kind,details_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run('planner-source-mismatch', null, null, 'source_bytes_verified_claim_unverified', 1, 0, null, conflictingDetailsRef, null,
+      'runtime_resolver', 'source', JSON.stringify({ sourceBytesSha256: 'f'.repeat(64) }));
+
+  const redacted = buildAdaptiveGoalGraphIntegrityReport(db);
+  const redactedEvidence = redacted.plannerRuns[0].evidence[0];
+  assert.equal(redactedEvidence.revalidation, 'source_hash_mismatch');
+  assert.equal(redacted.plannerRuns[0].evidence.length, 2);
+  assert.equal(Object.hasOwn(redactedEvidence, 'sourceReference'), false,
+    'sensitive file references must not leak into routine diagnostics');
+  assert.equal(redacted.plannerRuns[0].evidence[1].revalidation, 'source_bytes_verified_claim_unverified');
+  assert.deepEqual(redacted.plannerRuns[0].evidence[1].blockers, ['PLANNER_SOURCE_EVIDENCE_DECLARED_DIGEST_CONFLICT'],
+    'matching source bytes do not clear an immutable mismatch between URI and stored evidence digest');
+  assert.equal(redacted.findings.some(item => item.code === 'PLANNER_SOURCE_BYTES_REPORTED_VERIFIED_BUT_CURRENT_SOURCE_INVALID'), true,
+    'a contradictory declared digest must produce a durable reconciliation finding');
+  assert.equal(redacted.policy.sensitiveSourceIdentifiersIncluded, false);
+
+  const actionable = buildAdaptiveGoalGraphIntegrityReport(db, { includeSensitiveSourceIdentifiers: true });
+  const actionableEvidence = actionable.plannerRuns[0].evidence[0];
+  assert.equal(actionableEvidence.sourceReference, sourceRef);
+  assert.equal(actionableEvidence.expectedSourceSha256, '0'.repeat(64));
+  assert.equal(actionableEvidence.observedSourceSha256, sha(fs.readFileSync(sourcePath)));
+  assert.equal(actionableEvidence.sourceResolutionStatus, 'source_hash_mismatch');
+  const actionableConflict = actionable.plannerRuns[0].evidence[1];
+  assert.equal(actionableConflict.uriSourceSha256, observedSourceHash);
+  assert.equal(actionableConflict.detailSourceSha256, 'f'.repeat(64));
+  assert.equal(actionableConflict.expectedSourceSha256, 'f'.repeat(64));
+  assert.equal(actionableConflict.observedSourceSha256, observedSourceHash);
+  assert.equal(actionable.policy.sensitiveSourceIdentifiersIncluded, true);
+  assert.equal(actionable.policy.sensitiveSourceIdentifiersRequireExplicitOptIn, true);
+  assert.equal(actionable.plannerRuns[0].evidence[0].claimTruthVerified, false);
+  assert.equal(actionable.plannerRuns[0].evidence[0].independenceVerified, false);
 });
 
 test('Goal/Idea diagnostics identify revision hash substitution, provenance corruption and invalid recovery contracts', t => {
@@ -280,6 +372,9 @@ test('Goal/Idea diagnostics identify revision hash substitution, provenance corr
   assert.ok(codes.has('KNOWLEDGE_REVISION_PROVENANCE_NONCANONICAL') || codes.has('KNOWLEDGE_REVISION_CONTENT_OR_PROVENANCE_INVALID'));
   assert.ok(codes.has('KNOWLEDGE_RECOVERY_EDGE_CONTRACT_INVALID'));
   assert.equal(report.goals[0].graphIntegrity, 'INVALID');
+  assert.equal(report.goals[0].evidenceAssessment.status, 'BLOCKED');
+  assert.ok(report.goals[0].evidenceAssessment.blockers.some(item => item.code === 'KNOWLEDGE_ACTION_EVIDENCE_MISSING'));
+  assert.ok(report.goals[0].evidenceAssessment.blockers.some(item => item.code === 'KNOWLEDGE_ARTIFACT_EVIDENCE_UNRESOLVED'));
 });
 
 test('planner evidence reconciliation revalidates stored artifact bytes, producer contract and exact result-attempt-completion lineage', t => {
@@ -303,7 +398,8 @@ test('planner evidence reconciliation revalidates stored artifact bytes, produce
   const attemptFinishedAt = '2026-10-26T02:05:00.000Z';
   const completionAt = '2026-10-26T02:10:00.000Z';
   const artifactAt = '2026-10-26T02:20:00.000Z';
-  const content = '{"implementation":"fixture bytes"}';
+  const content = JSON.stringify({ summary: 'fixture implementation artifact', files_changed: [], verification: ['fixture schema verified'],
+    execution: { exit_code: 0, session_id: 'fixture-session' } });
   const contentHash = sha(content);
   db.prepare('INSERT INTO tasks(task_id,job_id,role,status) VALUES(?,?,?,?)')
     .run(taskId, jobId, 'engineer', 'completed');
@@ -335,12 +431,30 @@ test('planner evidence reconciliation revalidates stored artifact bytes, produce
   assert.equal(good.claimTruthVerified, false);
   assert.equal(good.independenceVerified, false);
 
+  // An attacker can replace artifact bytes and recompute the self-reported
+  // content hash. Even if the artifact-created event is updated to match those
+  // bytes, the durable typed producer schema must still fail closed.
+  const schemaInvalidContent = JSON.stringify({ summary: 'self-hashed but schema-invalid' });
+  const schemaInvalidHash = sha(schemaInvalidContent);
+  evidence.content_hash = schemaInvalidHash;
+  db.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?')
+    .run(schemaInvalidContent, schemaInvalidHash, artifactId);
+  const schemaInvalidEvent = { ...artifactPayload, contentHash: schemaInvalidHash };
+  db.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(JSON.stringify(schemaInvalidEvent), artifactEventId);
+  const schemaInvalid = revalidatePlannerEvidenceLineage(db, evidence);
+  assert.equal(schemaInvalid.valid, false);
+  assert.ok(schemaInvalid.blockers.some(item => item.code === 'PLANNER_EVIDENCE_ARTIFACT_SCHEMA_INVALID'));
+  assert.ok(!schemaInvalid.blockers.some(item => item.code === 'PLANNER_EVIDENCE_ARTIFACT_CONTENT_HASH_MISMATCH'),
+    'the adversarial fixture must have internally matching bytes/hash');
+
   db.prepare('UPDATE artifacts SET content=? WHERE artifact_id=?').run('{"implementation":"substituted bytes"}', artifactId);
+  db.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(JSON.stringify(artifactPayload), artifactEventId);
   const tamperedBytes = revalidatePlannerEvidenceLineage(db, evidence);
   assert.equal(tamperedBytes.valid, false);
   assert.ok(tamperedBytes.blockers.some(item => item.code === 'PLANNER_EVIDENCE_ARTIFACT_CONTENT_HASH_MISMATCH'));
 
-  db.prepare('UPDATE artifacts SET content=? WHERE artifact_id=?').run(content, artifactId);
+  db.prepare('UPDATE artifacts SET content=?,content_hash=? WHERE artifact_id=?').run(content, contentHash, artifactId);
+  evidence.content_hash = contentHash;
   db.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
     .run(JSON.stringify({ attemptId, executor: 'chat-on-steroids-plugin', resultId: 'result-substituted', taskId }), completionEventId);
   const tamperedLineage = revalidatePlannerEvidenceLineage(db, evidence);
@@ -400,6 +514,39 @@ test('proposal diagnostics inventory the actual persisted event payload and dete
   assert.equal(first.proposalRecords[0].readinessAssessment.evidenceLineageRevalidationPerformed, false,
     'read-only proposal diagnostics must not claim runtime evidence lineage validation');
 
+  const executionGraph = {
+    schemaVersion: 1, fingerprint: 'execution-fingerprint', proposalHash: 'execution-proposal-hash',
+    source: { planProposalJobId: 'job-plan-proposal', planProposalFingerprint: planProposal.fingerprint,
+      candidatePlanId: source.candidate_plan_id, graphHash: source.graph_hash, draftHash: source.draft_hash,
+      verification: { status: 'unverified', verified: false } },
+    nodes: draft.steps.map(step => ({ sourceStepId: step.id })), gates: { dispatchAllowed: false, executionAuthorized: false }
+  };
+  const executionSnapshot = { schema_version: 1, fingerprint: executionGraph.fingerprint, proposal_hash: executionGraph.proposalHash,
+    source_plan_proposal_job_id: 'job-plan-proposal', task_bindings: draft.steps.map((step, index) => ({
+      step_id: step.id, task_id: `task-${index}`, capability: 'test.capability'
+    })), execution_graph_proposal: executionGraph };
+  db.prepare('INSERT INTO jobs(job_id,state,status) VALUES(?,?,?)').run('job-execution-proposal', 'PROPOSED', 'active');
+  db.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)').run(
+    sha('execution-proposal-event'), 'job-execution-proposal', 'job.proposal_requested',
+    JSON.stringify({ workspace, workflowId: 'standard-engineering', adaptive_goal_execution_graph_proposal: executionSnapshot }), NOW);
+  const crossGraph = buildAdaptiveGoalGraphIntegrityReport(db);
+  const executionRecord = crossGraph.proposalRecords.find(item => item.kind === 'execution_graph_proposal');
+  assert.ok(executionRecord);
+  assert.equal(executionRecord.crossGraphConsistency.checks.sourcePlanProposalResolvedUniquely, true);
+  assert.equal(executionRecord.crossGraphConsistency.checks.taskBindingsExactlyCoverPlanSteps, true);
+  assert.equal(executionRecord.crossGraphConsistency.status, 'BLOCKED',
+    'internally linked proposals still block when no authenticated current Goal/Idea snapshot binding exists');
+
+  const danglingSnapshot = structuredClone(executionSnapshot);
+  danglingSnapshot.source_plan_proposal_job_id = 'job-missing-plan';
+  danglingSnapshot.execution_graph_proposal.source.planProposalJobId = 'job-missing-plan';
+  db.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(JSON.stringify({
+    workspace, workflowId: 'standard-engineering', adaptive_goal_execution_graph_proposal: danglingSnapshot
+  }), sha('execution-proposal-event'));
+  const dangling = buildAdaptiveGoalGraphIntegrityReport(db);
+  assert.ok(dangling.proposalFindings.some(item => item.code === 'AGG_EXECUTION_GRAPH_SOURCE_PLAN_LINKAGE_INVALID' &&
+    item.failedChecks.includes('sourcePlanProposalResolvedUniquely')));
+
   const tamperedPayload = structuredClone(eventPayload);
   tamperedPayload.adaptive_goal_plan_proposal.source.candidate_plan_id = `agg-${'2'.repeat(24)}`;
   db.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(JSON.stringify(tamperedPayload), sha('proposal-event'));
@@ -423,8 +570,18 @@ test('proposal diagnostics inventory the actual persisted event payload and dete
   assert.ok(third.proposalFindings.some(item => item.code === 'AGG_PLAN_GRAPH_PROPOSAL_SOURCE_LINEAGE_INVALID' &&
     item.reason === 'SOURCE_GRAPH_PREREQUISITE_NOT_PROJECTED' && item.prerequisiteNodeId === 'task-3' && item.dependentNodeId === 'task-4'));
   assert.equal(third.proposalSummary.planGraphProposalsWithInvalidSourceLineage, 1);
-  assert.equal(third.proposalRecords[0].sourceLineage.valid, false);
-  assert.equal(third.proposalRecords[0].readinessAssessment.status, 'BLOCKED');
+  const thirdPlanRecord = third.proposalRecords.find(item => item.kind === 'plan_graph_proposal');
+  assert.equal(thirdPlanRecord.sourceLineage.valid, false);
+  assert.equal(thirdPlanRecord.readinessAssessment.status, 'BLOCKED');
+
+  const omittedAction = structuredClone(eventPayload);
+  omittedAction.adaptive_goal_plan_proposal.draft.steps = omittedAction.adaptive_goal_plan_proposal.draft.steps
+    .filter(step => step.sourceNodeId !== 'task-0');
+  db.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(JSON.stringify(omittedAction), sha('proposal-event'));
+  const omittedActionReport = buildAdaptiveGoalGraphIntegrityReport(db);
+  assert.ok(omittedActionReport.proposalFindings.some(item => item.code === 'AGG_PLAN_GRAPH_PROPOSAL_SOURCE_LINEAGE_INVALID' &&
+    item.reason === 'SOURCE_ACTION_NODE_NOT_PROJECTED' && item.sourceNodeId === 'task-0'),
+  'a proposal must not silently omit a source action node even if all remaining step references resolve');
 });
 
 test('CLI writes an exclusive diagnostic report, refuses overwrite and rejects symlinked database paths', t => {
@@ -444,7 +601,7 @@ test('CLI writes an exclusive diagnostic report, refuses overwrite and rejects s
   assert.match(envelope.reportSha256, /^[a-f0-9]{64}$/);
   const report = JSON.parse(fs.readFileSync(outPath, 'utf8'));
   assert.equal(report.dbPath, dbPath);
-  assert.equal(report.summary.jobsFlaggedForReconciliation, 4);
+  assert.equal(report.summary.jobsFlaggedForReconciliation, 5);
   assert.equal(report.summary.selectionTruncated, false);
   assert.equal(fs.statSync(outPath).mode & 0o777, 0o600);
   const duplicate = spawnSync(process.execPath, [CLI, '--db', dbPath, '--out', outPath], { cwd: ROOT, encoding: 'utf8', timeout: 10_000 });

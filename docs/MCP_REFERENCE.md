@@ -2,9 +2,9 @@
 
 This page is generated from the shipped stdio MCP server by the documentation generator. It describes registered tool names and input schemas returned by `tools/list`; it does not claim that every tool is safe in every workflow state. Follow the linked guides for lifecycle preconditions, permissions, evidence rules, and limitations.
 
-- Source: `server/index-v1.0.9-rc.16.js` and its runtime schema definitions.
+- Source: `server/index-v1.0.9-rc.25.js` and its runtime schema definitions.
 - Server identity reported by the checked-out source: `runalith-agent-orchestrator`.
-- Source package version reported at generation time: `1.0.9-rc.16`. This is source-runtime metadata, not proof of which bundle is installed in a client.
+- Source package version reported at generation time: `1.0.9-rc.25`. This is source-runtime metadata, not proof of which bundle is installed in a client.
 - Registered tools: **74**.
 
 ## Choosing the right operation

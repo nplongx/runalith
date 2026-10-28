@@ -81,8 +81,11 @@ test('preserves CASE-06 execution denials and the frozen protocol gate remains c
     'custom_workflow_approve', 'custom_workflow_run_create']) {
     assert.ok(case6.hard_denied_tools.includes(name), `CASE-06 must continue to deny ${name}`);
   }
-  assert.equal(packageManifest.version, '1.0.9-rc.16');
-  assert.equal(packageManifest.server.entry_point, 'server/index-v1.0.9-rc.16.js');
+  const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(packageManifest.version, packageMetadata.version,
+    'the current candidate version must track package metadata without rewriting historical frozen fixtures');
+  assert.equal(packageManifest.server.entry_point, packageMetadata.runtimeEntryPoint,
+    'the current candidate entry point must match the versioned package runtime entry point');
   assert.notEqual(packageManifest.version, '1.0.9-rc.5',
     'the current candidate must not be conflated with the historical RC.5 archive used by older owner evidence');
 });

@@ -205,6 +205,14 @@ function normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSour
   if (!Array.isArray(refs) || refs.some(ref => typeof ref !== 'string' || !ref.trim()) || new Set(refs).size !== refs.length) {
     fail('KNOWLEDGE_EVIDENCE_REFERENCE_INVALID', 'persisted graph has malformed, duplicate or absent evidence references');
   }
+  // An empty graph evidence manifest is useful to diagnose, but it is never
+  // sufficient material for an independent claim/independence attestation.
+  // Preserve the snapshot and a deterministic empty-manifest hash for read-only
+  // reconciliation while carrying an explicit non-authorizing eligibility gate.
+  const eligibilityBlockers = refs.length === 0 ? [{
+    code: 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY',
+    message: 'Goal/Idea Graph has no durable evidence references; obtain current producer-bound artifact:// evidence before requesting an attestation'
+  }] : [];
   const artifactRefs = refs.filter(ref => ref.startsWith('artifact://'));
   const sourceRefs = refs.filter(ref => ref.startsWith('file:'));
   const unsupported = refs.filter(ref => !ref.startsWith('artifact://') && !ref.startsWith('file:'));
@@ -268,7 +276,25 @@ function normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSour
   if (invalid.length) fail('KNOWLEDGE_EVIDENCE_LINEAGE_INVALID', invalid.map(item => `${item.reference}: ${item.blockers.map(b => b.code).join(',')}`).join('; '));
   const normalized = manifest.sort((a, b) => a.reference < b.reference ? -1 : a.reference > b.reference ? 1 : 0);
   const canonical = canonicalAdaptiveGoalKnowledgeJson(normalized);
-  return { records: normalized, hash: sha256(canonical), artifacts: artifactRecords, sources: sourceRecords, canonical_json: canonical };
+  return {
+    records: normalized, hash: sha256(canonical), artifacts: artifactRecords, sources: sourceRecords,
+    canonical_json: canonical, eligibleForAttestation: eligibilityBlockers.length === 0,
+    blockers: eligibilityBlockers
+  };
+}
+
+function failedEvidenceManifestAssessment(error) {
+  const code = typeof error?.code === 'string' && error.code.trim()
+    ? error.code : 'KNOWLEDGE_EVIDENCE_MANIFEST_INVALID';
+  return {
+    records: [],
+    hash: sha256(canonicalAdaptiveGoalKnowledgeJson([])),
+    artifacts: [],
+    sources: [],
+    canonical_json: '[]',
+    eligibleForAttestation: false,
+    blockers: [{ code, message: String(error?.message || error || 'evidence manifest could not be resolved') }]
+  };
 }
 
 /**
@@ -369,6 +395,10 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
         fail('KNOWLEDGE_ATTESTATION_DURABLE_IDENTITY_MISMATCH', 'stored verifier record does not round-trip to its canonical signed payload');
       }
       const evidenceManifest = normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSourceRecords);
+      if (!evidenceManifest.eligibleForAttestation) {
+        fail(evidenceManifest.blockers[0]?.code || 'KNOWLEDGE_EVIDENCE_MANIFEST_INVALID',
+          evidenceManifest.blockers.map(item => item.message).join('; '));
+      }
       const trustedRoot = validateForCurrentSnapshot(attestation, snapshot, configured, evidenceManifest);
       const nonceCount = store.db.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications WHERE nonce=?').get(attestation.nonce).n;
       if (nonceCount !== 1) fail('KNOWLEDGE_ATTESTATION_NONCE_REPLAY', 'knowledge verifier nonce appears in multiple durable attestation rows');
@@ -398,6 +428,16 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
     let snapshot;
     try { snapshot = currentSnapshot(goalId); }
     catch (error) { return { verified: false, status: 'blocked', goalId, blockers: [{ code: error?.code || 'KNOWLEDGE_SNAPSHOT_INVALID', message: String(error?.message || error) }] }; }
+    let evidenceManifest;
+    try { evidenceManifest = normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSourceRecords); }
+    catch (error) { evidenceManifest = failedEvidenceManifestAssessment(error); }
+    if (!evidenceManifest.eligibleForAttestation) {
+      return {
+        verified: false, status: 'evidence_ineligible', goalId, snapshotHash: snapshot.snapshot_hash,
+        evidenceManifestHash: evidenceManifest.hash, evidenceRecordCount: evidenceManifest.records.length,
+        blockers: evidenceManifest.blockers
+      };
+    }
     let configured;
     try { configured = configuredVerifier(); }
     catch (error) { return { verified: false, status: 'verifier_unavailable', goalId, snapshotHash: snapshot.snapshot_hash,
@@ -441,7 +481,9 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
 
   function getAttestationRequest(goalId) {
     const snapshot = currentSnapshot(goalId);
-    const evidenceManifest = normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSourceRecords);
+    let evidenceManifest;
+    try { evidenceManifest = normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSourceRecords); }
+    catch (error) { evidenceManifest = failedEvidenceManifestAssessment(error); }
     const verifierConfiguration = getVerifierConfigurationStatus();
     const { canonical_json: _canonical, ...publicSnapshot } = snapshot;
     return {
@@ -453,7 +495,10 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       snapshot: publicSnapshot,
       evidenceManifest: evidenceManifest.records,
       evidenceManifestHash: evidenceManifest.hash,
-      requiredSignedFields: ['claim_status=verified', 'independence_status=verified'],
+      eligibleForAttestation: evidenceManifest.eligibleForAttestation,
+      attestationBlockers: evidenceManifest.blockers,
+      requiredSignedFields: evidenceManifest.eligibleForAttestation
+        ? ['claim_status=verified', 'independence_status=verified'] : [],
       warning: 'Hashes and lineage prove content integrity and origin only. A trusted verifier must independently adjudicate claim truth and evidence independence before signing this exact request.'
     };
   }
@@ -478,6 +523,10 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
     try {
       const snapshot = currentSnapshot(goalId);
       const evidenceManifest = normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSourceRecords);
+      if (!evidenceManifest.eligibleForAttestation) {
+        fail(evidenceManifest.blockers[0]?.code || 'KNOWLEDGE_EVIDENCE_MANIFEST_INVALID',
+          evidenceManifest.blockers.map(item => item.message).join('; '));
+      }
       const trustedRoot = validateForCurrentSnapshot(attestationInput, snapshot, configured, evidenceManifest);
       const canonicalAttestation = canonicalAdaptiveGoalKnowledgeJson(attestationInput);
       const existingIdentical = db.prepare('SELECT attestation_id,payload_json FROM adaptive_goal_knowledge_verifications WHERE goal_id=? AND snapshot_hash=? AND attestation_id=?')

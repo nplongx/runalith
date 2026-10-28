@@ -130,12 +130,12 @@ test('all eight immutable dist candidates retain exact hashes and are classified
   });
   assert.equal(diagnostic.status, 0, diagnostic.stderr);
   const report = JSON.parse(diagnostic.stdout);
-  // The forensic scanner also sees the newly built RC.15 successor. Keep the
+  // The forensic scanner also sees versioned RC.15/RC.16/RC.17 work candidates.
   // immutable historical hash assertion scoped to the eight archived legacy
-  // candidates; RC.15/RC.16 successors are validated independently by source
+  // candidates; the current successors are validated independently by source
   // alignment and must not enter the historical-hash assertion set.
   const historicalArchives = report.archives.filter(archive =>
-    !/\/runalith-1\.0\.9-rc\.(?:15|16)-candidate-/.test(archive.path));
+    !/\/runalith-1\.0\.9-rc\.(?:15|16|17)-.*candidate-/.test(archive.path));
   assert.equal(report.frozenContract.expectedArchivePaths, 71);
   assert.equal(report.frozenContract.changed, false);
   assert.equal(report.frozenContract.contractKind, 'frozen-entry-count-only');

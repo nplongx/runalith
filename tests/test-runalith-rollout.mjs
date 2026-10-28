@@ -6,6 +6,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import test, { after, before } from 'node:test';
+import { assertAndRecordAdaptiveGoalTrustConfiguration, initializeAdaptiveGoalTrustConfigurationLedger,
+  loadAdaptiveGoalTrustConfiguration } from '../src/runtime/adaptive-goal-trust-configuration.js';
 import {
   compareBundleToDirectory,
   createInstalledRollbackSnapshot,
@@ -64,7 +66,8 @@ function zipDirectory(source, destination, roots) {
   assert.equal(result.status, 0, result.stderr || result.stdout || 'zip failed');
 }
 
-function createBundle({ version = '1.0.9-rc.8', entryPoint = 'server/index-v1.0.9-rc.8.js', useRealHistorical = true } = {}) {
+function createBundle({ version = '1.0.9-rc.8', entryPoint = 'server/index-v1.0.9-rc.8.js',
+  startCommand = `node ${entryPoint}`, useRealHistorical = true } = {}) {
   const source = path.join(testRoot, `bundle-source-${crypto.randomUUID()}`);
   fs.mkdirSync(path.join(source, 'server'), { recursive: true, mode: 0o700 });
   const manifest = {
@@ -73,7 +76,8 @@ function createBundle({ version = '1.0.9-rc.8', entryPoint = 'server/index-v1.0.
     tools: [{ name: 'orchestrator_health', description: 'Isolated test runtime health probe' }]
   };
   fs.writeFileSync(path.join(source, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-  fs.writeFileSync(path.join(source, 'package.json'), `${JSON.stringify({ name: 'runalith-agent-orchestrator', version, type: 'module', main: entryPoint }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  fs.writeFileSync(path.join(source, 'package.json'), `${JSON.stringify({ name: 'runalith-agent-orchestrator', version, type: 'module', main: entryPoint,
+    scripts: { start: startCommand } }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   fs.copyFileSync(path.join(ROOT, 'server/index.js'), path.join(source, 'server/index.js'));
   if (useRealHistorical) fs.writeFileSync(path.join(source, entryPoint), fakeRuntimeSource(version), { flag: 'wx', mode: 0o600 });
   else fs.writeFileSync(path.join(source, entryPoint), 'export {};\n', { flag: 'wx', mode: 0o600 });
@@ -116,7 +120,8 @@ function makeFakeHost({ appRoot, procRoot, workflowDb, version = '1.0.9-rc.5' })
   const manifest = { name: 'runalith-agent-orchestrator', version, server: { type: 'node', entry_point: 'server/index.js', mcp_config: { command: 'node', args: ['${__dirname}/server/index.js'] } },
     tools: [{ name: 'orchestrator_health', description: 'Test fixture only', inputSchema: { type: 'object', properties: {}, additionalProperties: false } }] };
   fs.writeFileSync(path.join(generationRoot, 'manifest.json'), JSON.stringify(manifest), { flag: 'wx', mode: 0o600 });
-  fs.writeFileSync(path.join(generationRoot, 'package.json'), JSON.stringify({ name: 'runalith-agent-orchestrator', version, type: 'module', main: 'server/index.js' }), { flag: 'wx', mode: 0o600 });
+  fs.writeFileSync(path.join(generationRoot, 'package.json'), JSON.stringify({ name: 'runalith-agent-orchestrator', version,
+    type: 'module', main: 'server/index.js', scripts: { start: 'node server/index.js' } }), { flag: 'wx', mode: 0o600 });
   fs.mkdirSync(path.join(appRoot, 'state'), { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(appRoot, 'state', 'plugins.json'), JSON.stringify([{ id: pluginId, name: 'Runalith', version,
     enabled: true, status: 'ready', source: { kind: 'mcpb', path: 'runalith-current.mcpb', args: [] } }]), { flag: 'wx', mode: 0o600 });
@@ -142,10 +147,34 @@ function makeFakeHost({ appRoot, procRoot, workflowDb, version = '1.0.9-rc.5' })
     AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: trustConfig('action_intent_reviewer', 'rollout-test-reviewer-provider',
       pem(reviewerPair), 'agg.action_intent.review', 'rollout-reviewer-key')
   };
+  // The fake host models the ledger actually opened by the active runtime.
+  // Its random roots and rows are test-local only and never represent host trust.
+  const trustLedgerDirectory = path.join(appRoot, 'private-data');
+  fs.mkdirSync(trustLedgerDirectory, { recursive: true, mode: 0o700 });
+  const trustLedgerPath = path.join(trustLedgerDirectory, 'agg-trust-configuration.db');
+  const trustLedger = new DatabaseSync(trustLedgerPath);
+  initializeAdaptiveGoalTrustConfigurationLedger(trustLedger);
+  const sourceConfiguration = loadAdaptiveGoalTrustConfiguration({
+    configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
+    publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'goal_idea_verifier',
+    scope: 'agg.goal_idea_graph.verify', environment: trustEnvironment, now
+  });
+  const reviewerConfiguration = loadAdaptiveGoalTrustConfiguration({
+    configJsonEnv: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', providerEnv: 'AGG_REVIEW_IDENTITY_PROVIDER_ID',
+    publicKeyEnv: 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'action_intent_reviewer',
+    scope: 'agg.action_intent.review', environment: trustEnvironment, now
+  });
+  assertAndRecordAdaptiveGoalTrustConfiguration(trustLedger, sourceConfiguration, { now });
+  assertAndRecordAdaptiveGoalTrustConfiguration(trustLedger, reviewerConfiguration, { now });
+  trustLedger.close();
+  fs.mkdirSync(path.join(procRoot, '4242', 'fd'), { recursive: true, mode: 0o700 });
+  fs.symlinkSync(trustLedgerPath, path.join(procRoot, '4242', 'fd', '10'));
+  fs.symlinkSync(workflowDb, path.join(procRoot, '4242', 'fd', '11'));
   const trustEnvironmentPath = path.join(procRoot, '4242', 'environ');
   fs.writeFileSync(trustEnvironmentPath, Buffer.from(Object.entries(trustEnvironment).map(([key, value]) => `${key}=${value}`).join('\0') + '\0'),
     { flag: 'wx', mode: 0o600 });
-  return { pluginId, generationRoot, entryPoint: path.join(generationRoot, 'server/index.js'), trustEnvironmentPath };
+  return { pluginId, generationRoot, entryPoint: path.join(generationRoot, 'server/index.js'), trustEnvironmentPath, trustLedgerPath,
+    trustLedgerDescriptorPath: path.join(procRoot, '4242', 'fd', '10') };
 }
 
 test('read-only host process discovery recognizes versioned RC.8 entry points and retains the historical entry point', () => {
@@ -208,6 +237,14 @@ test('candidate package verification and extracted runtime health are bound to e
   const smoke = smokeCandidate(candidatePath, 30_000);
   assert.equal(smoke.passed, true, smoke.output);
   assert.equal(inspectBundle(candidatePath, { requireCurrentSource: false }).sha256, before.sha256);
+});
+
+test('candidate package rejects npm start that points to a different versioned runtime than the manifest', () => {
+  const splitIdentity = createBundle({ startCommand: 'node server/index-v1.0.9-rc.5.js' });
+  try {
+    assert.throws(() => inspectBundle(splitIdentity), /candidate manifest\/package metadata, entry point, args or tool declarations/,
+      'a candidate whose npm start diverges from manifest.server.entry_point must fail before activation');
+  } finally { fs.rmSync(splitIdentity, { force: true }); }
 });
 
 test('preflight diagnostic report publication is exclusive and unsupported options fail closed', () => {
@@ -296,6 +333,16 @@ test('workflow database preflight is read-only and reports jobs, running tasks, 
   assert.equal(summary.executingJobs, 1);
   assert.equal(summary.runningTasks, 1);
   assert.equal(summary.activeLeases, 1);
+  const inconsistentState = new DatabaseSync(workflowDbPath);
+  inconsistentState.prepare('INSERT INTO jobs(job_id,state,status) VALUES(?,?,?)')
+    .run('job-executing-status-inconsistent', 'EXECUTING', 'completed');
+  inconsistentState.close();
+  const inconsistentSummary = workflowDbSummary(workflowDbPath);
+  assert.equal(inconsistentSummary.executingJobs, 2,
+    'the rollout drain gate must count every EXECUTING state regardless of inconsistent status metadata');
+  const restoreInconsistentState = new DatabaseSync(workflowDbPath);
+  restoreInconsistentState.prepare('DELETE FROM jobs WHERE job_id=?').run('job-executing-status-inconsistent');
+  restoreInconsistentState.close();
   const malformedLease = new DatabaseSync(workflowDbPath);
   malformedLease.prepare('UPDATE task_leases SET expires_at=? WHERE lease_id=?').run('', 'lease-1');
   malformedLease.close();
@@ -628,6 +675,69 @@ test('active-runtime trust preflight rejects malformed, legacy-only, colliding, 
     return inspectRuntimeTrustConfiguration(4242, { procRoot });
   };
   try {
+    const current = inspect(baseline);
+    assert.equal(current.available, true, JSON.stringify(current));
+    assert.equal(current.trustLedger.available, true);
+    assert.equal(current.trustLedger.status, 'CURRENT_FOR_ALL_DOMAINS');
+    assert.equal(current.trustLedger.source, 'active_runtime_open_file_descriptor');
+    assert.equal(current.trustLedger.domains.goal_idea_verifier.verified, true);
+    assert.equal(current.trustLedger.domains.action_intent_reviewer.verified, true);
+
+    const sourceConfig = JSON.parse(baseline.AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON);
+    const reviewerConfig = JSON.parse(baseline.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON);
+    const unrecordedNextVersion = inspect({ ...baseline,
+      AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: JSON.stringify({ ...sourceConfig, config_version: 2,
+        updated_at: new Date(Date.now() - 500).toISOString(), change_reference: 'TEST-UNRECORDED-ROTATION' }) });
+    assert.equal(unrecordedNextVersion.available, false,
+      'a valid JSON config not yet observed in the active trust ledger must not be production-verified');
+    assert.ok(unrecordedNextVersion.blockers.some(blocker => blocker.code === 'PRODUCTION_AGG_TRUST_CONFIGURATION_LEDGER_NOT_CURRENT'));
+    assert.equal(unrecordedNextVersion.trustLedger.domains.goal_idea_verifier.latestRecordedConfigVersion, 1);
+    assert.equal(unrecordedNextVersion.externalAntiRollbackAnchor.status, 'NOT_CONFIGURED',
+      'a current local ledger still does not impersonate an external monotonic anchor');
+
+    const sameVersionReplacement = inspect({ ...baseline,
+      AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: JSON.stringify({ ...sourceConfig,
+        provider_id: 'replacement-source-provider-at-same-version' }) });
+    assert.equal(sameVersionReplacement.available, false);
+    assert.equal(sameVersionReplacement.trustLedger.domains.goal_idea_verifier.status, 'version_reused',
+      'same-version trust-provider substitution must be caught by the active ledger');
+
+    const rollbackLedgerDirectory = path.join(path.dirname(installed.trustLedgerPath), 'rollback-fixture');
+    fs.mkdirSync(rollbackLedgerDirectory, { recursive: true, mode: 0o700 });
+    const rollbackLedgerPath = path.join(rollbackLedgerDirectory, 'agg-trust-configuration.db');
+    const rollbackLedger = new DatabaseSync(rollbackLedgerPath);
+    initializeAdaptiveGoalTrustConfigurationLedger(rollbackLedger);
+    const sourceVersionTwo = loadAdaptiveGoalTrustConfiguration({
+      configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
+      publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'goal_idea_verifier',
+      scope: 'agg.goal_idea_graph.verify', environment: { ...baseline,
+        AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: JSON.stringify({ ...sourceConfig, config_version: 2,
+          updated_at: new Date(Date.now() - 250).toISOString(), change_reference: 'TEST-RECORDED-V2' }) }
+    });
+    const reviewerV1 = loadAdaptiveGoalTrustConfiguration({
+      configJsonEnv: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', providerEnv: 'AGG_REVIEW_IDENTITY_PROVIDER_ID',
+      publicKeyEnv: 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'action_intent_reviewer',
+      scope: 'agg.action_intent.review', environment: baseline
+    });
+    assertAndRecordAdaptiveGoalTrustConfiguration(rollbackLedger, sourceVersionTwo);
+    assertAndRecordAdaptiveGoalTrustConfiguration(rollbackLedger, reviewerV1);
+    rollbackLedger.close();
+    fs.unlinkSync(installed.trustLedgerDescriptorPath);
+    fs.symlinkSync(rollbackLedgerPath, installed.trustLedgerDescriptorPath);
+    const rolledBack = inspect(baseline);
+    assert.equal(rolledBack.available, false);
+    assert.equal(rolledBack.trustLedger.domains.goal_idea_verifier.status, 'rollback_detected',
+      'a lower effective config version must be blocked against the ledger high-water mark');
+    fs.unlinkSync(installed.trustLedgerDescriptorPath);
+    fs.symlinkSync(installed.trustLedgerPath, installed.trustLedgerDescriptorPath);
+
+    fs.unlinkSync(installed.trustLedgerDescriptorPath);
+    const noOpenLedger = inspect(baseline);
+    assert.equal(noOpenLedger.available, false,
+      'a well-formed file on disk is not effective anti-rollback evidence when the active process has not opened it');
+    assert.ok(noOpenLedger.blockers.some(blocker => blocker.details?.some(item => item.code === 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE')));
+    fs.symlinkSync(installed.trustLedgerPath, installed.trustLedgerDescriptorPath);
+
     const malformed = inspect({ ...baseline, AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: '{' });
     assert.equal(malformed.available, false);
     assert.equal(malformed.status, 'BLOCKED');
@@ -636,8 +746,8 @@ test('active-runtime trust preflight rejects malformed, legacy-only, colliding, 
     assert.ok(malformed.externalAntiRollbackAnchor.requiredFields.includes('candidateSha256'));
     assert.equal(JSON.stringify(malformed).includes('BEGIN PUBLIC KEY'), false);
 
-    const source = JSON.parse(baseline.AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON);
-    const reviewer = JSON.parse(baseline.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON);
+    const source = sourceConfig;
+    const reviewer = reviewerConfig;
     const legacyOnly = {
       AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID: source.provider_id,
       AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM: source.keys[0].public_key_pem,
