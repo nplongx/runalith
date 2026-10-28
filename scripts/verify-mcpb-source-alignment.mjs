@@ -110,6 +110,12 @@ const BUILD_INPUT_PATHS = Object.freeze([
   'docs/runalith-hosted-builder-pipeline.md',
   'docs/runalith-release-evidence-verifier.md',
   'docs/agg-production-trust-provisioning-runbook.md',
+  // The release dossier compiler is part of the acceptance decision logic.
+  // Bind it and its negative tests into the same source snapshot as the
+  // runtime/trust verifier so a release cannot silently omit changed gates.
+  'scripts/build-agg-readiness-dossier.mjs',
+  'tests/test-agg-readiness-dossier.mjs',
+  'tests/test-package-no-overwrite.js',
 ]);
 
 function fail(message) {

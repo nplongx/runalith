@@ -235,7 +235,8 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       '.github/workflows/runalith-provenance-builder.yml', '.github/workflows/runalith-provenance-verifier.yml',
       '.github/workflows/runalith-verification-attestation-signer.yml',
       'docs/runalith-provenance-release-trust-design.md', 'docs/runalith-hosted-builder-pipeline.md',
-      'docs/runalith-release-evidence-verifier.md', 'docs/agg-production-trust-provisioning-runbook.md'
+      'docs/runalith-release-evidence-verifier.md', 'docs/agg-production-trust-provisioning-runbook.md',
+      'scripts/build-agg-readiness-dossier.mjs', 'tests/test-agg-readiness-dossier.mjs', 'tests/test-package-no-overwrite.js'
     ];
     for (const relative of sourceInputs) {
       writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));

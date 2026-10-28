@@ -126,6 +126,9 @@ try {
     'docs/runalith-hosted-builder-pipeline.md',
     'docs/runalith-release-evidence-verifier.md',
     'docs/agg-production-trust-provisioning-runbook.md',
+    'scripts/build-agg-readiness-dossier.mjs',
+    'tests/test-agg-readiness-dossier.mjs',
+    'tests/test-package-no-overwrite.js',
   ]) {
     writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
   }

@@ -67,7 +67,7 @@ try {
   const fakeBin = path.join(temp, 'fake-bin');
   fs.mkdirSync(fakeBin);
   const nodeWrapper = path.join(fakeBin, 'node');
-  fs.writeFileSync(nodeWrapper, `#!/usr/bin/env bash\nfor arg in "$@"; do\n  if [[ "$arg" == */tests/test-runalith-plugin.js ]]; then\n    printf '%s\\n' 'Bundled plugin runtime smoke test PASS (initialize + tools/list: 67/67 manifest tools exposed)' 'Runalith local MCP E2E: PASS'\n    echo 'intentional nonzero integration-test failure after deceptive PASS-looking output' >&2\n    exit 91\n  fi\ndone\nexec "$REAL_NODE" "$@"\n`);
+  fs.writeFileSync(nodeWrapper, `#!/usr/bin/env bash\nfor arg in "$@"; do\n  if [[ "$arg" == */tests/test-runalith-plugin.js ]]; then\n    printf '%s\\n' 'Bundled plugin runtime smoke test PASS (initialize + tools/list: 74/74 manifest tools exposed)' 'Runalith local MCP E2E: PASS'\n    echo 'intentional nonzero integration-test failure after deceptive PASS-looking output' >&2\n    exit 91\n  fi\ndone\nexec "$REAL_NODE" "$@"\n`);
   fs.chmodSync(nodeWrapper, 0o755);
   const failedBuild = path.join(temp, 'must-not-publish.mcpb');
   const failedBuildResult = spawnSync('bash', [script], {
@@ -91,8 +91,13 @@ try {
     'failed package validation must clean its staging directory');
 
   const symlinkSourceRoot = path.join(temp, 'symlink-source-project');
-  fs.mkdirSync(path.join(symlinkSourceRoot, 'scripts'), { recursive: true });
+  for (const directory of ['scripts', 'plugin']) fs.mkdirSync(path.join(symlinkSourceRoot, directory), { recursive: true });
   fs.copyFileSync(script, path.join(symlinkSourceRoot, 'scripts/package-runalith-mcpb.sh'));
+  // The packager validates the package/manifest versioned entrypoint identity
+  // before checking individual source paths. Supply that minimal valid metadata
+  // so this case specifically reaches and tests the symlinked README rejection.
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(symlinkSourceRoot, 'package.json'));
+  fs.copyFileSync(path.join(root, 'plugin/manifest.json'), path.join(symlinkSourceRoot, 'plugin/manifest.json'));
   const externalReadme = path.join(temp, 'external-readme.md');
   fs.writeFileSync(externalReadme, 'external source bytes that must not be packaged\n');
   fs.symlinkSync(externalReadme, path.join(symlinkSourceRoot, 'README.md'));
@@ -108,10 +113,12 @@ try {
   // absence or symlink substitution must be rejected by the same preflight as
   // the manifest, runtime collector, and acceptance test.
   const schemaSourceRoot = path.join(temp, 'symlink-schema-test-project');
-  for (const directory of ['scripts', 'tests', 'plugin']) fs.mkdirSync(path.join(schemaSourceRoot, directory), { recursive: true });
+  for (const directory of ['scripts', 'tests', 'plugin', 'server', 'benchmarks/plugin-workflow-benchmark']) fs.mkdirSync(path.join(schemaSourceRoot, directory), { recursive: true });
   for (const relative of [
-    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json',
-    'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js',
+    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.27.js',
+    'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js', 'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+    'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
+    'tests/test-adaptive-goal-trust-entrypoint.mjs', 'tests/test-adaptive-goal-reviewer-identity.js', 'tests/test-reconcile-active-workflows.mjs',
     'tests/test-execution-lease-fencing.js', 'tests/test-execution-control-process-boundary.js',
     'tests/test-mcp-stdio-backpressure.mjs', 'tests/test-temp-dir.js',
     'tests/test-execution-batch.js', 'tests/test-execution-batch-concurrency.js',
@@ -119,8 +126,10 @@ try {
     'tests/test-phase5-recovery.js', 'tests/test-agent-tool-guidance.js',
     'tests/test-mcp-graceful-signal-shutdown-20261017.js',
     'tests/test-mcp-shutdown-backpressure-deadline-20261017.js',
-    'tests/test-mcp-eof-shutdown-framing-20261017.js',
-    'scripts/package-runalith-mcpb.sh', 'scripts/collect-plugin-runtime.mjs', 'scripts/plugin-package-metadata.mjs'
+    'tests/test-mcp-eof-shutdown-framing-20261017.js', 'tests/test-adaptive-goal-evidence-lineage.js',
+    'scripts/package-runalith-mcpb.sh', 'scripts/collect-plugin-runtime.mjs', 'scripts/plugin-package-metadata.mjs',
+    'scripts/reconcile-active-workflows.mjs', 'scripts/verify-mcpb-source-alignment.mjs',
+    'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs'
   ]) fs.copyFileSync(path.join(root, relative), path.join(schemaSourceRoot, relative));
   fs.symlinkSync(externalReadme, path.join(schemaSourceRoot, 'tests/test-extracted-package-tool-schemas.mjs'));
   const schemaSourceOutput = path.join(schemaSourceRoot, 'dist/candidate.mcpb');
@@ -139,8 +148,11 @@ try {
   const externalTest = path.join(temp, 'external-package-test.js');
   fs.writeFileSync(externalTest, "throw new Error('external package test must never execute');\n", { flag: 'wx', mode: 0o600 });
   const preflightInputs = [
-    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json',
-    'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js', 'tests/test-extracted-package-tool-schemas.mjs',
+    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.27.js',
+    'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js', 'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+    'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
+    'tests/test-adaptive-goal-trust-entrypoint.mjs', 'tests/test-adaptive-goal-reviewer-identity.js', 'tests/test-reconcile-active-workflows.mjs',
+    'tests/test-extracted-package-tool-schemas.mjs',
     'tests/test-execution-lease-fencing.js', 'tests/test-execution-control-process-boundary.js',
     'tests/test-mcp-stdio-backpressure.mjs', 'tests/test-temp-dir.js',
     'tests/test-execution-batch.js', 'tests/test-execution-batch-concurrency.js',
@@ -148,8 +160,10 @@ try {
     'tests/test-phase5-recovery.js', 'tests/test-agent-tool-guidance.js',
     'tests/test-mcp-graceful-signal-shutdown-20261017.js',
     'tests/test-mcp-shutdown-backpressure-deadline-20261017.js',
-    'tests/test-mcp-eof-shutdown-framing-20261017.js',
-    'scripts/package-runalith-mcpb.sh', 'scripts/collect-plugin-runtime.mjs', 'scripts/plugin-package-metadata.mjs'
+    'tests/test-mcp-eof-shutdown-framing-20261017.js', 'tests/test-adaptive-goal-evidence-lineage.js',
+    'scripts/package-runalith-mcpb.sh', 'scripts/collect-plugin-runtime.mjs', 'scripts/plugin-package-metadata.mjs',
+    'scripts/reconcile-active-workflows.mjs', 'scripts/verify-mcpb-source-alignment.mjs',
+    'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs'
   ];
   for (const [relative, expectedMessage] of [
     ['tests/test-production-behavioral-qa.js', /missing or symlinked package source: tests\/test-production-behavioral-qa\.js/],
@@ -158,7 +172,7 @@ try {
     ['tests/test-temp-dir.js', /missing or symlinked package source: tests\/test-temp-dir\.js/]
   ]) {
     const project = path.join(temp, `symlink-package-preflight-${path.basename(relative, '.js')}`);
-    for (const directory of ['scripts', 'tests', 'plugin']) fs.mkdirSync(path.join(project, directory), { recursive: true });
+    for (const directory of ['scripts', 'tests', 'plugin', 'server', 'benchmarks/plugin-workflow-benchmark']) fs.mkdirSync(path.join(project, directory), { recursive: true });
     for (const input of preflightInputs) {
       if (input === relative) continue;
       fs.copyFileSync(path.join(root, input), path.join(project, input));
@@ -180,6 +194,8 @@ try {
   const symlinkRuntimeStage = path.join(temp, 'symlink-runtime-stage');
   fs.mkdirSync(path.join(symlinkRuntimeRoot, 'server'), { recursive: true });
   fs.mkdirSync(symlinkRuntimeStage);
+  fs.copyFileSync(path.join(root, 'package.json'), path.join(symlinkRuntimeRoot, 'package.json'));
+  fs.copyFileSync(path.join(root, 'server/index-v1.0.9-rc.27.js'), path.join(symlinkRuntimeRoot, 'server/index-v1.0.9-rc.27.js'));
   fs.symlinkSync(externalReadme, path.join(symlinkRuntimeRoot, 'server/index.js'));
   const symlinkRuntimeBuild = spawnSync(process.execPath, [collector, symlinkRuntimeRoot, symlinkRuntimeStage], { cwd: root, encoding: 'utf8' });
   assert.notEqual(symlinkRuntimeBuild.status, 0, 'runtime collector must reject symlinked source dependencies');

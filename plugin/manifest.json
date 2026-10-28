@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "runalith-agent-orchestrator",
   "display_name": "Runalith",
-  "version": "1.0.9-rc.26",
+  "version": "1.0.9-rc.27",
   "description": "Local-first durable agent workflow orchestration with immutable plans, versioned policies, typed evidence, and approval-gated execution.",
   "long_description": "Runalith is a local-first MCP workflow runtime. It persists workflow state in SQLite, compiles explicitly approved proposals into immutable plans, schedules dependency-aware specialist tasks, executes approved deterministic commands locally, validates typed artifacts and provenance, and records recovery and audit events. The MCPB is a standard package container for compatible clients; Runalith does not provide a hosted model service or remote execution fleet.",
   "author": {
@@ -10,11 +10,11 @@
   },
   "server": {
     "type": "node",
-    "entry_point": "server/index-v1.0.9-rc.26.js",
+    "entry_point": "server/index-v1.0.9-rc.27.js",
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/server/index-v1.0.9-rc.26.js"
+        "${__dirname}/server/index-v1.0.9-rc.27.js"
       ],
       "env": {
         "AGG_PHASE2_SHADOW_TOOL_ENABLED": "1",
