@@ -76,8 +76,29 @@ test('source hash mismatch is retained with unknown cause and no historical rewr
   const d = buildAggReadinessDossier(fixture());
   const f = d.findings.find(item => item.detail === 'source_hash_mismatch');
   assert.ok(f);
+  assert.equal(f.sourceArtifact.name, 'reconciliation');
+  assert.equal(f.sourceArtifact.recordId, f.recordId);
   assert.match(f.cause, /exact historical mutation\/capture cause is not established/);
   assert.match(f.prohibitedAction, /Do not rewrite historical digests/);
+});
+
+test('every actionable finding and workflow recovery record links to its exact source report and digest', () => {
+  const input = fixture();
+  input.reconciliation.__path = '/reports/reconciliation.json';
+  input.reconciliation.__sha256 = '1'.repeat(64);
+  input.preflight.__path = '/reports/preflight.json';
+  input.preflight.__sha256 = '2'.repeat(64);
+  input.snapshot.__path = '/reports/snapshot.json';
+  input.snapshot.__sha256 = '3'.repeat(64);
+  input.trustStatus.__path = '/reports/trust.json';
+  input.trustStatus.__sha256 = '4'.repeat(64);
+  const d = buildAggReadinessDossier(input);
+  for (const finding of d.findings) {
+    const artifacts = finding.sourceArtifacts || [finding.sourceArtifact];
+    assert.ok(artifacts.length > 0 && artifacts.every(a => a.name && a.path && /^[a-f0-9]{64}$/.test(a.sha256)), finding.code);
+  }
+  assert.ok(d.rc23Gates.every(g => g.sourceArtifact.path === '/reports/preflight.json' && g.sourceArtifact.sha256 === '2'.repeat(64)));
+  assert.ok(d.workflowRecovery.every(j => j.sourceArtifact.path === '/reports/reconciliation.json' && j.sourceArtifact.sha256 === '1'.repeat(64)));
 });
 
 test('running tasks with missing leases stay HOLD and never infer worker death', () => {

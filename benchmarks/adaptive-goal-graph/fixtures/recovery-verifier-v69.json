@@ -624,17 +624,19 @@
     },
     {
       "path": "scripts/build-agg-readiness-dossier.mjs",
-      "sha256": "34d88c35e9cb0fa67d034a836de3c7f317bd91f465192c321122f80f686d041e",
+      "sha256": "7e068f97393168c1970e118dd9447bb20fa03ea178ac63a68cbf2e98275d3518",
       "claim": "Machine-readable release dossier compiler validates current report linkage and preserves open trust/evidence/lifecycle gates.",
-      "changeAssessment": "RC.27 adds candidate-bound read-only readiness aggregation with fail-closed report identity and evidence eligibility checks. RC.27 dossier output now preserves owner/provider-wait/runtime/lease and task-count/approval findings per workflow, and reads the live proposalSummary.planGraphSteps field; previous pin preserved in previouslyPinnedBeforeV69LineageDetailSha256.",
-      "previouslyPinnedBeforeV69LineageDetailSha256": "fb575015c560c8a828487578181255d69939d66c5dcf6960bfa96653882031fb"
+      "changeAssessment": "RC.27 adds candidate-bound read-only readiness aggregation with fail-closed report identity and evidence eligibility checks. RC.27 dossier output now preserves owner/provider-wait/runtime/lease and task-count/approval findings per workflow, and reads the live proposalSummary.planGraphSteps field; previous pin preserved in previouslyPinnedBeforeV69LineageDetailSha256. RC.27 dossier now directly links each finding, gate and workflow recovery record to its exact source report path/hash plus record identity; previous pin preserved in previouslyPinnedBeforeV69SourceArtifactLinksSha256.",
+      "previouslyPinnedBeforeV69LineageDetailSha256": "fb575015c560c8a828487578181255d69939d66c5dcf6960bfa96653882031fb",
+      "previouslyPinnedBeforeV69SourceArtifactLinksSha256": "34d88c35e9cb0fa67d034a836de3c7f317bd91f465192c321122f80f686d041e"
     },
     {
       "path": "tests/test-agg-readiness-dossier.mjs",
-      "sha256": "0da4ac99ed013040bd52ac3a7d9c9030fdbddb6243d73a07ecce2fc63322a52c",
+      "sha256": "20eefcf8c4849a488d9ddd7889f2d6baab5424cb856eaf1f963764fde3099d71",
       "claim": "Negative tests cover all six RC.23 gates, source mismatch, missing graph evidence, trust roots, lease ambiguity and candidate substitution.",
-      "changeAssessment": "RC.27 acceptance tests prevent omission, local integrity, or isolated trust from closing production gates. RC.27 dossier output now preserves owner/provider-wait/runtime/lease and task-count/approval findings per workflow, and reads the live proposalSummary.planGraphSteps field; previous pin preserved in previouslyPinnedBeforeV69LineageDetailSha256.",
-      "previouslyPinnedBeforeV69LineageDetailSha256": "3e7dc2fb2a1be1f3bcf090c59f1d36e0cd209a4d1eb580454295adb9acc16149"
+      "changeAssessment": "RC.27 acceptance tests prevent omission, local integrity, or isolated trust from closing production gates. RC.27 dossier output now preserves owner/provider-wait/runtime/lease and task-count/approval findings per workflow, and reads the live proposalSummary.planGraphSteps field; previous pin preserved in previouslyPinnedBeforeV69LineageDetailSha256. RC.27 dossier now directly links each finding, gate and workflow recovery record to its exact source report path/hash plus record identity; previous pin preserved in previouslyPinnedBeforeV69SourceArtifactLinksSha256.",
+      "previouslyPinnedBeforeV69LineageDetailSha256": "3e7dc2fb2a1be1f3bcf090c59f1d36e0cd209a4d1eb580454295adb9acc16149",
+      "previouslyPinnedBeforeV69SourceArtifactLinksSha256": "0da4ac99ed013040bd52ac3a7d9c9030fdbddb6243d73a07ecce2fc63322a52c"
     },
     {
       "path": "docs/runalith-rollout-rc27-20261028.md",

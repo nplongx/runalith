@@ -95,6 +95,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     recordType: f.recordType || 'planner_evidence',
     recordId: f.recordId,
     detail: f.detail,
+    sourceArtifact: { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null, recordId: f.recordId },
     confidence: 'CONFIRMED_BY_CURRENT_READ_ONLY_REVALIDATION',
     cause: 'Current source bytes do not match the historical planner evidence digest; the exact historical mutation/capture cause is not established by this finding.',
     owner: 'Repository/source artifact owner; identity not recorded in this planner evidence finding',
@@ -109,6 +110,8 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
   const executingJobs = (reconciliation.diagnostics || []).filter(job => String(job.state).toUpperCase() === 'EXECUTING');
   const workflowRecovery = executingJobs.map(job => ({
     jobId: job.jobId, state: job.state, status: job.status, phase: job.phase, updatedAt: job.updatedAt,
+    sourceArtifact: { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null,
+      jobId: job.jobId, eventIds: job.allJobEventIds || [] },
     activeTaskId: job.activeTaskId, ownerAuthority: job.ownerBinding?.authority || 'unresolved',
     ownerBinding: job.ownerBinding || null,
     providerIdentity: firstDefined(job.runtimeObservation?.providerRunIdentity, job.runtimeObservation?.providerIdentity,
@@ -135,6 +138,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
   const blockers = new Set(preflight.decision?.blockers || []);
   const gates = RC23_GATES.map(gate => ({
     ...gate,
+    sourceArtifact: { name: 'preflight', path: preflight.__path || null, sha256: preflight.__sha256 || null, blockerCode: gate.code },
     status: blockers.has(gate.code) ? 'OPEN' : 'NOT_CLOSED_BY_THIS_EVIDENCE',
     evidence: blockers.has(gate.code) ? 'Current rollout preflight explicitly reports this blocker.' : 'Absence from the blocker list is not sufficient authority to close this gate; independent closure evidence was not supplied to this dossier.',
     authorizationGranted: false
@@ -187,7 +191,12 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     ...sourceMismatchFindings,
     {
       code: 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY', confidence: 'CONFIRMED_BY_DEDICATED_LIVE_SNAPSHOT_AND_RECONCILIATION',
-      source: 'live Goal/Idea snapshot + read-only reconciliation', goalId: snapshot.goal_id, snapshotHash: snapshot.snapshot.snapshot_hash,
+      source: 'live Goal/Idea snapshot + read-only reconciliation',
+      sourceArtifacts: [
+        { name: 'snapshot', path: snapshot.__path || null, sha256: snapshot.__sha256 || null, goalId: snapshot.goal_id, snapshotHash: snapshot.snapshot.snapshot_hash },
+        { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null, goalId: snapshot.goal_id }
+      ],
+      goalId: snapshot.goal_id, snapshotHash: snapshot.snapshot.snapshot_hash,
       cause: 'All seven current node revisions have empty evidenceRefs; the canonical evidence manifest has zero entries.',
       owner: 'Goal/Idea evidence producers and the source artifact owner; no independent claim verifier is currently configured.',
       provider: 'No trusted verifier provider is configured', runtime: 'Active Runalith RC.26 host process', lease: 'Not applicable to the graph snapshot',
@@ -198,6 +207,10 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     {
       code: 'KNOWLEDGE_VERIFIER_NOT_CONFIGURED', confidence: 'CONFIRMED_BY_RUNTIME_SNAPSHOT_AND_TRUST_STATUS',
       source: 'adaptive_goal_knowledge_snapshot_get + adaptive_goal_trust_configuration_status',
+      sourceArtifacts: [
+        { name: 'snapshot', path: snapshot.__path || null, sha256: snapshot.__sha256 || null },
+        { name: 'trustStatus', path: trustStatus.__path || null, sha256: trustStatus.__sha256 || null }
+      ],
       cause: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON is blank in the effective runtime.', owner: 'Host/security administrator + independent Goal/Idea verifier authority',
       provider: 'Not configured', runtime: 'Effective process environment reports unavailable', lease: 'Not applicable',
       allowedAction: 'Provision the authority-issued versioned config through host-supported configuration and verify effective runtime ledger state.',
@@ -207,6 +220,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     {
       code: 'AGG_TRUST_CONFIG_NOT_CONFIGURED', confidence: 'CONFIRMED_BY_RUNTIME_TRUST_STATUS',
       source: 'adaptive_goal_trust_configuration_status', cause: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON is blank in the effective runtime.',
+      sourceArtifact: { name: 'trustStatus', path: trustStatus.__path || null, sha256: trustStatus.__sha256 || null, domain: 'action_intent_reviewer' },
       owner: 'Host/security administrator + independent action-intent reviewer authority', provider: 'Not configured', runtime: 'Effective process environment reports unavailable', lease: 'Not applicable',
       allowedAction: 'Provision the independently administered reviewer config with exact action-intent scope, then verify runtime version/fingerprint ledger history.',
       prohibitedAction: 'Do not substitute the Goal/Idea verifier key or any isolated test identity.',
@@ -215,6 +229,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     {
       code: 'PLAN_GRAPH_SUPPORTING_EVIDENCE_MISSING', confidence: 'CONFIRMED_BY_CURRENT_READ_ONLY_RECONCILIATION',
       source: 'adaptiveGoalGraph.proposalSummary', cause: `${proposalSummary.planGraphStepsMissingEvidence || 0} observed Plan Graph steps lack validated supporting evidence.`,
+      sourceArtifact: { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null, proposalSummary: true },
       owner: 'Artifact producers for each bound task and the Plan Graph reviewer', provider: 'Per-job provider identity is not persisted for these historical proposals', runtime: 'Historical proposal event lineage only', lease: 'Not applicable to proposal records',
       allowedAction: 'Re-run the authorized producers only after trust and source snapshot gates pass; map each step to active durable artifacts with verified lineage.',
       prohibitedAction: 'Do not copy isolated E2E artifacts or mark declared references as verified.',
@@ -223,6 +238,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     {
       code: 'EXECUTION_GRAPH_PROPOSALS_NOT_PERSISTED', confidence: 'CONFIRMED_BY_CURRENT_READ_ONLY_RECONCILIATION',
       source: 'adaptiveGoalGraph.proposalSummary', cause: 'No persisted Execution Graph proposal or execution-plan-candidate event is present in the current proposal inventory.',
+      sourceArtifact: { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null, proposalSummary: true },
       owner: 'Plan Graph owner/reviewer after upstream evidence and trust gates pass', provider: 'Not applicable until a valid persisted plan exists', runtime: 'Current live proposal event inventory', lease: 'Not applicable',
       allowedAction: 'After evidence, snapshot attestation, plan pinning, and reviewer approval are valid, create and read back a new Execution Graph proposal.',
       prohibitedAction: 'Do not persist or dispatch an Execution Graph from caller-supplied or isolated test graph data.',
@@ -245,6 +261,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     liveState, findings, workflowRecovery,
     rc23Gates: gates,
     additionalBlockers: additionalBlockers.map(code => ({ code, status: 'OPEN', source: 'current rollout preflight',
+      sourceArtifact: { name: 'preflight', path: preflight.__path || null, sha256: preflight.__sha256 || null, blockerCode: code },
       action: code === 'ROLLBACK_BUNDLE_NOT_VERIFIED' || code === 'ROLLBACK_VERSION_DOES_NOT_MATCH_INSTALLED_BASELINE'
         ? 'Use a verified rollback archive whose version and bytes match the installed baseline; do not claim RC.25 is the current rollback baseline while RC.26 is installed.'
         : code === 'CANDIDATE_VERSION_ALREADY_INSTALLED'
