@@ -1,6 +1,6 @@
 {
   "name": "runalith-agent-orchestrator",
-  "version": "1.0.9-rc.25",
+  "version": "1.0.9-rc.26",
   "description": "Runalith is a local-first MCP runtime for approval-gated durable agent workflows, typed evidence, and constrained local execution.",
   "license": "MIT",
   "repository": {
@@ -25,11 +25,11 @@
   "engines": {
     "node": ">=22.13.0"
   },
-  "main": "server/index-v1.0.9-rc.25.js",
-  "runtimeEntryPoint": "server/index-v1.0.9-rc.25.js",
+  "main": "server/index-v1.0.9-rc.26.js",
+  "runtimeEntryPoint": "server/index-v1.0.9-rc.26.js",
   "type": "module",
   "scripts": {
-    "start": "node server/index-v1.0.9-rc.25.js",
+    "start": "node server/index-v1.0.9-rc.26.js",
     "docs:generate-reference": "node scripts/generate-mcp-reference.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "docs:check:external": "node scripts/check-docs.mjs --check-external-links",

@@ -15,6 +15,10 @@ const EVENT_KEYS = /^(task_?id|task|attempt_?id|attempt|result_?id|artifact_?id|
 const MAX_REPORT_JOBS = 200;
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const GRAPH_LIMITS = Object.freeze({ nodes: 10_000, revisions: 50_000, memberships: 50_000, edges: 20_000, attestations: 5_000, plannerRuns: 500, evidencePerRun: 5_000 });
+// Keep the reconciliation inventory aligned with the rollout drain gate:
+// execution state is authoritative even when status metadata is stale or has
+// different casing, and running tasks must never disappear from the report.
+const ACTIVE_JOB_SELECTION_SQL = "WHERE lower(status)='active' OR UPPER(state)='EXECUTING' OR job_id IN (SELECT job_id FROM tasks WHERE lower(status)='running')";
 const RECONCILIATION_FINDING_GUIDANCE = Object.freeze({
   RUNNING_TASK_WITHOUT_EXECUTION_METADATA: ['tasks', 'Confirm the exact attempt, worker/process identity and provider run through host-owned records; do not infer worker death from absent metadata.'],
   ACTIVE_ATTEMPT_WITHOUT_ACTIVE_LEASE: ['attempts,task_leases', 'Ask the workflow owner to reconcile the attempt with lease fencing and provider state before any lifecycle transition.'],
@@ -25,6 +29,7 @@ const RECONCILIATION_FINDING_GUIDANCE = Object.freeze({
   ACTIVE_LEASE_ATTEMPT_MISMATCH: ['task_leases,tasks', 'Verify attempt fencing and owner epoch against the authoritative lease service.'],
   ACTIVE_LEASE_JOB_TASK_LINEAGE_MISMATCH: ['task_leases,jobs,tasks', 'Verify lease job/task ownership against the authoritative lease service before intervention.'],
   ACTIVE_LEASE_OWNER_EPOCH_UNAVAILABLE: ['task_leases', 'Obtain the lease owner epoch from the authoritative lease service; missing epoch is unresolved, not permission to recover.'],
+  QUARANTINED_TASK_LEASE_REQUIRES_RECONCILIATION: ['task_leases,events', 'A quarantined lease records an uncertain remote effect. Correlate its quarantine event, provider run, attempt, result and artifact with the owner; do not retry, release, or terminalize automatically.'],
   TASK_ATTEMPT_PROVIDER_RUN_ID_MISMATCH: ['tasks,attempts', 'Verify provider identity and run binding with the provider owner; do not attach a different run to this attempt.'],
   TASK_ATTEMPT_PROVIDER_RUN_ID_BINDING_INCOMPLETE: ['tasks,attempts', 'Obtain the missing provider run binding from authoritative provider records or keep the task on hold.'],
   RUNTIME_ATTEMPT_ACTIVE_TASK_MISMATCH: ['workflow_runtime_state,tasks', 'Re-read runtime and task attempt IDs and reconcile through the documented owner-authorized lifecycle path.'],
@@ -34,6 +39,7 @@ const RECONCILIATION_FINDING_GUIDANCE = Object.freeze({
   RUNNING_TASKS_WITHOUT_ACTIVE_LEASES: ['tasks,task_leases', 'Confirm host/provider worker identity and lease fencing; absent leases do not prove the worker is dead.'],
   ACTIVE_TASK_POINTER_MISSING_OR_UNRESOLVED: ['jobs,tasks', 'Resolve the active task pointer from authoritative workflow state and retain HOLD until the owner confirms lineage.'],
   WORKFLOW_RUNTIME_HAS_LAST_ERROR: ['workflow_runtime_state', 'Inspect the runtime error and correlated event/attempt/result lineage; do not automatically retry or terminalize.'],
+  EXECUTING_STATE_STATUS_INCONSISTENT: ['jobs,tasks,events', 'Treat the job as executing because its durable state is EXECUTING; reconcile owner/provider/runtime and task lineage, and do not edit the row from this report.'],
   TASK_LINEAGE_INVENTORY_TRUNCATED: ['tasks,attempts,results,artifacts,task_leases', 'The diagnostic inventory is bounded and incomplete; re-run a scoped report and inspect the full authoritative records before any lifecycle decision.'],
   TASK_DEPENDENCY_JSON_INVALID: ['tasks', 'Validate the persisted dependency_json bytes and recover only through an owner-approved workflow repair; do not infer task ordering.'],
   TASK_DEPENDENCY_REFERENCE_INVALID: ['tasks', 'Resolve every parent/dependency reference to a task in the same job and preserve the existing DAG until the workflow owner authorizes repair.'],
@@ -68,7 +74,7 @@ function reconciliationFinding(code, { job, taskEntry = null, eventIds = [], run
     attemptIds: taskEntry?.lineageAssessment?.attemptIds ?? [],
     resultIds: taskEntry?.lineageAssessment?.resultIds ?? [],
     artifactIds: taskEntry?.lineageAssessment?.artifactIds ?? [],
-    leaseIds: taskEntry?.lineageAssessment?.leaseIds ?? [],
+    leaseIds: [...new Set([...(taskEntry?.lineageAssessment?.leaseIds ?? []), ...(taskEntry?.lineageAssessment?.quarantinedLeaseIds ?? [])])],
     eventIds: taskEntry?.eventLineage?.eventIds ?? eventIds
   };
   const evidence = {
@@ -1295,14 +1301,22 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
       "WHERE task_id=? AND UPPER(state)='ACTIVE'", [task.task_id], 'ORDER BY rowid DESC', 'LIMIT 1001');
     const activeLeaseInventoryTruncated = activeLeaseRows.length > 1000;
     const activeLeases = activeLeaseRows.slice(0, 1000);
-    const leasesById = new Map([...recentLeases, ...activeLeases].map(lease => [lease.lease_id, lease]));
+    // Failed leases can encode a quarantine after an uncertain remote effect;
+    // they are not active leases, but they still require explicit owner/provider
+    // reconciliation and must not vanish behind the recent-history window.
+    const quarantinedLeaseRows = selectAvailable(db, 'task_leases', leaseColumns,
+      "WHERE task_id=? AND UPPER(state)='FAILED' AND last_error LIKE 'REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION:%'",
+      [task.task_id], 'ORDER BY rowid DESC', 'LIMIT 1001');
+    const quarantinedLeaseInventoryTruncated = quarantinedLeaseRows.length > 1000;
+    const quarantinedLeases = quarantinedLeaseRows.slice(0, 1000);
+    const leasesById = new Map([...recentLeases, ...activeLeases, ...quarantinedLeases].map(lease => [lease.lease_id, lease]));
     const leases = [...leasesById.values()].sort((a, b) => String(b.issued_at || '').localeCompare(String(a.issued_at || '')));
     const latestAttempt = attempts[0] || null;
     const updatedAge = ageMs(task.updated_at, nowMs);
     const flags = [];
     const truncated = { attempts: observedCounts.attempts > attempts.length, results: observedCounts.results > results.length,
       artifacts: observedCounts.artifacts > artifacts.length,
-      leases: observedCounts.activeLeases > activeLeases.length || activeLeaseInventoryTruncated || observedCounts.leases > leases.length };
+      leases: observedCounts.activeLeases > activeLeases.length || activeLeaseInventoryTruncated || quarantinedLeaseInventoryTruncated || observedCounts.leases > leases.length };
     if (Object.values(truncated).some(Boolean)) flags.push('TASK_LINEAGE_INVENTORY_TRUNCATED');
     if (task.status === 'running' && Number(task.execution_attempt ?? 0) === 0 && !task.execution_started_at && task.execution_pid == null && !task.execution_session_id) {
       flags.push('RUNNING_TASK_WITHOUT_EXECUTION_METADATA');
@@ -1314,6 +1328,7 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
       timestampMs(lease.expires_at) == null || timestampMs(lease.expires_at) <= nowMs)) {
       flags.push('RUNNING_TASK_WITH_EXPIRED_OR_INVALID_LEASE');
     }
+    if (quarantinedLeases.length) flags.push('QUARANTINED_TASK_LEASE_REQUIRES_RECONCILIATION');
     const crossJobArtifacts = artifacts.filter(artifact => artifact.job_id && artifact.job_id !== jobId);
     if (crossJobArtifacts.length) flags.push('ARTIFACT_JOB_TASK_LINEAGE_MISMATCH');
     const producerRoleMismatches = artifacts.filter(artifact => artifact.producer_role && task.role &&
@@ -1387,7 +1402,9 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
         observedCounts,
         truncated,
         ownerAuthority: 'not_persisted_in_supported_workflow_schema',
-        providerIdentity: 'not_persisted_in_supported_workflow_schema'
+        providerIdentity: 'not_persisted_in_supported_workflow_schema',
+        quarantinedLeaseIds: quarantinedLeases.map(lease => lease.lease_id),
+        quarantineInventoryTruncated: quarantinedLeaseInventoryTruncated
       },
       flags
     };
@@ -1442,6 +1459,18 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   }
   for (const entry of tasks) {
     const correlated = eventsByTaskId.get(entry.task.taskId) || [];
+    const quarantineEvents = correlated.filter(event => String(event.type || '').toLowerCase() === 'task.lease.quarantined');
+    const eventQuarantinedLeaseIds = quarantineEvents.map(event => {
+      const fields = summarizePayload(parseJson(event.payload_json || '{}'));
+      return firstDefined(fields.leaseId, fields.lease_id, fields['lease.id']);
+    }).filter(value => typeof value === 'string' && value.length > 0);
+    if (quarantineEvents.length) {
+      entry.lineageAssessment.quarantinedLeaseIds = [...new Set([...(entry.lineageAssessment.quarantinedLeaseIds || []), ...eventQuarantinedLeaseIds])];
+      entry.lineageAssessment.quarantineEventIds = quarantineEvents.map(event => event.event_id);
+      if (!entry.flags.includes('QUARANTINED_TASK_LEASE_REQUIRES_RECONCILIATION')) {
+        entry.flags.push('QUARANTINED_TASK_LEASE_REQUIRES_RECONCILIATION');
+      }
+    }
     entry.eventLineage = {
       taskId: entry.task.taskId,
       eventIds: correlated.map(event => event.event_id),
@@ -1449,6 +1478,8 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
       eventCount: correlated.length,
       firstEventAt: correlated[0]?.created_at || null,
       latestEventAt: correlated.at(-1)?.created_at || null,
+      quarantineEventIds: quarantineEvents.map(event => event.event_id),
+      quarantinedLeaseIds: [...new Set([...(entry.lineageAssessment.quarantinedLeaseIds || []), ...eventQuarantinedLeaseIds])],
       truncated: false,
       correlation: 'payload_task_id_exact_match'
     };
@@ -1491,7 +1522,12 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
 
   let classification = 'active_non_executing_state';
   let ownerAction = 'Inspect the current proposal/approval state; do not dispatch from diagnostics.';
-  if (status !== 'active' || TERMINAL_STATES.has(state)) {
+  const executingWithInactiveStatus = state === 'EXECUTING' && status !== 'active';
+  if (executingWithInactiveStatus) flags.push('EXECUTING_STATE_STATUS_INCONSISTENT');
+  if (executingWithInactiveStatus) {
+    classification = 'executing_state_status_inconsistent';
+    ownerAction = 'Durable state says EXECUTING but status metadata is not active. Reconcile the current owner/provider/runtime, events, attempts, results, artifacts and leases; do not infer terminality or change lifecycle state from this report.';
+  } else if (status !== 'active' || TERMINAL_STATES.has(state)) {
     classification = 'terminal_or_inactive';
     ownerAction = 'No lifecycle action suggested by this report.';
   } else if (state === 'PROPOSED' || state === 'IDLE') {
@@ -1579,11 +1615,11 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
     ? selectAvailable(db, 'jobs', ['job_id', 'conversation_key', 'title', 'state', 'status', 'active_task_id', 'provider_waiting', 'provider_retry_at', 'created_at', 'updated_at'],
       'WHERE job_id=?', [jobId], '', 'LIMIT 1')
     : selectAvailable(db, 'jobs', ['job_id', 'conversation_key', 'title', 'state', 'status', 'active_task_id', 'provider_waiting', 'provider_retry_at', 'created_at', 'updated_at'],
-      "WHERE status='active' OR state='EXECUTING' OR job_id IN (SELECT job_id FROM tasks WHERE lower(status)='running')",
+      ACTIVE_JOB_SELECTION_SQL,
       [limit], 'ORDER BY COALESCE(updated_at,created_at) ASC', 'LIMIT ?');
   if (jobId && !jobs.length) fail('RECONCILIATION_JOB_NOT_FOUND', `job not found: ${jobId}`);
   const matchingJobCount = jobId ? 1 : db.prepare(
-    "SELECT COUNT(*) AS count FROM jobs WHERE status='active' OR state='EXECUTING' OR job_id IN (SELECT job_id FROM tasks WHERE lower(status)='running')"
+    `SELECT COUNT(*) AS count FROM jobs ${ACTIVE_JOB_SELECTION_SQL}`
   ).get().count;
   const diagnostics = jobs.map(job => reportJob(db, job, { nowMs, staleAfterMs, procRoot }));
   const recoveryPlan = diagnostics.map(item => {

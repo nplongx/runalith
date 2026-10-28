@@ -93,11 +93,11 @@ function makePrivateRoot() {
 function writeTestDb(dbPath, { executing = true } = {}) {
   const db = new DatabaseSync(dbPath);
   db.exec(`CREATE TABLE jobs(job_id TEXT PRIMARY KEY,state TEXT NOT NULL,status TEXT NOT NULL);
-    CREATE TABLE events(event_id TEXT PRIMARY KEY);
+    CREATE TABLE events(event_id TEXT PRIMARY KEY,type TEXT,payload_json TEXT);
     CREATE TABLE tasks(task_id TEXT PRIMARY KEY,status TEXT NOT NULL);
     CREATE TABLE artifacts(artifact_id TEXT PRIMARY KEY);
     CREATE TABLE results(result_id TEXT PRIMARY KEY);
-    CREATE TABLE task_leases(lease_id TEXT PRIMARY KEY,state TEXT NOT NULL,expires_at TEXT);`);
+    CREATE TABLE task_leases(lease_id TEXT PRIMARY KEY,state TEXT NOT NULL,expires_at TEXT,last_error TEXT);`);
   db.prepare('INSERT INTO jobs(job_id,state,status) VALUES(?,?,?)').run('j-active', executing ? 'EXECUTING' : 'COMPLETED', executing ? 'active' : 'completed');
   db.prepare('INSERT INTO jobs(job_id,state,status) VALUES(?,?,?)').run('j-idle', 'IDLE', 'active');
   db.prepare('INSERT INTO events(event_id) VALUES(?)').run('e1');
@@ -352,6 +352,49 @@ test('workflow database preflight is read-only and reports jobs, running tasks, 
   malformedLeaseRestore.prepare('UPDATE task_leases SET expires_at=? WHERE lease_id=?').run('2099-01-01T00:00:00.000Z', 'lease-1');
   malformedLeaseRestore.close();
   assert.equal(afterHash, beforeHash, 'the rollout preflight must not modify any SQLite bytes');
+});
+
+test('rollout distinguishes ACTIVE leases from quarantined uncertain remote effects and keeps quarantine blocked', () => {
+  const isolatedDbPath = path.join(testRoot, `quarantine-workflow-${crypto.randomUUID()}.db`);
+  writeTestDb(isolatedDbPath);
+  const db = new DatabaseSync(isolatedDbPath);
+  const insertLease = db.prepare('INSERT INTO task_leases(lease_id,state,expires_at,last_error) VALUES(?,?,?,?)');
+  const future = '2099-01-01T00:00:00.000Z';
+  for (const [id, state, lastError] of [
+    ['lease-state-expired', 'EXPIRED', null],
+    ['lease-state-released', 'RELEASED', null],
+    ['lease-state-completed', 'COMPLETED', null],
+    ['lease-state-failed', 'FAILED', 'ordinary provider failure'],
+    ['lease-state-quarantined', 'FAILED', 'REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION: provider outcome unknown']
+  ]) insertLease.run(id, state, future, lastError);
+  db.prepare('INSERT INTO events(event_id,type,payload_json) VALUES(?,?,?)').run('event-quarantine-state', 'task.lease.quarantined',
+    JSON.stringify({ leaseId: 'lease-state-quarantined', taskId: 't-running', remoteEffect: 'uncertain', reconciliationRequired: true }));
+  db.close();
+
+  const summary = workflowDbSummary(isolatedDbPath);
+  assert.equal(summary.activeLeases, 1, 'only the durable ACTIVE row is counted as an active lease regardless of unrelated terminal states');
+  assert.equal(summary.quarantinedLeases, 1,
+    'the failed lease and its quarantine event count once as one unresolved remote-effect quarantine');
+
+  const host = { registryReadable: true, plugin: {}, installedGeneration: { manifestVersion: '1.0.9-rc.5' },
+    blockers: [], database: summary, trustConfiguration: { available: true, externalAntiRollbackAnchor: null } };
+  const decision = evaluateRolloutGate({ candidate: { verified: true, version: '1.0.9-rc.8', sha256: 'a'.repeat(64) },
+    rollback: { verified: true, version: '1.0.9-rc.5', sha256: 'b'.repeat(64) }, host });
+  assert.equal(decision.status, 'BLOCKED');
+  assert.ok(decision.blockers.includes('ACTIVE_TASK_LEASES_MUST_DRAIN'));
+  assert.ok(decision.blockers.includes('QUARANTINED_TASK_LEASES_MUST_RECONCILE'));
+
+  const clearActive = new DatabaseSync(isolatedDbPath);
+  clearActive.prepare("UPDATE task_leases SET state='RELEASED' WHERE lease_id='lease-1'").run();
+  clearActive.close();
+  const quarantineOnly = workflowDbSummary(isolatedDbPath);
+  assert.equal(quarantineOnly.activeLeases, 0);
+  assert.equal(quarantineOnly.quarantinedLeases, 1);
+  const quarantineDecision = evaluateRolloutGate({ candidate: { verified: true, version: '1.0.9-rc.8', sha256: 'a'.repeat(64) },
+    rollback: { verified: true, version: '1.0.9-rc.5', sha256: 'b'.repeat(64) }, host: { ...host, database: quarantineOnly } });
+  assert.ok(quarantineDecision.blockers.includes('QUARANTINED_TASK_LEASES_MUST_RECONCILE'));
+  assert.ok(!quarantineDecision.blockers.includes('ACTIVE_TASK_LEASES_MUST_DRAIN'),
+    'quarantined FAILED lease is not mislabeled ACTIVE, but remains an independent fail-closed blocker');
 });
 
 test('host identity plus active execution blockers keep live activation fail-closed until drained', () => {

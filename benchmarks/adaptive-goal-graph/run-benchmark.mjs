@@ -9,7 +9,7 @@ import { createAdaptiveGoalKnowledgeStore } from '../../src/runtime/adaptive-goa
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
-let fixturePath = path.join(here, 'fixtures/recovery-verifier-v67.json');
+let fixturePath = path.join(here, 'fixtures/recovery-verifier-v68.json');
 const MAX_PINNED_SOURCE_BYTES = 2 * 1024 * 1024;
 // Frozen v6 scenario identity and oracle are duplicated as verifier constants
 // so editing the fixture cannot rewrite both the tested graph and its scoring
@@ -43,7 +43,7 @@ for (let i = 0; i < args.length; i++) {
     if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) throw new Error('BENCHMARK_FIXTURE_PATH_OUT_OF_SCOPE');
   }
   else if (args[i] === '--help') {
-    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--fixture fixtures/recovery-verifier-v67.json] [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
+    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--fixture fixtures/recovery-verifier-v68.json] [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
     process.exit(0);
   } else throw new Error(`Unknown or incomplete argument: ${args[i]}`);
 }
@@ -250,7 +250,8 @@ function validateFixtureContract() {
     fixture?.schemaVersion === 64 && fixture?.fixtureId === 'recovery-verifier-investigation-v64' ||
     fixture?.schemaVersion === 65 && fixture?.fixtureId === 'recovery-verifier-investigation-v65' ||
     fixture?.schemaVersion === 66 && fixture?.fixtureId === 'recovery-verifier-investigation-v66' ||
-    fixture?.schemaVersion === 67 && fixture?.fixtureId === 'recovery-verifier-investigation-v67';
+    fixture?.schemaVersion === 67 && fixture?.fixtureId === 'recovery-verifier-investigation-v67' ||
+    fixture?.schemaVersion === 68 && fixture?.fixtureId === 'recovery-verifier-investigation-v68';
   if (!fixture || !supportedFixtureIdentity ||
       !fixture.groundTruth || !Array.isArray(fixture.groundTruth.requiredEvidence) ||
       fixture.groundTruth.requiredEvidence.length === 0 ||

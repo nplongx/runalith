@@ -735,7 +735,7 @@ export function workflowDbSummary(dbPath) {
   const result = { path: absolute, readable: false, integrityCheck: null, foreignKeyViolations: null,
     jobs: null, events: null, tasks: null, artifacts: null, results: null,
     stateCounts: [], taskStatusCounts: [], executingJobs: null, runningTasks: null,
-    activeLeases: null, blockers: [] };
+    activeLeases: null, quarantinedLeases: null, blockers: [] };
   const db = new DatabaseSync(absolute, { readOnly: true });
   try {
     db.exec('PRAGMA query_only=ON');
@@ -754,16 +754,37 @@ export function workflowDbSummary(dbPath) {
     // column: inconsistent status metadata must never hide an EXECUTING job.
     result.executingJobs = db.prepare("SELECT COUNT(*) AS n FROM jobs WHERE UPPER(state)='EXECUTING'").get().n;
     result.runningTasks = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE lower(status)='running'").get().n;
-    const leaseStates = db.prepare('SELECT state,expires_at FROM task_leases').all();
-    const nowMs = Date.now();
-    result.activeLeases = leaseStates.filter(row => {
-      if (['released', 'expired', 'cancelled'].includes(String(row.state).toLowerCase())) return false;
-      if (typeof row.expires_at !== 'string' || !row.expires_at.trim()) return true;
-      const expiryMs = Date.parse(row.expires_at);
-      // Malformed/ambiguous lease expiry is a live blocker, never evidence that
-      // a lease is safe to ignore during an upgrade.
-      return !Number.isFinite(expiryMs) || expiryMs > nowMs;
-    }).length;
+    const leaseColumns = new Set(db.prepare('PRAGMA table_info(task_leases)').all().map(row => row.name));
+    const leaseFields = ['lease_id', 'state', ...(leaseColumns.has('expires_at') ? ['expires_at'] : []),
+      ...(leaseColumns.has('last_error') ? ['last_error'] : [])];
+    const leaseStates = db.prepare(`SELECT ${leaseFields.map(name => `"${name}"`).join(',')} FROM task_leases`).all();
+    // Only durable ACTIVE state is an active lease. FAILED may be a quarantine
+    // for an uncertain remote effect; do not mislabel it as active, but keep it
+    // behind a separate blocker until owner/provider reconciliation completes.
+    result.activeLeases = leaseStates.filter(row => String(row.state || '').toUpperCase() === 'ACTIVE').length;
+    const quarantinedLeaseIds = new Set();
+    for (const lease of leaseStates) {
+      if (String(lease.state || '').toUpperCase() === 'FAILED' &&
+          typeof lease.last_error === 'string' && lease.last_error.startsWith('REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION:')) {
+        quarantinedLeaseIds.add(typeof lease.lease_id === 'string' && lease.lease_id ? lease.lease_id : `lease-row-${quarantinedLeaseIds.size}`);
+      }
+    }
+    const eventColumns = new Set(db.prepare('PRAGMA table_info(events)').all().map(row => row.name));
+    if (eventColumns.has('event_id') && eventColumns.has('type') && eventColumns.has('payload_json')) {
+      const quarantineEvents = db.prepare("SELECT event_id,payload_json FROM events WHERE lower(type)='task.lease.quarantined'").all();
+      for (const event of quarantineEvents) {
+        let leaseId = null;
+        try {
+          const payload = JSON.parse(event.payload_json || '{}');
+          if (payload && typeof payload.leaseId === 'string' && payload.leaseId.trim()) leaseId = payload.leaseId;
+          else if (payload && typeof payload.lease_id === 'string' && payload.lease_id.trim()) leaseId = payload.lease_id;
+        } catch {}
+        // An event without a parseable lease reference is still an unresolved
+        // quarantine marker, rather than evidence that the remote effect is safe.
+        quarantinedLeaseIds.add(leaseId || `event:${event.event_id}`);
+      }
+    }
+    result.quarantinedLeases = quarantinedLeaseIds.size;
     result.readable = true;
     return result;
   } catch (error) {
@@ -1119,6 +1140,7 @@ export function evaluateRolloutGate({ candidate, rollback, host, releaseEvidence
   if (host?.database?.executingJobs > 0) blockers.push('ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN');
   if (host?.database?.runningTasks > 0) blockers.push('RUNNING_TASKS_MUST_DRAIN');
   if (host?.database?.activeLeases > 0) blockers.push('ACTIVE_TASK_LEASES_MUST_DRAIN');
+  if (host?.database?.quarantinedLeases > 0) blockers.push('QUARANTINED_TASK_LEASES_MUST_RECONCILE');
   if (candidate?.version === host?.installedGeneration?.manifestVersion) blockers.push('CANDIDATE_VERSION_ALREADY_INSTALLED');
   if (rollback?.version && rollback.version !== host?.installedGeneration?.manifestVersion) blockers.push('ROLLBACK_VERSION_DOES_NOT_MATCH_INSTALLED_BASELINE');
   return { status: blockers.length ? 'BLOCKED' : 'READY_FOR_HOST_MANAGED_ACTIVATION', canActivateNow: blockers.length === 0,

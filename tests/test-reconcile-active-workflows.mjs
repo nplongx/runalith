@@ -131,6 +131,11 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   assert.ok(statusMismatch, 'EXECUTING jobs must be included even when status column is inconsistent');
   assert.equal(statusMismatch.state, 'EXECUTING');
   assert.equal(statusMismatch.status, 'completed');
+  assert.equal(statusMismatch.classification, 'executing_state_status_inconsistent');
+  assert.ok(statusMismatch.flags.includes('EXECUTING_STATE_STATUS_INCONSISTENT'));
+  const statusMismatchFinding = statusMismatch.findings.find(item => item.code === 'EXECUTING_STATE_STATUS_INCONSISTENT');
+  assert.equal(statusMismatchFinding?.gate, 'HOLD');
+  assert.equal(statusMismatchFinding?.authorizationGranted, false);
   assert.ok(statusMismatch.flags.includes('RUNNING_TASKS_WITHOUT_ACTIVE_LEASES'));
 
   const stale = jobs.get('job-stale');
@@ -221,6 +226,91 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   assert.equal(changedLivePlan.observedIdentity.taskLineage[0].providerRunIdentityBinding, 'matching');
   assert.notEqual(changedLivePlan.idempotencyKey, livePlan.idempotencyKey,
     'recovery identity must change when provider-run lineage changes even if task/attempt row IDs remain constant');
+});
+
+test('executing-state reconciliation is case-insensitive, overrides inactive status metadata, and covers every rollout-counted executing job', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'executing-job-selection-'));
+  fs.chmodSync(dir, 0o700);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = path.join(dir, 'workflow.db');
+  writeFixture(dbPath);
+  const writer = new DatabaseSync(dbPath);
+  // This job has no tasks. Its lowercase state still counts as executing in
+  // the rollout gate and therefore must not disappear from reconciliation.
+  writer.prepare(`INSERT INTO jobs(job_id,conversation_key,title,state,status,active_task_id,provider_waiting,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?)`).run('job-lowercase-executing', 'conversation:lowercase-executing',
+      'lowercase executing state with stale status', 'executing', 'completed', null, 0, OLD, OLD);
+  const rolloutExecutingIds = writer.prepare("SELECT job_id FROM jobs WHERE UPPER(state)='EXECUTING'").all().map(row => row.job_id);
+  writer.close();
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const report = buildActiveWorkflowReconciliationReport(db, {
+    now: NOW, staleAfterMs: 900_000, limit: 20, procRoot: path.join(dir, 'proc')
+  });
+  db.close();
+
+  assert.equal(report.summary.selectionTruncated, false);
+  assert.equal(report.summary.matchingJobCount, report.summary.consideredJobs);
+  const diagnostics = new Map(report.diagnostics.map(job => [job.jobId, job]));
+  for (const jobId of rolloutExecutingIds) {
+    assert.ok(diagnostics.has(jobId), `rollout-counted executing job ${jobId} must appear in an untruncated reconciliation report`);
+  }
+  for (const jobId of ['job-executing-status-mismatch', 'job-lowercase-executing']) {
+    const job = diagnostics.get(jobId);
+    assert.ok(job, `${jobId} must be inventoried`);
+    assert.equal(job.classification, 'executing_state_status_inconsistent');
+    assert.ok(job.flags.includes('EXECUTING_STATE_STATUS_INCONSISTENT'));
+    const finding = job.findings.find(item => item.code === 'EXECUTING_STATE_STATUS_INCONSISTENT');
+    assert.equal(finding?.gate, 'HOLD');
+    assert.equal(finding?.authorizationGranted, false);
+    assert.match(job.ownerAction, /Durable state says EXECUTING/);
+  }
+  assert.equal(diagnostics.get('job-stale')?.classification, 'stale_candidate_reconciliation_required',
+    'a normally active executing job remains covered by the existing stale reconciliation classification');
+});
+
+test('reconciliation surfaces quarantined uncertain-remote-effect leases outside the recent lease window and never authorizes retry', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'quarantined-lease-reconciliation-'));
+  fs.chmodSync(dir, 0o700);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = path.join(dir, 'workflow.db');
+  writeFixture(dbPath);
+  const writer = new DatabaseSync(dbPath);
+  const insertLease = writer.prepare(`INSERT INTO task_leases(lease_id,task_id,job_id,attempt,worker_id,state,issued_at,heartbeat_at,
+    expires_at,released_at,last_error,owner_epoch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+  insertLease.run('lease-quarantined', 'task-completed', 'job-stuck-terminal', 1, 'worker-uncertain', 'FAILED', OLD, OLD,
+    OLD, COMPLETE_EVENT, 'REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION: provider status could not be confirmed', 7);
+  writer.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)').run(
+    'event-lease-quarantined', 'job-stuck-terminal', 'task.lease.quarantined', JSON.stringify({
+      taskId: 'task-completed', leaseId: 'lease-quarantined', attempt: 1, remoteEffect: 'uncertain', reconciliationRequired: true
+    }), COMPLETE_EVENT);
+  for (let index = 1; index <= 5; index++) {
+    insertLease.run(`lease-newer-released-${index}`, 'task-completed', 'job-stuck-terminal', index + 1,
+      `worker-released-${index}`, 'RELEASED', COMPLETE_EVENT, COMPLETE_EVENT, OLD, COMPLETE_EVENT, null, index + 1);
+  }
+  writer.close();
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const report = buildActiveWorkflowReconciliationReport(db, { now: NOW, staleAfterMs: 900_000, limit: 20, procRoot: path.join(dir, 'proc') });
+  db.close();
+
+  const job = report.diagnostics.find(item => item.jobId === 'job-stuck-terminal');
+  const task = job.tasks.find(item => item.task.taskId === 'task-completed');
+  assert.ok(task.flags.includes('QUARANTINED_TASK_LEASE_REQUIRES_RECONCILIATION'));
+  assert.ok(task.leases.some(lease => lease.leaseId === 'lease-quarantined' && lease.state === 'FAILED'));
+  assert.ok(!task.leases.slice(0, 5).some(lease => lease.leaseId === 'lease-quarantined'),
+    'quarantined history row is deliberately outside the five newest lease rows');
+  assert.ok(task.eventLineage.eventIds.includes('event-lease-quarantined'));
+  assert.ok(task.eventLineage.quarantineEventIds.includes('event-lease-quarantined'));
+  assert.ok(task.lineageAssessment.quarantinedLeaseIds.includes('lease-quarantined'));
+  const finding = job.findings.find(item => item.code === 'QUARANTINED_TASK_LEASE_REQUIRES_RECONCILIATION');
+  assert.equal(finding.status, 'UNRESOLVED');
+  assert.equal(finding.gate, 'HOLD');
+  assert.equal(finding.authorizationGranted, false);
+  assert.ok(finding.source.recordIds.leaseIds.includes('lease-quarantined'));
+  assert.ok(finding.source.recordIds.eventIds.includes('event-lease-quarantined'));
+  assert.match(finding.remediation, /do not retry, release, or terminalize automatically/);
+  assert.equal(report.readOnly, true);
 });
 
 test('Goal/Idea diagnostics reproduce the canonical live snapshot hash but never treat a stored binding as signature authority', t => {
