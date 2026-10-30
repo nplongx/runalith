@@ -1,0 +1,40 @@
+# Goal/Idea Graph → Plan Graph → Execution Graph acceptance — RC.30
+
+**Production decision: `BLOCKED`.** RC.30 closes an internal trust-boundary gap identified by CodeGraph source tracing: a structurally valid, approved but caller-supplied/unverified legacy Plan Graph could reach the Execution Graph proposal builder without first being rejected specifically for lacking authenticated current-snapshot binding. Final candidate/dispatch gates already constrained executable authorization; RC.30 adds earlier rejection at both proposal materialization and durable readback.
+
+## Enforced chain
+
+1. **Producer output:** actual typed artifacts must resolve against the durable active artifact row, exact content hash/schema, successful task result, completed attempt, and canonical producer/completion event lineage. A reference string or structurally valid JSON alone is not source evidence.
+2. **Goal/Idea snapshot:** snapshot integrity is not claim truth. Every evidence reference must resolve; an empty manifest remains `KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY` and cannot be independently attested. An authorized verifier signs the exact current snapshot, revision/membership set, evidence manifest, scope, provider/root identity, validity window and replay-protected attestation.
+3. **Plan Graph:** source-backed Plan Graph creation calls the persisted verifier path for the exact expected current snapshot. The durable proposal binds the source snapshot and attestation hashes, evidence manifest, plan draft/fingerprint and explicit step/task mapping. Each step requires supporting evidence with durable lineage.
+4. **Execution Graph materialization:** RC.30 requires that `readAdaptiveGoalPlanProposal` rebuild/verify the current stored snapshot and that the returned verification metadata exactly matches the bound Plan Graph snapshot. `adaptiveGoalExecutionGraphSourceBlocker` rejects a missing/legacy source, non-verified claim or independence status, incomplete hashes, invalid/expired time bounds or a mismatch in snapshot/attestation/provider/root/evidence-manifest bindings. Creation returns `EXECUTION_GRAPH_SOURCE_ATTESTATION_REQUIRED` without creating a job or executable plan.
+5. **Durable readback:** `readAdaptiveGoalExecutionGraphProposal` applies the same source-binding gate before declaring the proposal fresh. Replacing its source pointer with an unverified legacy proposal makes the persisted Execution Graph stale; the regression test restores exact original event bytes before continuing.
+6. **Reviewer and lifecycle:** separate action-intent reviewer identity/authority and approval must bind the exact current candidate. Immutable plan pinning happens only after the reviewed inputs are revalidated; the dispatch transition revalidates source/evidence/reviewer/approval and does not infer permission from a proposal hash or prior approval. A Plan Graph approval is review-checklist approval only.
+
+## Regression evidence executed
+
+- `node --test tests/test-adaptive-goal-current-scope-producer-e2e.mjs`: **PASS**, exit 0 on the RC.30 source. The disposable SQLite E2E produces nine role-typed artifacts, validates their exact hashes/lineage, builds the source-backed Goal/Idea snapshot and Plan Graph DAG, persists Plan/Execution proposals, validates separate reviewer identity, immutable plan pinning and isolated dispatch. Negative cases include bad artifacts/source mutation, expiry/replay boundaries, reviewer freshness, legacy unverified Plan Graph materialization, and persisted Execution Graph readback re-bound to a legacy source.
+- `node --test tests/test-agg-live-remediation-plan.mjs`: **PASS**, 2/2. Tests validate precise finding counts, no authorization/mutations, explicit HOLD for running tasks without leases, and rejection of input reports that do not prove read-only behavior.
+- `node tests/test-package-no-overwrite.js`: **PASS**, exit 0 on RC.30 metadata and current packaging inputs.
+- `npm test`: **PASS**, exit 0; log `/tmp/runalith-npm-test-rc30-20261028.log`, SHA-256 `10f1c5960a54d60af1a42b0233cb694c1c9454f84526589f40c6d390c13e22d3`.
+- `npm run test:agg-codegraph-regression` and `npm run test:agg-telemetry`: **PASS**, included in the full suite. `npm run docs:check` and `npm run docs:check:external`: **PASS**, 128 Markdown files, 339 local links and 31 unique external URLs.
+- Candidate archive `dist/runalith-1.0.9-rc.30-authenticated-execution-source-gate-20261028.mcpb`: SHA-256 `dfb8905f3366ba101d54c5860cd0ac707690098c53b61c5aa86af65d75f50320`, 869,285 bytes, 95 entries, 74 tools. Source alignment passes exact archive-entry bytes but reports `DIRTY_GIT_TREE_BYTES_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT`; release eligibility remains blocked.
+- `npm run test:package-reproducibility`: **PASS** on rerun, log `/tmp/runalith-reproducibility-rc30-rerun-20261028.log`, SHA-256 `2de0508f72819ee16e478a99c2b6c32d9d5474ea099d81d177252880f6125b54`. Initial run failed because the test's expected archive inventory omitted the newly packaged remediation script/test; the expected inventory was corrected without weakening archive checks.
+- `npm run test:mcpb-candidate -- dist/runalith-1.0.9-rc.30-authenticated-execution-source-gate-20261028.mcpb`: **PASS**, `MCPB_FAST_TEST=PASS`, 95 archive entries, 74/74 runtime tools. Fresh read-only preflight remains `BLOCKED` with all six external gates open.
+
+## Live state and remediation boundary
+
+Fresh read-only observations still show four source-hash mismatches (cause unresolved), a 7-node/7-edge/7-membership Goal/Idea snapshot with zero evidence references, three Plan Graph proposals with 22/22 steps missing supporting evidence and 3/3 without authenticated current-snapshot binding, and zero persisted Execution Graph proposals. The active RC.26 process has both verifier/reviewer trust JSON environment variables blank. These are live production findings and cannot be repaired using test-local artifacts or trust keys. The current reconciliation and machine-readable remediation plan must preserve exact job/task/event/attempt/result/artifact/lease identities, owner/provider/runtime uncertainty and `HOLD` disposition.
+
+## Six gates — all remain open until authority evidence verifies them
+
+| Gate | Required independent evidence / authority |
+|---|---|
+| `PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED` | Phase 2 owner-signed canonical 71-path manifest, controlled-builder receipt bound to exact source/candidate, host-pinned authority roots and exact archive path+byte equality. |
+| `INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED` | Independent builder provenance, candidate verifier result and release approval with distinct authenticated authority roots, exact candidate/baseline/rollback bindings and host-issued nonce. |
+| `PRODUCTION_AGG_TRUST_CONFIGURATION_NOT_VERIFIED` | Authority-issued schema-v1 verifier/reviewer JSON configs, different provider IDs, disjoint SPKI roots, exact scopes, valid version/rotation/revocation and effective host environment with matching append-only ledger state. |
+| `PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED` | Independently protected monotonic checkpoint service, host-owned canonical root-pinned adapter/policy, separate checkpoint/store-attestation keys, fresh signed continuity and CAS/commit receipts. |
+| `ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN` | Workflow owner and provider/runtime disposition for each active job, cross-checked with authoritative attempts, result/artifact/completion events and runtime identity. |
+| `RUNNING_TASKS_MUST_DRAIN` | Per-task owner/provider/runtime/lease-fencing outcome; do not treat absent lease/PID as proof of death and do not bulk-reset/terminalize. |
+
+RC.30 local success is implementation/regression evidence only. It does not grant production approval, create independent source/release provenance, provision host trust, establish external checkpoint continuity, prove worker status, or authorize activation. Do not mutate the live workflow database, trust ledger, host registry/configuration or external checkpoint; do not install/restart/kill the host or dispatch production. No push was performed.

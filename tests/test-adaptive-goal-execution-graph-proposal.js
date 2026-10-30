@@ -223,6 +223,22 @@ test('proposal verifier rejects rehashed envelopes with inconsistent component h
   enabledNode.nodes[0].execution = { enabled: true, executable: 'node', args: [], authorization: 'approved' };
   assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(enabledNode)), false,
     'a correctly rehashed proposal must never authorize an executable node');
+
+  const mismatchedBinding = structuredClone(proposal);
+  mismatchedBinding.bindings[0].role = 'qa';
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposalComponents(mismatchedBinding)), false,
+    'a rehashed binding cannot change the Plan Graph step role without matching its pinned Execution Graph role contract');
+
+  const duplicateBinding = structuredClone(proposal);
+  duplicateBinding.bindings.push(structuredClone(duplicateBinding.bindings[0]));
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposalComponents(duplicateBinding)), false,
+    'the binding table must remain one-to-one with the Execution Graph nodes');
+
+  const malformedNestedNode = structuredClone(proposal);
+  malformedNestedNode.nodes[0] = null;
+  assert.doesNotThrow(() => verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(malformedNestedNode)),
+    'malformed serialized node shapes must be handled by the verifier as invalid data');
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(malformedNestedNode)), false);
 });
 
 test('serialized Execution Graph verifier binds every node source-file reference to the pinned source evidence snapshot', () => {
@@ -247,6 +263,62 @@ test('serialized Execution Graph verifier binds every node source-file reference
   unverifiedIntegrity.nodes[0].supportingEvidence.sourceFilesIntegrityVerified = false;
   assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(unverifiedIntegrity)), false,
     'a proposal cannot claim readiness while source-file integrity is marked false');
+});
+
+test('serialized Execution Graph verifier preserves Goal/Idea source-node identity across the Plan Graph step binding', () => {
+  const value = context();
+  const base = buildAdaptiveGoalExecutionGraphProposal({
+    sourcePlanProposal: value.sourcePlanProposal, readiness: value.readiness, taskBindings: value.taskBindings
+  });
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(base), true);
+
+  const missingSourceDraft = structuredClone(base);
+  delete missingSourceDraft.source.planGraphDraftSnapshot;
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(missingSourceDraft)), false,
+    'v1-style proposals without the original Plan Graph draft body are not accepted by the v2 verifier');
+
+  const sourceDraftTampered = structuredClone(base);
+  sourceDraftTampered.source.planGraphDraftSnapshot.steps[0].sourceNodeId = 'changed-only-inside-source-draft';
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(sourceDraftTampered)), false,
+    'a source-draft mapping change without a matching draftHash cannot be hidden by rehashing only the outer proposal');
+
+  const changedSourceNode = structuredClone(base);
+  changedSourceNode.nodes[0].sourceNodeId = 'different-goal-node';
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(changedSourceNode)), false,
+    'the original Plan Graph step ID must commit to its source Goal/Idea node, even when the outer envelope is re-hashed');
+
+  const missingSourceNode = structuredClone(base);
+  delete missingSourceNode.nodes[0].sourceNodeId;
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposal(missingSourceNode)), false,
+    'missing source-node identity must fail closed');
+
+  const sourceNodeAndEnvelopeRehashed = structuredClone(base);
+  sourceNodeAndEnvelopeRehashed.nodes[0].sourceNodeId = 'another-goal-node';
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposalComponents(sourceNodeAndEnvelopeRehashed)), false,
+    'recomputing all exposed component hashes must not detach source-node identity from its deterministic Plan Graph step ID');
+
+  const sourceStepAndEnvelopeRehashed = structuredClone(base);
+  const priorNodeId = sourceStepAndEnvelopeRehashed.nodes[0].id;
+  const priorStepId = sourceStepAndEnvelopeRehashed.nodes[0].sourceStepId;
+  const forgedSourceNodeId = 'forged-goal-node-outside-plan-draft';
+  sourceStepAndEnvelopeRehashed.nodes[0].sourceNodeId = forgedSourceNodeId;
+  sourceStepAndEnvelopeRehashed.nodes[0].sourceStepId = `agg-step-${createHash('sha256')
+    .update(`${sourceStepAndEnvelopeRehashed.source.graphHash}\n${sourceStepAndEnvelopeRehashed.source.candidatePlanId}\n${forgedSourceNodeId}`).digest('hex').slice(0, 24)}`;
+  sourceStepAndEnvelopeRehashed.nodes[0].id = `agg-eg-step-${createHash('sha256')
+    .update(`${sourceStepAndEnvelopeRehashed.source.draftHash}\u0000${sourceStepAndEnvelopeRehashed.nodes[0].sourceStepId}`).digest('hex').slice(0, 24)}`;
+  for (const binding of sourceStepAndEnvelopeRehashed.bindings) {
+    if (binding.stepId === priorStepId) binding.stepId = sourceStepAndEnvelopeRehashed.nodes[0].sourceStepId;
+  }
+  sourceStepAndEnvelopeRehashed.edges = sourceStepAndEnvelopeRehashed.edges.map(edge => ({
+    ...edge,
+    from: edge.from === priorNodeId ? sourceStepAndEnvelopeRehashed.nodes[0].id : edge.from,
+    to: edge.to === priorNodeId ? sourceStepAndEnvelopeRehashed.nodes[0].id : edge.to
+  }));
+  for (const node of sourceStepAndEnvelopeRehashed.nodes) {
+    node.dependencies = node.dependencies.map(id => id === priorNodeId ? sourceStepAndEnvelopeRehashed.nodes[0].id : id);
+  }
+  assert.equal(verifyAdaptiveGoalExecutionGraphProposalHash(rehashExecutionProposalComponents(sourceStepAndEnvelopeRehashed)), false,
+    'rewriting sourceNodeId, deterministic step/node IDs, binding IDs and every exposed hash must still fail unless the original Plan Graph draft mapping is preserved');
 });
 
 test('serialized Execution Graph verifier rejects rehashed duplicate dependencies and multi-node cycles', () => {

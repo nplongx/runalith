@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { main as runTrustConfigValidator } from '../scripts/validate-agg-trust-config.mjs';
 import {
   adaptiveGoalPublicKeyFingerprint,
   assertAndRecordAdaptiveGoalTrustConfiguration,
@@ -171,6 +172,18 @@ test('rejects unknown fields, invalid Ed25519 roots, repeated IDs/fingerprints, 
   const invalidWindow = entry('bad-window', b.pem, { notBefore: new Date(Date.now() + 10_000).toISOString(), notAfter: new Date(Date.now() - 10_000).toISOString() });
   process.env[KNOWLEDGE.configJsonEnv] = JSON.stringify(config(KNOWLEDGE.domain, 'source-provider', [invalidWindow]));
   assert.throws(() => load(), error => error.code === 'AGG_TRUST_CONFIG_KEY_WINDOW_INVALID');
+});
+
+test('distinguishes trust schema/config-version mismatch from ordinary field-schema violations', t => {
+  const key = root();
+  const valid = config(KNOWLEDGE.domain, 'version-contract-provider', [entry('version-contract-key', key.pem)]);
+  withConfig(t, KNOWLEDGE, valid);
+  process.env[KNOWLEDGE.configJsonEnv] = JSON.stringify({ ...valid, schema_version: 2 });
+  assert.throws(() => load(), error => error.code === 'AGG_TRUST_CONFIG_VERSION_INVALID');
+  process.env[KNOWLEDGE.configJsonEnv] = JSON.stringify({ ...valid, config_version: 0 });
+  assert.throws(() => load(), error => error.code === 'AGG_TRUST_CONFIG_VERSION_INVALID');
+  process.env[KNOWLEDGE.configJsonEnv] = JSON.stringify({ ...valid, unexpected: true });
+  assert.throws(() => load(), error => error.code === 'AGG_TRUST_CONFIG_SCHEMA_INVALID');
 });
 
 test('pins domains to distinct provider IDs and disjoint public roots', t => {
@@ -348,6 +361,12 @@ test('operator validation CLI checks a supplied file without changing trust/runt
     assert.equal(JSON.parse(requiredPair.stdout).code, 'AGG_TRUST_CONFIG_PAIR_REQUIRED',
       'production operator validation must fail closed if the peer trust domain is omitted');
 
+    const missingFile = spawnSync(process.execPath, [VALIDATOR_CLI, '--domain', 'goal_idea_verifier', '--config', path.join(directory, 'missing.json')], {
+      cwd: REPO_ROOT, encoding: 'utf8', timeout: 10_000, env
+    });
+    assert.equal(missingFile.status, 2);
+    assert.equal(JSON.parse(missingFile.stderr).code, 'AGG_TRUST_CONFIG_FILE_MISSING');
+
     const reviewer = root();
     const reviewerDocument = config(REVIEWER.domain, 'cli-reviewer-provider', [entry('cli-reviewer-key', reviewer.pem, { scope: REVIEWER.scope })]);
     const reviewerFile = path.join(directory, 'reviewer-trust.json');
@@ -369,8 +388,10 @@ test('operator validation CLI checks a supplied file without changing trust/runt
     const collision = spawnSync(process.execPath, [VALIDATOR_CLI, '--domain', 'goal_idea_verifier', '--config', file, '--peer-config', collisionFile], {
       cwd: REPO_ROOT, encoding: 'utf8', timeout: 10_000, env
     });
-    assert.equal(collision.status, 2, collision.stderr || collision.stdout);
-    assert.match(collision.stderr, /trust-domain separation failed/);
+    assert.equal(collision.status, 3, collision.stderr || collision.stdout);
+    assert.equal(JSON.parse(collision.stdout).result, 'BLOCKED');
+    assert.equal(JSON.parse(collision.stdout).code, 'AGG_TRUST_DOMAINS_ROOT_COLLISION');
+    assert.equal(JSON.parse(collision.stdout).productionTrustEstablished, false);
 
     const aliasDirectory = path.join(directory, 'alias-parent');
     fs.symlinkSync(directory, aliasDirectory, 'dir');
@@ -395,5 +416,134 @@ test('operator validation CLI checks a supplied file without changing trust/runt
     });
     assert.equal(bad.status, 2, bad.stderr || bad.stdout);
     assert.match(bad.stderr, /AGG_TRUST_CONFIG_SCHEMA_INVALID/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('operator validator distinguishes offline pair validity from the exact effective host environment and entrypoint', t => {
+  const source = root(); const reviewer = root();
+  const sourceDocument = config(KNOWLEDGE.domain, 'effective-host-source-provider', [entry('effective-host-source-key', source.pem)]);
+  const reviewerDocument = config(REVIEWER.domain, 'effective-host-reviewer-provider', [entry('effective-host-reviewer-key', reviewer.pem, { scope: REVIEWER.scope })]);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-trust-effective-host-'));
+  fs.chmodSync(directory, 0o700);
+  const sourceFile = path.join(directory, 'source.json');
+  const reviewerFile = path.join(directory, 'reviewer.json');
+  fs.writeFileSync(sourceFile, `${JSON.stringify(sourceDocument, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  fs.writeFileSync(reviewerFile, `${JSON.stringify(reviewerDocument, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+  const procRoot = path.join(directory, 'proc');
+  const pid = '4242'; const ppid = '100';
+  const entrypoint = path.join(directory, 'app', 'plugins', 'plugin-effective', 'g-rc32', 'server', 'index-v1.0.9-rc.32.js');
+  fs.mkdirSync(path.dirname(entrypoint), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(entrypoint, 'export {};\n', { flag: 'wx', mode: 0o600 });
+  fs.mkdirSync(path.join(procRoot, pid), { recursive: true, mode: 0o700 });
+  fs.mkdirSync(path.join(procRoot, ppid), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(procRoot, pid, 'cmdline'), `node\0${entrypoint}\0`, { flag: 'wx', mode: 0o600 });
+  fs.writeFileSync(path.join(procRoot, pid, 'status'), `Name:\tnode\nPPid:\t${ppid}\n`, { flag: 'wx', mode: 0o600 });
+  fs.writeFileSync(path.join(procRoot, ppid, 'cmdline'), '/opt/Chat On Steroids/chat-on-steroids\0', { flag: 'wx', mode: 0o600 });
+  const trustEnv = {
+    AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: fs.readFileSync(sourceFile, 'utf8'),
+    AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: fs.readFileSync(reviewerFile, 'utf8')
+  };
+  const writeEnvironment = values => fs.writeFileSync(path.join(procRoot, pid, 'environ'),
+    Buffer.from(`${Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\0')}\0`), { flag: 'w', mode: 0o600 });
+  const runEffective = expectedEntryPoint => {
+    const savedEnv = { ...process.env };
+    const savedExitCode = process.exitCode;
+    const originalLog = console.log;
+    const originalError = console.error;
+    let stdout = '';
+    let stderr = '';
+    console.log = (...values) => { stdout += `${values.join(' ')}\n`; };
+    console.error = (...values) => { stderr += `${values.join(' ')}\n`; };
+    process.exitCode = 0;
+    try {
+      runTrustConfigValidator(['--domain', 'goal_idea_verifier', '--config', sourceFile,
+        '--peer-config', reviewerFile, '--require-peer-config', '--effective-host-pid', pid,
+        '--effective-host-entrypoint', expectedEntryPoint], { procRoot });
+      return { status: process.exitCode || 0, stdout, stderr };
+    } finally {
+      for (const key of Object.keys(process.env)) if (!Object.hasOwn(savedEnv, key)) delete process.env[key];
+      for (const [key, value] of Object.entries(savedEnv)) process.env[key] = value;
+      console.log = originalLog;
+      console.error = originalError;
+      process.exitCode = savedExitCode ?? 0;
+    }
+  };
+  try {
+    writeEnvironment(trustEnv);
+    const pass = runEffective(entrypoint);
+    assert.equal(pass.status, 0, pass.stderr || pass.stdout);
+    const passReport = JSON.parse(pass.stdout);
+    assert.equal(passReport.result, 'PASS');
+    assert.equal(passReport.effectiveHostVerification.result, 'PASS');
+    assert.equal(passReport.effectiveHostVerification.domains.goal_idea_verifier.matchesSuppliedFile, true);
+    assert.equal(passReport.effectiveHostVerification.domains.action_intent_reviewer.matchesSuppliedFile, true);
+    assert.equal(passReport.effectiveHostVerification.domains.goal_idea_verifier.configJsonVariablePresent, true);
+    assert.equal(passReport.effectiveHostVerification.domains.goal_idea_verifier.configJsonNonEmpty, true);
+    assert.equal(passReport.effectiveHostVerification.domains.goal_idea_verifier.providerIdVariablePresent, false);
+    assert.equal(passReport.effectiveHostVerification.domains.goal_idea_verifier.legacyPublicRootVariablePresent, false);
+    assert.equal(JSON.stringify(passReport).includes(source.pem), false);
+    assert.match(passReport.effectiveHostVerification.note, /does not verify the active trust-ledger high-water rows or external monotonic checkpoint/);
+
+    const fakeProcRootCli = spawnSync(process.execPath, [VALIDATOR_CLI, '--domain', 'goal_idea_verifier', '--config', sourceFile,
+      '--peer-config', reviewerFile, '--require-peer-config', '--effective-host-pid', pid, '--effective-host-entrypoint', entrypoint,
+      '--proc-root', procRoot], { cwd: REPO_ROOT, encoding: 'utf8', timeout: 10_000, env: { ...process.env } });
+    assert.equal(fakeProcRootCli.status, 2, fakeProcRootCli.stderr || fakeProcRootCli.stdout);
+    assert.match(fakeProcRootCli.stderr, /unsupported argument: --proc-root/,
+      'the production CLI must never accept a caller-selected fake proc tree as host evidence');
+
+    const rotatedButUnprovisioned = config(KNOWLEDGE.domain, 'effective-host-source-provider', [entry('effective-host-source-key', source.pem)],
+      { config_version: 2, updated_at: new Date(Date.now() - 1_000).toISOString() });
+    writeEnvironment({ ...trustEnv, AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: JSON.stringify(rotatedButUnprovisioned) });
+    const mismatch = runEffective(entrypoint);
+    assert.equal(mismatch.status, 3, mismatch.stderr || mismatch.stdout);
+    const mismatchReport = JSON.parse(mismatch.stdout);
+    assert.equal(mismatchReport.result, 'BLOCKED');
+    assert.equal(mismatchReport.effectiveHostVerification.code, 'AGG_TRUST_CONFIG_VERSION_MISMATCH_ON_HOST');
+    assert.equal(mismatchReport.effectiveHostVerification.domains.goal_idea_verifier.blocker, 'AGG_TRUST_CONFIG_VERSION_MISMATCH_ON_HOST');
+
+    const wrongProvider = config(KNOWLEDGE.domain, 'unapproved-effective-host-provider', [entry('effective-host-source-key', source.pem)]);
+    writeEnvironment({ ...trustEnv, AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: JSON.stringify(wrongProvider) });
+    const providerMismatch = runEffective(entrypoint);
+    assert.equal(providerMismatch.status, 3, providerMismatch.stderr || providerMismatch.stdout);
+    assert.equal(JSON.parse(providerMismatch.stdout).effectiveHostVerification.code, 'AGG_TRUST_CONFIG_PROVIDER_MISMATCH_ON_HOST');
+
+    const replacementRoot = root();
+    const wrongRoot = config(KNOWLEDGE.domain, 'effective-host-source-provider', [entry('replacement-root', replacementRoot.pem)]);
+    writeEnvironment({ ...trustEnv, AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: JSON.stringify(wrongRoot) });
+    const rootMismatch = runEffective(entrypoint);
+    assert.equal(rootMismatch.status, 3, rootMismatch.stderr || rootMismatch.stdout);
+    assert.equal(JSON.parse(rootMismatch.stdout).effectiveHostVerification.code, 'AGG_TRUST_CONFIG_FINGERPRINT_MISMATCH_ON_HOST');
+
+    const hostRootCollision = config(REVIEWER.domain, 'effective-host-reviewer-provider',
+      [entry('host-collision-root', source.pem, { scope: REVIEWER.scope })]);
+    writeEnvironment({ ...trustEnv, AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: JSON.stringify(hostRootCollision) });
+    const effectiveCollision = runEffective(entrypoint);
+    assert.equal(effectiveCollision.status, 3, effectiveCollision.stderr || effectiveCollision.stdout);
+    const effectiveCollisionReport = JSON.parse(effectiveCollision.stdout).effectiveHostVerification;
+    assert.equal(effectiveCollisionReport.code, 'AGG_TRUST_DOMAINS_ROOT_COLLISION');
+    assert.equal(effectiveCollisionReport.effectivePairVerification.status, 'EFFECTIVE_PAIR_SEPARATION_BLOCKED');
+
+    writeEnvironment({ ...trustEnv, AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: '' });
+    const presentButBlank = runEffective(entrypoint);
+    assert.equal(presentButBlank.status, 3, presentButBlank.stderr || presentButBlank.stdout);
+    const presentButBlankDomain = JSON.parse(presentButBlank.stdout).effectiveHostVerification.domains.goal_idea_verifier;
+    assert.equal(presentButBlankDomain.configJsonVariablePresent, true,
+      'the diagnostics must distinguish an env entry present with an empty value from an absent entry');
+    assert.equal(presentButBlankDomain.configJsonNonEmpty, false);
+    assert.equal(presentButBlankDomain.configured, false);
+    assert.equal(presentButBlankDomain.blocker, 'AGG_TRUST_CONFIG_NOT_CONFIGURED');
+
+    writeEnvironment({ AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: trustEnv.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON });
+    const missing = runEffective(entrypoint);
+    assert.equal(missing.status, 3, missing.stderr || missing.stdout);
+    const absentDomain = JSON.parse(missing.stdout).effectiveHostVerification.domains.goal_idea_verifier;
+    assert.equal(absentDomain.configJsonVariablePresent, false);
+    assert.equal(absentDomain.configJsonNonEmpty, false);
+    assert.equal(absentDomain.blocker, 'AGG_TRUST_CONFIG_NOT_CONFIGURED');
+
+    writeEnvironment(trustEnv);
+    const wrongEntrypoint = runEffective(`${entrypoint}.not-current`);
+    assert.equal(wrongEntrypoint.status, 3, wrongEntrypoint.stderr || wrongEntrypoint.stdout);
+    assert.equal(JSON.parse(wrongEntrypoint.stdout).effectiveHostVerification.code, 'AGG_TRUST_CONFIG_HOST_ENTRYPOINT_MISMATCH');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

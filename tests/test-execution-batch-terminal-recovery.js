@@ -38,6 +38,28 @@ try {
   store.approve(job.job_id, 'isolated terminal recovery fixture', 'test-fixture');
   const parent = store.dispatch(job.job_id, { role: 'architect', description: 'batch recovery parent' });
 
+  // The store-level cancellation API must not hide an execution that still
+  // owns a durable running attempt. The manager's abort/drain barrier is not
+  // interchangeable with a caller merely requesting cancellation.
+  const unresolvedCommand = `${nodeExecutable} --version`;
+  const unresolvedTask = store.createChildTask(job.job_id, {
+    parentTaskId: parent.task_id, role: 'architect', description: 'cancellation must preserve unresolved execution',
+    metadata: { deterministic: true, command: unresolvedCommand }
+  });
+  const unresolvedBatch = store.createExecutionBatch(job.job_id, {
+    parentTaskId: parent.task_id, role: 'architect', items: [{ taskId: unresolvedTask.task_id, command: unresolvedCommand }]
+  });
+  const unresolvedItem = store.listExecutionBatchItems(unresolvedBatch.batch_id)[0];
+  assert.ok(store.markExecutionBatchItemRunning(unresolvedBatch.batch_id, unresolvedItem.item_id, { expectedAttempt: 1 }));
+  store.prepareExecutionForBatchClaim(unresolvedTask.task_id, {
+    executionSessionId: 'exec-cancel-unresolved-fixture', attempt: 1, command: unresolvedCommand, cwd: root,
+    startedAt: new Date().toISOString(), tmuxName: 'cos-exec-cancel-unresolved-fixture', boundaryIdentity: null
+  }, { batchId: unresolvedBatch.batch_id, itemId: unresolvedItem.item_id, batchAttempt: 1, itemAttempt: 1 });
+  assert.throws(() => store.cancelExecutionBatch(unresolvedBatch.batch_id), /task execution is unresolved; drain or reconcile first/);
+  assert.equal(store.getExecutionBatch(unresolvedBatch.batch_id).status, 'RUNNING');
+  assert.equal(store.listExecutionBatchItems(unresolvedBatch.batch_id)[0].status, 'RUNNING');
+  assert.equal(store.getTask(unresolvedTask.task_id).execution_status, 'running');
+
   // Simulate a crash after the task's complete terminal ledger commits but
   // before finishExecutionBatchItem runs. Recovery must use the immutable
   // batch claim embedded in execution.started and replay the durable terminal
@@ -151,6 +173,11 @@ try {
   store.finishExecutionBatchItem(legacyBatch.batch_id, legacyItem.item_id, {
     expectedAttempt: 1, status: 'FAILED', error: 'simulated historical false-failure row'
   });
+  assert.throws(() => store.cancelExecutionBatch(legacyBatch.batch_id),
+    /task execution is unresolved; drain or reconcile first/,
+    'cancellation must inspect durable task state even if an older writer incorrectly terminalized the item row');
+  assert.equal(store.getExecutionBatch(legacyBatch.batch_id).status, 'RUNNING',
+    'cancellation must not turn an inconsistent legacy item into a false terminal aggregate');
   assert.throws(() => store.finishExecutionBatch(legacyBatch.batch_id, {
     status: 'FAILED', aggregateContent: 'simulated historical false-failure aggregate', expectedAttempt: 1
   }), /failed batch item conflicts with a live or incomplete task execution/,

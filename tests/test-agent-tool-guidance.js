@@ -102,7 +102,10 @@ assert.match(description('custom_workflow_approve'), /workflow_approve/i);
 assert.match(description('custom_workflow_run_create'), /workflow_approve/i);
 
 // Public identifiers and key input contracts must remain stable while descriptions evolve.
-assert.deepEqual(Object.keys(tools.get('workflow_approve').inputSchema.properties).sort(), ['confirmation', 'job_id']);
+const expectedApprovalProperties = runtimeManifestPath
+  ? ['approval_evidence', 'confirmation', 'job_id']
+  : ['confirmation', 'job_id'];
+assert.deepEqual(Object.keys(tools.get('workflow_approve').inputSchema.properties).sort(), expectedApprovalProperties);
 assert.deepEqual([...tools.get('workflow_approve').inputSchema.required].sort(), ['confirmation', 'job_id']);
 assert.deepEqual(Object.keys(tools.get('workflow_complete_task').inputSchema.properties).sort(), ['artifact', 'content', 'outcome', 'task_id']);
 assert.deepEqual([...tools.get('workflow_complete_task').inputSchema.required].sort(), ['artifact', 'content', 'task_id']);

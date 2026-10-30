@@ -442,10 +442,36 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
     try { configured = configuredVerifier(); }
     catch (error) { return { verified: false, status: 'verifier_unavailable', goalId, snapshotHash: snapshot.snapshot_hash,
       blockers: [{ code: error?.code || 'KNOWLEDGE_VERIFIER_NOT_CONFIGURED', message: String(error?.message || error) }] }; }
-    try { assertAndRecordAdaptiveGoalTrustConfiguration(trustConfigurationDb, configured, { now: now() }); }
-    catch (error) { return { verified: false, status: 'trust_configuration_blocked', goalId, snapshotHash: snapshot.snapshot_hash,
-      blockers: [{ code: error?.code || 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', message: String(error?.message || error) }] }; }
+    // Verification/read paths must never initialize or advance the trust
+    // configuration ledger. Only the explicit trust-status operation and the
+    // signed-attestation ingestion path are allowed to record an observation.
+    // In particular, `adaptive_goal_knowledge_snapshot_get` and graph search
+    // are advertised as reads, so they must not create hidden trust-ledger rows.
+    const antiRollback = inspectAdaptiveGoalTrustConfigurationHistory(trustConfigurationDb, configured.domain, configured);
+    if (['rollback_detected', 'version_gap_detected', 'version_reused', 'time_rollback_detected', 'unavailable', 'current_configuration_invalid'].includes(antiRollback.status)) {
+      const code = antiRollback.code || antiRollback.blocker || 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE';
+      return { verified: false, status: 'trust_configuration_blocked', goalId, snapshotHash: snapshot.snapshot_hash,
+        providerId: configured.providerId, trustRootSha256: configured.roots?.[0]?.trustRootSha256 || null,
+        blockers: [{ code, message: `read-only trust-ledger inspection is ${antiRollback.status}; no trust observation was written` }] };
+    }
+    const trustObservation = antiRollback.status === 'current_or_forward' && antiRollback.latest &&
+      antiRollback.latest.config_version === configured.configVersion &&
+      antiRollback.latest.configuration_fingerprint === configured.configurationFingerprint &&
+      antiRollback.latest.provider_id === configured.providerId;
     const report = { ...readPersistedAttestation(snapshot, configured), snapshotHash: snapshot.snapshot_hash, snapshot, verifierAvailable: true };
+    if (!trustObservation && report.status !== 'stale_or_invalid') {
+      return { ...report, verified: false, status: 'trust_configuration_not_observed', trustConfigurationObserved: false,
+        blockers: [...(report.blockers || []), { code: 'KNOWLEDGE_TRUST_CONFIG_NOT_OBSERVED',
+          message: 'the current trust configuration has not been explicitly observed at this exact version/fingerprint in the trust ledger; use the explicit trust-configuration status operation before relying on persisted attestation verification' }] };
+    }
+    if (!trustObservation && report.status === 'stale_or_invalid') {
+      // Keep more specific findings (especially root revocation/signature
+      // failure) visible while still making the trust observation boundary
+      // explicit. This path remains non-authorizing and does not write ledger.
+      report.trustConfigurationObserved = false;
+      report.blockers = [...(report.blockers || []), { code: 'KNOWLEDGE_TRUST_CONFIG_NOT_OBSERVED',
+        message: 'current trust configuration is not registered at this exact version/fingerprint; no trust observation was written' }];
+    }
     if (report.verified === true && report.status === 'verified') {
       authenticatedVerificationReports.add(report);
       // The WeakSet authenticates object identity, not mutable fields. Freeze
@@ -456,7 +482,7 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
     return report;
   }
 
-  function getVerifierConfigurationStatus() {
+  function getVerifierConfigurationStatus({ recordObservation = true } = {}) {
     try {
       const configured = configuredVerifier();
       const status = adaptiveGoalTrustConfigurationStatus(configured);
@@ -465,14 +491,29 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
         return { ...status, available: false, antiRollback, blockers: [...status.blockers,
           { code: antiRollback.code || 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', message: `trust configuration anti-rollback check is ${antiRollback.status}` }] };
       }
+      if (!recordObservation) {
+        const latest = antiRollback.latest;
+        const observed = antiRollback.status === 'current_or_forward' && latest &&
+          latest.config_version === configured.configVersion &&
+          latest.configuration_fingerprint === configured.configurationFingerprint &&
+          latest.provider_id === configured.providerId;
+        return { ...status, antiRollback, currentTrustConfigurationObserved: Boolean(observed),
+          observationRequired: !observed,
+          audit: { versionRecorded: Boolean(observed), recorded: false, idempotent: Boolean(observed), observationRequired: !observed,
+            mode: 'read_only_no_ledger_write' } };
+      }
       let recorded;
       try { recorded = assertAndRecordAdaptiveGoalTrustConfiguration(trustConfigurationDb, configured, { now: now() }); }
       catch (error) {
         return { ...status, available: false, antiRollback: { status: 'blocked', code: error?.code || 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE' },
           blockers: [...status.blockers, { code: error?.code || 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE', message: String(error?.message || error) }] };
       }
-      return { ...status, antiRollback: inspectAdaptiveGoalTrustConfigurationHistory(trustConfigurationDb, configured.domain, configured),
-        audit: { versionRecorded: true, recorded: recorded.recorded, idempotent: recorded.idempotent } };
+      const observed = inspectAdaptiveGoalTrustConfigurationHistory(trustConfigurationDb, configured.domain, configured);
+      return { ...status, antiRollback: observed, currentTrustConfigurationObserved: observed.status === 'current_or_forward' &&
+        observed.latest?.config_version === configured.configVersion && observed.latest?.configuration_fingerprint === configured.configurationFingerprint &&
+        observed.latest?.provider_id === configured.providerId,
+        observationRequired: false, audit: { versionRecorded: true, recorded: recorded.recorded, idempotent: recorded.idempotent,
+          observationRequired: false, mode: 'explicit_trust_status_observation' } };
     } catch (error) {
       return { available: false, providerId: null, trustRootSha256: null, configurationFingerprint: null, roots: [],
         blockers: [{ code: error?.code || 'KNOWLEDGE_VERIFIER_NOT_CONFIGURED', message: String(error?.message || error) }] };
@@ -484,7 +525,10 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
     let evidenceManifest;
     try { evidenceManifest = normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSourceRecords); }
     catch (error) { evidenceManifest = failedEvidenceManifestAssessment(error); }
-    const verifierConfiguration = getVerifierConfigurationStatus();
+    // Request construction is diagnostic/read-only. The external attestation
+    // ingest path performs the explicit trust observation when it validates a
+    // signature; this method must not write to the anti-rollback ledger.
+    const verifierConfiguration = getVerifierConfigurationStatus({ recordObservation: false });
     const { canonical_json: _canonical, ...publicSnapshot } = snapshot;
     return {
       verified: false,

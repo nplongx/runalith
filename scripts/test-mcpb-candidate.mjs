@@ -274,12 +274,24 @@ async function main() {
     const requiresRuntimeIdentity = (rcVersion !== undefined && Number(rcVersion) >= 17) ||
       Object.keys(manifest.user_config || {}).length > 0;
     if (requiresRuntimeIdentity) {
-      const trustConfigUserFields = {
+      // RC.71 introduces three additional independently administered AGG
+      // trust domains. Historical RC.17-RC.70 rollback bundles intentionally
+      // retain their original two-domain manifest and must remain smoke-testable.
+      const approvalSubsystemCandidate = rcVersion !== undefined && Number(rcVersion) >= 71;
+      const trustConfigUserFields = approvalSubsystemCandidate ? {
+        goal_idea_verifier_trust_config_json: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
+        action_intent_reviewer_trust_config_json: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON',
+        approval_policy_trust_config_json: 'AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON',
+        action_intent_maker_trust_config_json: 'AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON',
+        execution_approval_trust_config_json: 'AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON'
+      } : {
         goal_idea_verifier_trust_config_json: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
         action_intent_reviewer_trust_config_json: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON'
       };
       assert.deepEqual(Object.keys(manifest.user_config || {}).sort(), Object.keys(trustConfigUserFields).sort(),
-        'current candidate must expose only the two administrator-managed AGG trust configuration inputs');
+        approvalSubsystemCandidate
+          ? 'RC.71+ candidate must expose all five administrator-managed AGG trust configuration inputs'
+          : 'historical rollback candidate must preserve its original two administrator-managed AGG trust configuration inputs');
       for (const [configKey, environmentName] of Object.entries(trustConfigUserFields)) {
         const config = manifest.user_config[configKey];
         assert.equal(config.type, 'string', configKey + ': config must be a JSON string');

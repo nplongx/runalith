@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "runalith-agent-orchestrator",
   "display_name": "Runalith",
-  "version": "1.0.9-rc.28",
+  "version": "1.0.9-rc.71",
   "description": "Local-first durable agent workflow orchestration with immutable plans, versioned policies, typed evidence, and approval-gated execution.",
   "long_description": "Runalith is a local-first MCP workflow runtime. It persists workflow state in SQLite, compiles explicitly approved proposals into immutable plans, schedules dependency-aware specialist tasks, executes approved deterministic commands locally, validates typed artifacts and provenance, and records recovery and audit events. The MCPB is a standard package container for compatible clients; Runalith does not provide a hosted model service or remote execution fleet.",
   "author": {
@@ -10,18 +10,21 @@
   },
   "server": {
     "type": "node",
-    "entry_point": "server/index-v1.0.9-rc.28.js",
+    "entry_point": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
     "mcp_config": {
       "command": "node",
       "args": [
-        "${__dirname}/server/index-v1.0.9-rc.28.js"
+        "${__dirname}/server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js"
       ],
       "env": {
         "AGG_PHASE2_SHADOW_TOOL_ENABLED": "1",
         "AGG_PHASE3_MCTS_TOOL_ENABLED": "1",
         "AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED": "1",
         "AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON": "${user_config.goal_idea_verifier_trust_config_json}",
-        "AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON": "${user_config.action_intent_reviewer_trust_config_json}"
+        "AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON": "${user_config.action_intent_reviewer_trust_config_json}",
+        "AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON": "${user_config.approval_policy_trust_config_json}",
+        "AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON": "${user_config.action_intent_maker_trust_config_json}",
+        "AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON": "${user_config.execution_approval_trust_config_json}"
       }
     }
   },
@@ -72,11 +75,11 @@
     },
     {
       "name": "adaptive_goal_knowledge_snapshot_get",
-      "description": "Read a canonical persisted Goal/Idea Graph snapshot, all current and historical revisions, membership and edge provenance, and current evidence-integrity results. A trusted external signature is required before the snapshot is planning-usable."
+      "description": "Read a complete canonical Goal/Idea Graph snapshot: current node revisions/content/provenance, immutable memberships and their provenance, edges/provenance, source references, integrity issues and exact snapshot hash. Resolves evidence through durable artifact/source verifiers and returns a signed-attestation request. This operation does not write the trust ledger. If the current trust configuration version/fingerprint has not been explicitly observed, currentVerification remains blocked with KNOWLEDGE_TRUST_CONFIG_NOT_OBSERVED; use the explicitly state-changing trust-configuration status operation to record that observation. Hashes prove integrity, not claim truth; without a trusted verifier signature the graph is not eligible for planning."
     },
     {
       "name": "adaptive_goal_trust_configuration_status",
-      "description": "Read-only for workflow, graph and approval state; records an observed valid trust configuration version/fingerprint in a separate append-only local ledger to prevent downgrade. Reports config version/fingerprint, public-root fingerprints, validity/revocation and administrator change metadata without exposing PEMs. Flags shared provider IDs or roots across source-verifier and reviewer domains. Configure through the host-supported administrator environment mechanism, never through MCP arguments."
+      "description": "Explicit, state-changing host-trust observation: appends effective config versions/fingerprints to the anti-rollback ledger for Goal/Idea verification, reviewer identity, approval policy, maker identity and execution approval. It does not mutate workflows, approvals, plans or tasks. Reports trust roots/fingerprints, validity/revocation and administrator metadata without exposing PEMs; fails closed if any required approval domain is missing or shares provider IDs or mathematical roots with another domain. It does not provision trust or grant execution authority."
     },
     {
       "name": "adaptive_goal_knowledge_snapshot_attest",
@@ -129,6 +132,10 @@
     {
       "name": "adaptive_goal_execution_plan_candidate_get",
       "description": "Rebuild and revalidate the persisted execution-plan candidate and its original reviewed-action-intent input from the current Execution Graph proposal, source evidence, typed artifact bindings, role/artifact contracts, dependency ancestry, compiler output, validator and normal preflight hash. Reports tampering/staleness as stable blockers; does not refresh snapshots, pin plans, approve, create tasks or dispatch."
+    },
+    {
+      "name": "adaptive_goal_reviewer_attestation_ingest",
+      "description": "State-changing, evidence-only ingestion of an externally signed reviewer identity attestation. Rebuilds the current candidate and verifies the independent Goal/Idea snapshot, configured reviewer trust root, exact candidate/plan/action-intent hashes, scope, expiry, nonce/replay protection and canonical atomic readback. It never issues a signature, accepts caller identity claims as proof, grants workflow approval, pins a plan, creates tasks, dispatches, or authorizes execution. The external provider must authenticate the reviewer and authorize the requested scope before signing; test-local keys are never production trust."
     },
     {
       "name": "adaptive_goal_sandbox_action_execute",
@@ -192,7 +199,7 @@
     },
     {
       "name": "workflow_approve",
-      "description": "Explicitly approve a proposal after feasibility checks and compile its immutable plan."
+      "description": "State-changing approval after inspecting the proposal and proposed immutable plan, obtaining a ready feasibility preflight, and explicitly authorizing the exact action. AGG Execution Graph candidates require externally signed versioned approval policy, authenticated maker attestation and checker decisions meeting the policy-defined quorum; evidence is bound to the exact candidate, plan, action, permission scope and evidence hashes, and is independently revalidated at dispatch and action execution. Reviewer identity or confirmation text alone is not approval."
     },
     {
       "name": "workflow_write_files",
@@ -347,6 +354,30 @@
       "type": "string",
       "title": "Action-intent reviewer trust configuration (JSON)",
       "description": "Optional host-managed trust config supplied by your security administrator and approved by a separately administered reviewer authority. Use the versioned action_intent_reviewer config with scope agg.action_intent.review and public roots disjoint from the verifier roots. Public Ed25519 keys only; never paste a private key. Leaving this blank keeps trusted review and approval blocked.",
+      "default": "",
+      "required": false,
+      "sensitive": false
+    },
+    "approval_policy_trust_config_json": {
+      "type": "string",
+      "title": "Execution approval policy trust configuration (JSON)",
+      "description": "Optional host-managed trust config provisioned by the authorized host/security administrator and approved by the security/policy authority. Use the versioned execution_approval_policy domain and scope agg.approval.policy with public Ed25519 keys only. This root authorizes signed approval-policy documents; it is not itself a quorum or approval. Leaving it blank keeps AGG action approval blocked.",
+      "default": "",
+      "required": false,
+      "sensitive": false
+    },
+    "action_intent_maker_trust_config_json": {
+      "type": "string",
+      "title": "Action-intent maker identity trust configuration (JSON)",
+      "description": "Optional host-managed trust config provisioned by the authorized host administrator and approved by the independent identity/security authority. Use the versioned action_intent_maker domain and scope agg.action_intent.propose with public Ed25519 keys only. The external identity provider must authenticate the real maker/requester before signing. Leaving it blank keeps AGG action approval blocked.",
+      "default": "",
+      "required": false,
+      "sensitive": false
+    },
+    "execution_approval_trust_config_json": {
+      "type": "string",
+      "title": "Execution approval decision trust configuration (JSON)",
+      "description": "Optional host-managed trust config provisioned by the authorized host/security administrator and approved by the independent execution-approval authority. Use the versioned execution_approval domain and scope agg.execution.approve with public Ed25519 keys only. The signed policy defines the required quorum, roles, trust domains and veto semantics; no default quorum is assumed. Leaving it blank keeps AGG action approval and dispatch blocked.",
       "default": "",
       "required": false,
       "sensitive": false

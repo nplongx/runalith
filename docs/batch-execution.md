@@ -47,6 +47,8 @@ A batch result preview alone is not proof of successful completion. Inspect dura
 
 Recovery must distinguish a rejection before spawn from a failed item and from an ambiguous/possibly-spawned process. Continue using the same authorized batch/recovery path to reconcile durable session, process and attempt evidence. Do not blindly replay unresolved side effects. A local successful execution is not an exactly-once guarantee for external effects.
 
+Cancellation is a request, not proof that execution stopped. The execution manager must drain all started lanes before cancelling the aggregate. The store additionally refuses batch cancellation while a `RUNNING` item still has `tasks.execution_status='running'` or a durable `attempts.status='started'` row. Such work remains non-terminal until its owner finishes cleanup or an authoritative recovery path resolves it.
+
 ## Workspace freshness
 
 For validation contracts listed in `validation_task_ids`, the runtime records a fingerprint before the validation batch runs and checks it again before synthesis. A mismatch blocks the claim that the tests validate the current workspace.

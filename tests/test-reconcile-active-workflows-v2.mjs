@@ -30,6 +30,9 @@ function writeFixture(dbPath) {
     CREATE TABLE results(result_id TEXT PRIMARY KEY,task_id TEXT,outcome TEXT,content TEXT,created_at TEXT);
     CREATE TABLE events(event_id TEXT PRIMARY KEY,job_id TEXT,type TEXT,payload_json TEXT,created_at TEXT);
     CREATE TABLE task_leases(lease_id TEXT PRIMARY KEY,task_id TEXT,job_id TEXT,attempt INTEGER,worker_id TEXT,state TEXT,issued_at TEXT,heartbeat_at TEXT,expires_at TEXT,released_at TEXT,last_error TEXT,owner_epoch INTEGER);
+    CREATE TABLE provider_runs(provider_run_id TEXT PRIMARY KEY,provider TEXT,job_id TEXT,task_id TEXT,lease_id TEXT,attempt INTEGER,
+      run_attempt INTEGER,input_commit TEXT,workflow TEXT,ref TEXT,state TEXT,status TEXT,conclusion TEXT,dispatch_key TEXT,
+      request_sha256 TEXT,owner_epoch INTEGER,created_at TEXT,updated_at TEXT);
     CREATE TABLE workflow_runtime_state(job_id TEXT,phase TEXT,attempt INTEGER,resume_after TEXT,last_error TEXT,updated_at TEXT);
     CREATE TABLE artifacts(artifact_id TEXT PRIMARY KEY,job_id TEXT,task_id TEXT,kind TEXT,uri TEXT,metadata_json TEXT,created_at TEXT,
       schema_version INTEGER,producer_role TEXT,content TEXT,evidence_json TEXT,status TEXT,supersedes TEXT,content_hash TEXT);
@@ -47,11 +50,33 @@ function writeFixture(dbPath) {
     producer_role,content,evidence_json,status,supersedes,content_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const insertLease = db.prepare(`INSERT INTO task_leases(lease_id,task_id,job_id,attempt,worker_id,state,issued_at,heartbeat_at,expires_at,
     released_at,last_error,owner_epoch) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const insertProviderRun = db.prepare(`INSERT INTO provider_runs(provider_run_id,provider,job_id,task_id,lease_id,attempt,run_attempt,
+    input_commit,workflow,ref,state,status,conclusion,dispatch_key,request_sha256,owner_epoch,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   const activeStale = 'job-stale';
   insertJob.run(activeStale, 'conversation:stale', 'stale job with running task but no worker identity', 'EXECUTING', 'active', 'task-stale', 0, OLD, OLD);
   insertTask.run('task-stale', activeStale, 'researcher', 'running', null, null, null, '[]', '{}', OLD, OLD, null, null, 0, null, null, null);
+  insertProviderRun.run('provider-run-stale', 'github-actions', activeStale, 'task-stale', 'lease-missing', 1, 1,
+    'a'.repeat(40), 'workflow.yml', 'main', 'in_progress', 'running', null, 'dispatch-stale', 'b'.repeat(64), 2, OLD, OLD);
   insertEvent.run('event-stale', activeStale, 'task.dispatched', JSON.stringify({ taskId: 'task-stale', role: 'researcher',
     attemptId: 'attempt-does-not-exist', resultId: 'result-does-not-exist', artifactId: 'artifact-does-not-exist' }), OLD);
+  // Event correlation must not depend on summarizePayload's deliberately
+  // bounded display projection: the only task ID is in the sixth array item.
+  insertEvent.run('event-task-id-sixth-array-item', activeStale, 'task.batch_reconciled', JSON.stringify({
+    entries: [{ note: 'unrelated-1' }, { note: 'unrelated-2' }, { note: 'unrelated-3' }, { note: 'unrelated-4' },
+      { note: 'unrelated-5' }, { taskId: 'task-stale', attemptId: 'attempt-only-in-sixth-array-item' }]
+  }), OLD);
+  // Reference collection used to inspect only the first 100 array items. All
+  // references must now be assessed, or the report must explicitly say that
+  // the scan was truncated instead of silently implying complete lineage.
+  insertEvent.run('event-lineage-more-than-100-references', activeStale, 'task.bulk_reconcile', JSON.stringify({
+    taskId: 'task-stale', references: Array.from({ length: 150 }, (_, index) => ({ attemptId: `attempt-bulk-${index + 1}` }))
+  }), OLD);
+  // The explicit safety bound must be visible as incomplete, not silently
+  // represented as a complete task/event graph when a payload exceeds it.
+  insertEvent.run('event-task-correlation-scan-cap', activeStale, 'task.batch_reconciled', JSON.stringify({
+    entries: [...Array.from({ length: 10_000 }, () => ({ note: 'bounded scan fixture' })), { taskId: 'task-stale-after-scan-cap' }]
+  }), OLD);
   insertArtifact.run('artifact-stale-mismatch', 'other-job', 'task-stale', 'architecture', 'artifact://mismatch', '{}', OLD, 1, 'architect',
     '{"components":[]}', '[]', 'active', null, sha('mismatched-artifact'));
 
@@ -60,6 +85,9 @@ function writeFixture(dbPath) {
   insertTask.run('task-completed', 'job-stuck-terminal', 'reviewer', 'completed', 'run-7', 'session-7', null, '[]', '{}', OLD, '2026-10-26T01:30:00.000Z',
     'exec-session-7', 'success', 1, null, OLD, COMPLETE_EVENT);
   insertAttempt.run('attempt-7', 'task-completed', 'completed', 'run-7', OLD, COMPLETE_EVENT, null);
+  insertProviderRun.run('provider-run-completed', 'github-actions', 'job-stuck-terminal', 'task-completed', 'lease-7', 1, 1,
+    'c'.repeat(40), 'workflow.yml', 'main', 'completed', 'completed', 'success', 'dispatch-completed', 'd'.repeat(64), 1,
+    COMPLETE_EVENT, COMPLETE_EVENT);
   insertResult.run('result-7', 'task-completed', 'success', 'not copied to the diagnostic output', COMPLETE_EVENT);
   insertArtifact.run('artifact-7', 'job-stuck-terminal', 'task-completed', 'review', 'artifact://7', '{}', COMPLETE_EVENT, 1, 'reviewer',
     '{"decision":"needs_changes"}', '[]', 'active', null, sha('artifact-content'));
@@ -133,9 +161,25 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   const after = sha(fs.readFileSync(dbPath));
   assert.equal(after, before, 'read-only reconciliation must preserve exact SQLite bytes');
   assert.equal(report.readOnly, true);
+  assert.equal(report.schemaVersion, 2, 'operability metrics are carried in the versioned diagnostic report contract');
   assert.equal(report.policy.staleCandidateIsNotProofOfWorkerDeath, true);
   assert.equal(report.policy.missingLeaseDoesNotAuthorizeTerminalization, true);
   assert.equal(report.summary.consideredJobs, 6);
+  assert.equal(report.operabilityMetrics.status, 'DIAGNOSTIC_ONLY_NOT_RELEASE_EVIDENCE');
+  assert.equal(report.operabilityMetrics.jobsWithUnverifiedOwnerIdentity, 6);
+  assert.equal(report.operabilityMetrics.jobsWithProviderIdentityNotPersisted, 6);
+  assert.equal(report.operabilityMetrics.tasksObserved, 7);
+  assert.equal(report.operabilityMetrics.runningTasksObserved, 5);
+  assert.equal(report.operabilityMetrics.runningTasksWithoutActiveLeaseRows, 3);
+  assert.equal(report.operabilityMetrics.runningTasksMissingExecutionMetadata, 1);
+  assert.equal(report.operabilityMetrics.tasksWithReconciliationFlags, 6,
+    'a nonterminal provider run whose lease binding is missing must be counted as a reconciliation finding');
+  assert.equal(report.operabilityMetrics.tasksWithConflictingEventReferences, 1);
+  assert.equal(report.operabilityMetrics.tasksWithUnverifiedOwnerOrProvider, 7);
+  assert.equal(report.operabilityMetrics.terminalDispositionProof.status, 'NOT_ASSESSED_BY_LOCAL_SQLITE_DIAGNOSTIC');
+  assert.equal(report.operabilityMetrics.terminalDispositionProof.verifiedTerminalDispositions, 0);
+  assert.equal(report.operabilityMetrics.automaticLifecycleActionsAuthorized, false);
+  assert.equal(report.operabilityMetrics.oldestObservedActivityAgeMs, 16_800_000);
   const jobs = new Map(report.diagnostics.map(job => [job.jobId, job]));
 
   const stale = jobs.get('job-stale');
@@ -153,7 +197,29 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   assert.equal(stale.tasks[0].lifecycleEvidence.provider.status, 'UNVERIFIED');
   assert.equal(stale.tasks[0].lifecycleEvidence.lease.status, 'MISSING_NOT_PROOF_OF_WORKER_DEATH');
   assert.equal(stale.tasks[0].lifecycleEvidence.automaticLifecycleActionAuthorized, false);
-  assert.deepEqual(stale.tasks[0].lifecycleEvidence.eventReferences.unresolvedAttemptIds, ['attempt-does-not-exist']);
+  assert.equal(stale.tasks[0].providerRunSchemaStatus, 'TASK_BOUND_SCHEMA');
+  assert.equal(stale.tasks[0].providerRuns[0].providerRunId, 'provider-run-stale');
+  assert.equal(stale.tasks[0].providerRuns[0].taskBindingStatus, 'TASK_BOUND_BY_ROW');
+  assert.deepEqual(stale.tasks[0].lineageAssessment.nonterminalProviderRunIds, ['provider-run-stale']);
+  assert.ok(stale.tasks[0].flags.includes('PROVIDER_RUN_LEASE_BINDING_MISMATCH'),
+    'a nonterminal provider run whose lease is missing must remain a reconciliation blocker');
+  assert.equal(stale.tasks[0].lifecycleEvidence.provider.status, 'UNVERIFIED',
+    'persisted provider-run linkage is diagnostic and must not be treated as authenticated remote outcome');
+  assert.ok(stale.tasks[0].lifecycleEvidence.eventReferences.unresolvedAttemptIds.includes('attempt-does-not-exist'));
+  assert.ok(stale.tasks[0].eventLineage.eventIds.includes('event-task-id-sixth-array-item'),
+    'task correlation must inspect nested event arrays beyond the first five display-summary elements');
+  assert.ok(stale.tasks[0].lifecycleEvidence.eventReferences.unresolvedAttemptIds.includes('attempt-only-in-sixth-array-item'),
+    'attempt references in the sixth nested array item must not be omitted');
+  assert.ok(stale.tasks[0].lifecycleEvidence.eventReferences.unresolvedAttemptIds.includes('attempt-bulk-150'),
+    'lineage reference scans must include more than 100 array elements when within the explicit scan bound');
+  assert.equal(stale.tasks[0].lifecycleEvidence.eventReferences.scan.truncated, false);
+  assert.equal(stale.tasks[0].eventLineage.truncated, false,
+    'an unattributed truncated event must not be represented as if this task payload was truncated');
+  assert.ok(stale.flags.includes('EVENT_TASK_CORRELATION_SCAN_TRUNCATED'),
+    'an unattributed truncated event must be visible at job scope');
+  assert.ok(!stale.tasks[0].flags.includes('EVENT_TASK_CORRELATION_SCAN_TRUNCATED'),
+    'an unattributed event scan failure must not be falsely attributed to every task');
+  assert.ok(stale.tasks[0].eventLineage.unattributedTruncatedEventIds.includes('event-task-correlation-scan-cap'));
   assert.match(stale.ownerAction, /responsible owner/);
 
   const mismatched = jobs.get('job-stuck-terminal');
@@ -229,9 +295,44 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   const changedReport = buildActiveWorkflowReconciliationReport(changedDb, {
     now: NOW, staleAfterMs: 900_000, limit: 20, procRoot: path.join(dir, 'proc')
   });
+  const eventBefore = JSON.parse(changedDb.prepare('SELECT payload_json FROM events WHERE event_id=?').get('event-task-correlation-scan-cap').payload_json);
   changedDb.close();
   assert.notEqual(changedReport.recoveryPlan.find(item => item.jobId === 'job-stuck-terminal').idempotencyKey,
     plan.idempotencyKey, 'a result-content change with stable row IDs must invalidate the old reconciliation key');
+  eventBefore.entries[0].note = 'same event ID, changed payload outside the bounded identity display projection';
+  const eventWriter = new DatabaseSync(dbPath);
+  eventWriter.prepare('UPDATE events SET payload_json=? WHERE event_id=?').run(JSON.stringify(eventBefore), 'event-task-correlation-scan-cap');
+  eventWriter.close();
+  const eventChangedDb = new DatabaseSync(dbPath, { readOnly: true });
+  const eventChangedReport = buildActiveWorkflowReconciliationReport(eventChangedDb, {
+    now: NOW, staleAfterMs: 900_000, limit: 20, procRoot: path.join(dir, 'proc')
+  });
+  eventChangedDb.close();
+  assert.notEqual(eventChangedReport.recoveryPlan.find(item => item.jobId === 'job-stale').idempotencyKey,
+    changedReport.recoveryPlan.find(item => item.jobId === 'job-stale').idempotencyKey,
+    'changing payload bytes under a stable, incompletely correlated event ID must invalidate the recovery identity');
+});
+
+test('legacy provider runs without task binding remain visible and block inferred disposition', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'active-workflow-legacy-provider-runs-'));
+  fs.chmodSync(dir, 0o700);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = path.join(dir, 'workflow.db');
+  writeFixture(dbPath);
+  const db = new DatabaseSync(dbPath);
+  db.exec('DROP TABLE provider_runs; CREATE TABLE provider_runs(provider_run_id TEXT PRIMARY KEY,job_id TEXT,provider TEXT,state TEXT,updated_at TEXT);');
+  db.prepare('INSERT INTO provider_runs(provider_run_id,job_id,provider,state,updated_at) VALUES(?,?,?,?,?)')
+    .run('legacy-provider-run', 'job-stale', 'legacy-provider', 'IN_PROGRESS', OLD);
+  const report = buildActiveWorkflowReconciliationReport(db, { now: NOW, staleAfterMs: 900_000, limit: 20, procRoot: path.join(dir, 'proc') });
+  db.close();
+  const stale = report.diagnostics.find(job => job.jobId === 'job-stale');
+  const task = stale.tasks[0];
+  assert.equal(task.providerRunSchemaStatus, 'LEGACY_JOB_ONLY_BINDING');
+  assert.equal(task.providerRuns[0].providerRunId, 'legacy-provider-run');
+  assert.equal(task.providerRuns[0].taskBindingStatus, 'UNBOUND_AMBIGUOUS');
+  assert.ok(task.flags.includes('NONTERMINAL_PROVIDER_RUN_WITHOUT_TASK_BINDING'));
+  assert.equal(task.lifecycleEvidence.disposition, 'HOLD_CONFLICTING_EVIDENCE');
+  assert.equal(task.lifecycleEvidence.automaticLifecycleActionAuthorized, false);
 });
 
 test('CLI writes an exclusive diagnostic report, refuses overwrite and rejects symlinked database paths', t => {
@@ -250,8 +351,15 @@ test('CLI writes an exclusive diagnostic report, refuses overwrite and rejects s
   assert.equal(envelope.readOnly, true);
   assert.match(envelope.reportSha256, /^[a-f0-9]{64}$/);
   const report = JSON.parse(fs.readFileSync(outPath, 'utf8'));
+  assert.equal(report.schemaVersion, 2);
+  assert.equal(report.readOnly, true);
+  assert.equal(report.liveMutationPerformed, false);
+  assert.equal(report.workflowDatabaseMutationPerformed, false);
+  assert.equal(report.externalSecurityStoreMutationPerformed, false);
   assert.equal(report.dbPath, dbPath);
   assert.equal(report.summary.jobsFlaggedForReconciliation, 4);
+  assert.equal(report.operabilityMetrics.automaticLifecycleActionsAuthorized, false);
+  assert.equal(report.operabilityMetrics.terminalDispositionProof.status, 'NOT_ASSESSED_BY_LOCAL_SQLITE_DIAGNOSTIC');
   assert.equal(fs.statSync(outPath).mode & 0o777, 0o600);
   const duplicate = spawnSync(process.execPath, [CLI, '--db', dbPath, '--out', outPath], { cwd: ROOT, encoding: 'utf8', timeout: 10_000 });
   assert.equal(duplicate.status, 2);

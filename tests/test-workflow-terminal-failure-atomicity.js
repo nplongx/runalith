@@ -143,6 +143,49 @@ store.db.prepare("UPDATE task_leases SET state='RELEASED',released_at=? WHERE le
 assert.equal(store.reconcileRunningTaskForTerminalJob(providerRunningTask.task_id).status, 'cancelled',
   'terminal-job recovery must proceed after provider run is terminal and lease is released');
 
+// Native specialist runs are recorded outside provider_runs. Terminal failure
+// must not treat the absence of a GitHub dispatch intent/run as proof that a
+// native remote effect has ended.
+const nativeEffectJob = store.createJob({ conversationKey: `workflow-terminal-native-effect-${process.pid}`, title: 'Native effect terminalization guard' });
+store.approve(nativeEffectJob.job_id, 'isolated native-effect test approval');
+const nativeEffectTask = store.dispatch(nativeEffectJob.job_id, { role: 'cto', description: 'native runtime remains active' });
+const nativeEffectLease = store.acquireTaskLease(nativeEffectTask.task_id, {
+  leaseId: `workflow-terminal-native-lease-${process.pid}`, workerId: 'native-terminal-test-worker', ttlMs: 60_000
+});
+store.attachM12NativeSpecialistRuntime(nativeEffectTask.task_id, {
+  attempt: nativeEffectLease.attempt,
+  sessionKey: 'agent:terminal-native-effect',
+  nativeSessionId: `workflow-terminal-native-session-${process.pid}`,
+  runId: `workflow-terminal-native-run-${process.pid}`,
+  environmentId: 'fixture-environment', nodeId: 'fixture-node',
+  leaseId: nativeEffectLease.lease_id, ownerEpoch: nativeEffectLease.owner_epoch
+});
+assert.throws(() => store.failWorkflowVerification(nativeEffectJob.job_id, {
+  reason: 'verification failed while native effect is active', errors: ['native outcome unresolved']
+}), /provider outcome is unresolved \(native_runtime_not_terminal:/,
+'terminal failure must defer while an active native specialist runtime may still own a remote effect');
+assert.equal(store.getJob(nativeEffectJob.job_id).state, 'EXECUTING', 'blocked native-effect terminalization must not change Job state');
+assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE job_id=? AND type='job.failed'")
+  .get(nativeEffectJob.job_id).n, 0, 'blocked native-effect terminalization must not append a terminal event');
+
+const quarantinedEffectJob = store.createJob({ conversationKey: `workflow-terminal-quarantined-effect-${process.pid}`, title: 'Quarantined effect terminalization guard' });
+store.approve(quarantinedEffectJob.job_id, 'isolated quarantined-effect test approval');
+const quarantinedEffectTask = store.dispatch(quarantinedEffectJob.job_id, { role: 'cto', description: 'quarantined remote effect remains unresolved' });
+const quarantinedEffectLease = store.acquireTaskLease(quarantinedEffectTask.task_id, {
+  leaseId: `workflow-terminal-quarantined-lease-${process.pid}`, workerId: 'quarantined-terminal-test-worker', ttlMs: 60_000
+});
+const quarantineReason = 'REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION: provider status unavailable';
+store.db.prepare("UPDATE task_leases SET state='FAILED',released_at=?,last_error=? WHERE lease_id=?")
+  .run(new Date().toISOString(), quarantineReason, quarantinedEffectLease.lease_id);
+store.db.prepare("INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)")
+  .run(`workflow-terminal-quarantine-event-${process.pid}`, quarantinedEffectJob.job_id, 'task.lease.quarantined',
+    JSON.stringify({ taskId: quarantinedEffectTask.task_id, leaseId: quarantinedEffectLease.lease_id, remoteEffect: 'uncertain', reconciliationRequired: true }), new Date().toISOString());
+assert.throws(() => store.failWorkflowVerification(quarantinedEffectJob.job_id, {
+  reason: 'verification failed while lease remains quarantined', errors: ['remote outcome unresolved']
+}), /provider outcome is unresolved \(quarantined_lease_remote_effect_unresolved:/,
+'a FAILED/quarantined lease must not be mistaken for proof that its remote effect stopped');
+assert.equal(store.getJob(quarantinedEffectJob.job_id).state, 'EXECUTING', 'blocked quarantined-effect terminalization must preserve Job state');
+
 // The older complete() API must also roll back task/result/job writes together
 // if SIGKILL lands after its job state update but before the completion event.
 const legacyCrashCompleteJob = store.createJob({ conversationKey: `workflow-legacy-complete-crash-${process.pid}`, title: 'Legacy completion SIGKILL fixture' });

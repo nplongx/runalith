@@ -17,7 +17,7 @@ function fixture() {
     alignment: { status: 'PASS_SOURCE_TO_BUNDLE_BYTE_ALIGNMENT', byteIdentityStatus: 'PASS_EXACT_ARCHIVE_ENTRY_BYTES',
       bundleSha256: candidateHash, bundlePath: '/candidate.mcpb', bundleBytes: 1234, sourceSnapshotSha256: 'b'.repeat(64),
       sourceProvenanceStatus: 'CLEAN_GIT_TREE_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT', releaseEligibility: 'BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED',
-      archiveEntryCount: 93, manifestToolCount: 74 },
+      archiveEntryCount: 93, manifestToolCount: 75 },
     preflight: { readOnly: true, liveMutationPerformed: false, workflowDatabaseMutationPerformed: false,
       externalSecurityStoreMutationPerformed: false, candidate: { sha256: candidateHash, version: '1.0.9-rc.28', sizeBytes: 1234,
         smoke: { passed: true }, entryPoint: 'server/index-v1.0.9-rc.28.js' },
@@ -51,7 +51,7 @@ test('dossier keeps all six RC.23 gates open and separates byte alignment from r
   const d = buildAggReadinessDossier(fixture());
   assert.equal(d.decision.status, 'BLOCKED');
   assert.equal(d.candidate.archiveEntryCount, 93);
-  assert.equal(d.candidate.toolCount, 74);
+  assert.equal(d.candidate.toolCount, 75);
   assert.equal(d.checks.sourceToBundleByteAlignment, 'PASS');
   assert.equal(d.checks.sourceProvenanceAuthenticated, false);
   assert.deepEqual(d.rc23Gates.map(g => g.code), gates);

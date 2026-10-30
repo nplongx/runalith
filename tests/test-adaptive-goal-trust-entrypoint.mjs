@@ -66,6 +66,10 @@ function createAttestation(request, { keyPair, providerId, pem, nonce = randomUU
 
 const sourceVerifierKey = generateKeyPairSync('ed25519');
 const reviewerKey = generateKeyPairSync('ed25519');
+const approvalPolicyKey = generateKeyPairSync('ed25519');
+const makerIdentityKey = generateKeyPairSync('ed25519');
+const executionApprovalKeyA = generateKeyPairSync('ed25519');
+const executionApprovalKeyB = generateKeyPairSync('ed25519');
 const wrongSignerKey = generateKeyPairSync('ed25519');
 const sourceVerifierPem = publicKeyPem(sourceVerifierKey);
 const reviewerPem = publicKeyPem(reviewerKey);
@@ -84,6 +88,17 @@ const env = {
   OPENAI_API_KEY: '',
   AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: trustConfig('goal_idea_verifier', providerId, sourceVerifierPem, 'agg.goal_idea_graph.verify', 'source-verifier-test-key'),
   AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: trustConfig('action_intent_reviewer', reviewerProviderId, reviewerPem, 'agg.action_intent.review', 'action-reviewer-test-key'),
+  AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON: trustConfig('execution_approval_policy', 'entrypoint-test-independent-approval-policy', publicKeyPem(approvalPolicyKey), 'agg.approval.policy', 'approval-policy-test-key'),
+  AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON: trustConfig('action_intent_maker', 'entrypoint-test-independent-action-maker', publicKeyPem(makerIdentityKey), 'agg.action_intent.propose', 'action-maker-test-key'),
+  AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON: JSON.stringify({
+    schema_version: 1, domain: 'execution_approval', provider_id: 'entrypoint-test-independent-execution-approval', config_version: 1,
+    updated_at: new Date(Date.now() - 1000).toISOString(), updated_by: 'disposable-entrypoint-security-admin',
+    change_reference: 'ISOLATED-TEST-execution_approval-1',
+    keys: [
+      { key_id: 'execution-approval-test-key-a', public_key_pem: publicKeyPem(executionApprovalKeyA), scopes: ['agg.execution.approve'], not_before: new Date(Date.now() - 60_000).toISOString(), not_after: null, revoked_at: null },
+      { key_id: 'execution-approval-test-key-b', public_key_pem: publicKeyPem(executionApprovalKeyB), scopes: ['agg.execution.approve'], not_before: new Date(Date.now() - 60_000).toISOString(), not_after: null, revoked_at: null }
+    ]
+  }),
   AGG_PHASE2_SHADOW_TOOL_ENABLED: '0',
   AGG_PHASE3_MCTS_TOOL_ENABLED: '0',
   AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED: '0'
@@ -91,6 +106,9 @@ const env = {
 for (const key of [
   'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID', 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM',
   'AGG_REVIEW_IDENTITY_PROVIDER_ID', 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM',
+  'AGG_APPROVAL_POLICY_PROVIDER_ID', 'AGG_APPROVAL_POLICY_TRUST_ROOT_PUBLIC_KEY_PEM',
+  'AGG_ACTION_INTENT_MAKER_PROVIDER_ID', 'AGG_ACTION_INTENT_MAKER_TRUST_ROOT_PUBLIC_KEY_PEM',
+  'AGG_EXECUTION_APPROVAL_PROVIDER_ID', 'AGG_EXECUTION_APPROVAL_TRUST_ROOT_PUBLIC_KEY_PEM',
   'CHAT_ON_STEROIDS_DATA_DIR', 'CHAT_ON_STEROIDS_WORKFLOW_DB', 'WORKFLOW_DATA_DIR', 'WORKFLOW_DB',
   'CHAT_ON_STEROIDS_WORKSPACE', 'WORKFLOW_WORKSPACE', 'CHAT_ON_STEROIDS_EXECUTION_TMP_DIR', 'EXECUTION_TMP_DIR'
 ]) delete env[key];
@@ -166,6 +184,10 @@ try {
   assert.equal(trustStatus.data.status, 'configured', JSON.stringify(trustStatus.data));
   assert.equal(trustStatus.data.domains.goal_idea_verifier.configVersion, 1);
   assert.equal(trustStatus.data.domains.action_intent_reviewer.configVersion, 1);
+  assert.equal(trustStatus.data.approvalSubsystem.status, 'configured', JSON.stringify(trustStatus.data.approvalSubsystem.blockers));
+  assert.equal(trustStatus.data.approvalSubsystem.domains.policyAuthority.configVersion, 1);
+  assert.equal(trustStatus.data.approvalSubsystem.domains.makerAuthority.configVersion, 1);
+  assert.equal(trustStatus.data.approvalSubsystem.domains.decisionAuthority.configVersion, 1);
   assert.equal(trustStatus.data.separation.providerIdsDistinct, true);
   assert.equal(trustStatus.data.separation.publicRootsDisjoint, true);
   assert.doesNotMatch(JSON.stringify(trustStatus.data), /BEGIN (?:PRIVATE|RSA PRIVATE|OPENSSH PRIVATE) KEY/);
@@ -258,7 +280,9 @@ try {
   const ledger = new DatabaseSync(path.join(dataDir, 'agg-trust-configuration.db'), { readOnly: true });
   try {
     const rows = ledger.prepare('SELECT domain,config_version,configuration_fingerprint,provider_id,config_change_reference FROM adaptive_goal_trust_configuration_history ORDER BY domain').all();
-    assert.deepEqual(rows.map(row => row.domain).sort(), ['action_intent_reviewer', 'goal_idea_verifier']);
+    assert.deepEqual(rows.map(row => row.domain).sort(), [
+      'action_intent_maker','action_intent_reviewer','execution_approval','execution_approval_policy','goal_idea_verifier'
+    ]);
     assert.ok(rows.every(row => row.config_version === 1 && /^[a-f0-9]{64}$/.test(row.configuration_fingerprint)));
     assert.equal(rows.some(row => JSON.stringify(row).includes('PUBLIC KEY')), false);
   } finally { ledger.close(); }

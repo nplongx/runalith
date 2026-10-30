@@ -92,9 +92,9 @@ try {
     assert.ok(exit, `EOF/backpressure shutdown did not exit within bound; stderr=${run.stderr}`);
     assert.equal(exit.signal, null, `EOF/backpressure should fail-stop explicitly; stderr=${run.stderr}`);
     assert.equal(exit.code, 1, `EOF/backpressure must not report success; stderr=${run.stderr}`);
-    assert.match(run.stderr, /shutdown drain exceeded 150ms|fatal unhandled rejection/i,
-      `EOF/backpressure should report a bounded drain failure; stderr=${run.stderr}`);
-    const diagnostic = run.stderr.split(/\r?\n/).find(line => /fatal unhandled rejection|shutdown drain exceeded/i.test(line)) || run.stderr.trim().split(/\r?\n/).at(-1);
+    assert.match(run.stderr, /shutdown drain exceeded 150ms|stdout backpressure exceeded 150ms|fatal unhandled rejection/i,
+      `EOF/backpressure should report a bounded output or shutdown drain failure; stderr=${run.stderr}`);
+    const diagnostic = run.stderr.split(/\r?\n/).find(line => /fatal unhandled rejection|shutdown drain exceeded|stdout backpressure exceeded/i.test(line)) || run.stderr.trim().split(/\r?\n/).at(-1);
     console.log(`EOF/backpressure observed exit=${exit.code}, signal=${exit.signal}; diagnostic=${diagnostic}`);
     } catch (error) { failures.push(`EOF/backpressure: ${error instanceof Error ? error.message : String(error)}`); }
   }

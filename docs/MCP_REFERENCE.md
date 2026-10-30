@@ -2,10 +2,9 @@
 
 This page is generated from the shipped stdio MCP server by the documentation generator. It describes registered tool names and input schemas returned by `tools/list`; it does not claim that every tool is safe in every workflow state. Follow the linked guides for lifecycle preconditions, permissions, evidence rules, and limitations.
 
-- Source: `server/index-v1.0.9-rc.28.js` and its runtime schema definitions.
+- Source: the runtime entry point declared by `package.json` and its runtime schema definitions.
 - Server identity reported by the checked-out source: `runalith-agent-orchestrator`.
-- Source package version reported at generation time: `1.0.9-rc.28`. This is source-runtime metadata, not proof of which bundle is installed in a client.
-- Registered tools: **74**.
+- Registered tools: **75**.
 
 ## Choosing the right operation
 
@@ -31,8 +30,8 @@ This page is generated from the shipped stdio MCP server by the documentation ge
 | [`adaptive_goal_knowledge_capture_workflow_outcome`](#adaptive_goal_knowledge_capture_workflow_outcome) | Opt-in source-only Phase 4 capture for authorized local testing. Set AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED=1 to expose the tool in tools/list. Captures bounded task/result/artifact metadata from a terminal local workflow and an optional caller-authored unverified lesson; rejects active jobs and malformed/oversized traces. Never verifies knowledge, authorizes execution, or dispatches. | `goal_id`, `job_id` |
 | [`adaptive_goal_knowledge_edge_add`](#adaptive_goal_knowledge_edge_add) | Append a typed Idea Graph relation with provenance and stable edge identity. recovers_to edges require explicit condition and expected-outcome contracts; recovery relations are excluded from ordinary search by default. This tool never verifies claims or grants execution authority. | `goal_id`, `from_id`, `to_id`, `edge_type`, `provenance` |
 | [`adaptive_goal_knowledge_search`](#adaptive_goal_knowledge_search) | Search the shared append-only Idea Graph across goals, including goal/hypothesis/idea/capability/experiment/evidence/condition nodes and cross-goal reuse memberships. This listing does not itself verify claims, current artifact lineage, or independence; use adaptive_goal_knowledge_snapshot_get and adaptive_goal_knowledge_graph_search to check a verifier-signed current snapshot. | None |
-| [`adaptive_goal_knowledge_snapshot_get`](#adaptive_goal_knowledge_snapshot_get) | Read a complete canonical Goal/Idea Graph snapshot: current node revisions/content/provenance, immutable memberships and their provenance, edges/provenance, source references, integrity issues and exact snapshot hash. Resolves evidence through the live durable artifact/source verifiers and returns an explicit signed-attestation request. Hashes prove integrity, not claim truth; without a trusted verifier signature the graph is not eligible for planning. | `goal_id` |
-| [`adaptive_goal_trust_configuration_status`](#adaptive_goal_trust_configuration_status) | Read-only for workflow, graph and approval state; records an observed valid trust configuration version/fingerprint in a separate append-only local ledger to prevent downgrade. Reports config version/fingerprint, public-root fingerprints, validity/revocation and administrator change metadata without exposing PEMs. Flags shared provider IDs or roots across source-verifier and reviewer domains. Configure through the host-supported administrator environment mechanism, never through MCP arguments. | None |
+| [`adaptive_goal_knowledge_snapshot_get`](#adaptive_goal_knowledge_snapshot_get) | Read a complete canonical Goal/Idea Graph snapshot: current node revisions/content/provenance, immutable memberships and their provenance, edges/provenance, source references, integrity issues and exact snapshot hash. Resolves evidence through durable artifact/source verifiers and returns a signed-attestation request. This operation does not write the trust ledger. If the current trust configuration version/fingerprint has not been explicitly observed, currentVerification remains blocked with KNOWLEDGE_TRUST_CONFIG_NOT_OBSERVED; use the explicitly state-changing trust-configuration status operation to record that observation. Hashes prove integrity, not claim truth; without a trusted verifier signature the graph is not eligible for planning. | `goal_id` |
+| [`adaptive_goal_trust_configuration_status`](#adaptive_goal_trust_configuration_status) | Explicit, state-changing host-trust observation: appends effective config versions/fingerprints to the anti-rollback ledger for Goal/Idea verification, reviewer identity, approval policy, maker identity and execution approval. It does not mutate workflows, approvals, plans or tasks. Reports trust roots/fingerprints, validity/revocation and administrator metadata without exposing PEMs; fails closed if any required approval domain is missing or shares provider IDs or mathematical roots with another domain. It does not provision trust or grant execution authority. | None |
 | [`adaptive_goal_knowledge_snapshot_attest`](#adaptive_goal_knowledge_snapshot_attest) | Persist an externally signed Ed25519 verification for the exact current Goal/Idea Graph snapshot. Requires the configured independent verifier provider/public trust root, current node/revision/edge/membership hashes, and freshly resolved successful producer/result/attempt/completion lineage. Claim truth and evidence independence are accepted only from the trusted signature; payloads from callers cannot self-promote. Uses a transactional append-only ledger with nonce/idempotency checks; never approves or dispatches. | `attestation` |
 | [`adaptive_goal_knowledge_graph_search`](#adaptive_goal_knowledge_graph_search) | Run bounded search using only a freshly revalidated, trusted-attested persisted Goal/Idea Graph, not a caller-supplied graph. Requires the exact snapshot hash and persisted start/goal member IDs. Returns candidates and Plan Graph drafts bound to the current verifier attestation; any changed revision, membership, edge, source bytes, artifact lineage, nonce, signature, or expiry blocks planning. | `goal_id`, `start_node_id`, `goal_node_id`, `expected_snapshot_hash` |
 | [`adaptive_goal_knowledge_node_get`](#adaptive_goal_knowledge_node_get) | Read the current or a specific immutable Idea Graph node revision, including its stable identity, cross-goal memberships, evidence refs, content hash, provenance hash, and unverified status. | `node_id` |
@@ -46,6 +45,7 @@ This page is generated from the shipped stdio MCP server by the documentation ge
 | [`adaptive_goal_execution_graph_proposal_get`](#adaptive_goal_execution_graph_proposal_get) | Read back and revalidate a stored Execution Graph proposal against its source Plan Graph proposal and current durable artifact evidence. Reports stale hashes, changed workflow contracts or invalidated evidence as stable blockers. Read-only; never pins plans, approves, dispatches or executes. | `job_id` |
 | [`adaptive_goal_execution_plan_candidate_create`](#adaptive_goal_execution_plan_candidate_create) | Validate and persist a review-only execution-plan candidate using the existing workflow compiler, validateExecutionPlan and exact preflight plan hash. The versioned semantic policy checks each role capability, canonical operation, target binding, artifact output type, exact role completion criteria and canonical description; arbitrary/free-form instructions and unresolved targets are rejected. Reviewer identity is not inferred from caller-supplied reviewerId: the candidate remains blocked until a trusted Ed25519 identity provider attestation is durably recorded and verified against the configured public trust root and exact candidate/semantic/role-contract/immutable-plan fingerprints. Candidate creation writes only a bounded candidate event; it never approves, pins workflow_plans, creates tasks, dispatches, grants execution authorization or generates commands/arguments. | `job_id`, `reviewed_action_intents` |
 | [`adaptive_goal_execution_plan_candidate_get`](#adaptive_goal_execution_plan_candidate_get) | Read-only rebuild and revalidation of the persisted review-only candidate, exact action-intent semantics, typed input/evidence/ancestor provenance, role/artifact contracts, current source evidence, compiler and plan hashes. Reports tampering/staleness and trust-root-verified reviewer status. Without a valid, unexpired, replay-free identity-provider attestation bound to the exact candidate and immutable-plan fingerprints, the reviewer identity blocker remains and approval/dispatch/task preparation are denied. This tool does not refresh snapshots, approve, pin plans, create tasks or dispatch. | `job_id` |
+| [`adaptive_goal_reviewer_attestation_ingest`](#adaptive_goal_reviewer_attestation_ingest) | State-changing, evidence-only ingestion of an externally signed reviewer identity attestation. Rebuilds the current candidate and verifies the independent Goal/Idea snapshot, configured reviewer trust root, exact candidate/plan/action-intent hashes, scope, expiry, nonce/replay protection and canonical atomic readback. It never issues a signature, accepts caller identity claims as proof, grants workflow approval, pins a plan, creates tasks, dispatches, or authorizes execution. The external provider must authenticate the reviewer and authorize the requested scope before signing; test-local keys are never production trust. | `job_id`, `attestation` |
 | [`adaptive_goal_sandbox_action_execute`](#adaptive_goal_sandbox_action_execute) | Experimental/test-only executor for one hard-coded, no-network fixture action. Requires a current trust-root-verified reviewer attestation, explicit workflow approval, exact immutable compiler plan, dispatched active workflow, completed task prerequisites, and current typed artifact/result/completion lineage. Executes no caller-supplied command, script, or path. Refuses production mode, missing/tampered evidence, unsupported action, unresolved prior claims, and replay; repeated requests can only read the exact already-verified receipt without re-executing. This tool never grants approval or production execution authority. | `job_id`, `task_id` |
 | [`workflow_catalog`](#workflow_catalog) | Read-only discovery of supported local workflow templates, exact workflow IDs/versions and intended execution modes. Use first when choosing a template; then workflow_create and workflow_preflight. This does not create, approve, or run a workflow. | None |
 | [`workflow_recommend_resources`](#workflow_recommend_resources) | Proactive, read-only discovery for a task goal. Use before creating a substantial workflow even when the user did not name roles, policies, skills, or reusable workflows. Ranks saved custom workflows, custom roles/attached skills, saved policies, and built-in role hints using deterministic Vietnamese/English lexical matching. Prefer compatible high-confidence existing resources over near-duplicates, but inspect contracts and policy scope; lexical scores are hints, not semantic proof. Does not attach policies, bind roles, mutate storage, approve, or execute. | `task` |
@@ -60,8 +60,8 @@ This page is generated from the shipped stdio MCP server by the documentation ge
 | [`workflow_list`](#workflow_list) | Read-only list of locally stored active workflows. Use to find a job_id when it is not known, then inspect that run with workflow_get; this does not advance or mutate any workflow. | None |
 | [`workflow_get`](#workflow_get) | Read-only inspection of local workflow state, immutable plan/hash, task states, artifact metadata and phase. Use before approval or when diagnosing a specific job; it does not expose full result bodies or mutate state. | `job_id` |
 | [`workflow_liveness_diagnostics`](#workflow_liveness_diagnostics) | Read-only diagnosis of active-job liveness using durable job/task/event timestamps and task-lease heartbeats/expiry. Reports stale candidates and safe inspection hints; old activity is not proof a worker is dead. Never changes job/task state, expires or reacquires leases, retries, dispatches, or grants permission. | None |
-| [`workflow_preflight`](#workflow_preflight) | Read-only feasibility check of a proposal or approved immutable plan. Compiles in memory without creating/changing a plan, checks workflow/version compatibility, role capability/permission contracts, scoped workspace-write roots, and plan/hash consistency. Run before workflow_approve; approval independently repeats the gate. A ready result is not approval or execution. | `job_id` |
-| [`workflow_approve`](#workflow_approve) | State-changing approval: use only after workflow_preflight is ready, the proposal and proposed immutable plan are inspected, and explicit human approval is obtained. Re-runs feasibility checks, then pins the plan; do not edit it in place afterward. Approval is not dispatch—call workflow_dispatch next. | `job_id`, `confirmation` |
+| [`workflow_preflight`](#workflow_preflight) | Read-only feasibility check of a proposal or approved immutable plan. For an AGG Execution Graph candidate, also pass approval_evidence containing the host-authority-signed current policy, authenticated maker attestation and checker votes. Verifies policy/quorum/action/plan/evidence bindings without persisting approval or advancing workflow state. A ready result is not approval or execution. | `job_id` |
+| [`workflow_approve`](#workflow_approve) | State-changing approval: only after inspecting the proposal and proposed immutable plan, obtaining a ready feasibility preflight, and explicitly authorizing the exact action. For an AGG Execution Graph candidate, approval_evidence is mandatory: externally signed versioned policy, independently authenticated maker/requester attestation, and distinct checker decisions satisfying the policy-defined quorum, roles, trust-domain constraints and validity windows. All signed evidence binds the exact candidate, immutable plan, action intent, permission scope and evidence hashes. Runtime re-verifies it under the approval writer lock and records the immutable binding; dispatch and action execution independently reverify current policy/trust/expiry/revocation and the exact binding. Reviewer identity or confirmation text alone is not approval. | `job_id`, `confirmation` |
 | [`workflow_dispatch`](#workflow_dispatch) | State-changing dispatch: use only for a proposal already approved with a current immutable plan. Starts the local workflow and creates its durable coordinator task; no cloud/remote worker is contacted. Then prepare tasks or use workflow_coordinator_step to advance. | `job_id` |
 | [`workflow_prepare_tasks`](#workflow_prepare_tasks) | State-changing task preparation/recovery: use after workflow_dispatch when the immutable plan's child tasks need creating or reconciling. Safe to repeat for the same approved plan; does not execute tasks. Next call workflow_next_task or workflow_coordinator_step. | `job_id` |
 | [`workflow_next_task`](#workflow_next_task) | Use after task preparation and after each recorded completion to obtain the next dependency-ready task, exact role contract and predecessor evidence. Deterministic tasks must use the approved task_execute_local/execute_batch path; specialist reasoning tasks use workflow_complete_task. If no task is ready or a gate blocks progress, inspect/diagnose rather than inventing a result. | `job_id` |
@@ -2684,7 +2684,7 @@ Search the shared append-only Idea Graph across goals, including goal/hypothesis
 
 ### `adaptive_goal_knowledge_snapshot_get`
 
-Read a complete canonical Goal/Idea Graph snapshot: current node revisions/content/provenance, immutable memberships and their provenance, edges/provenance, source references, integrity issues and exact snapshot hash. Resolves evidence through the live durable artifact/source verifiers and returns an explicit signed-attestation request. Hashes prove integrity, not claim truth; without a trusted verifier signature the graph is not eligible for planning.
+Read a complete canonical Goal/Idea Graph snapshot: current node revisions/content/provenance, immutable memberships and their provenance, edges/provenance, source references, integrity issues and exact snapshot hash. Resolves evidence through durable artifact/source verifiers and returns a signed-attestation request. This operation does not write the trust ledger. If the current trust configuration version/fingerprint has not been explicitly observed, currentVerification remains blocked with KNOWLEDGE_TRUST_CONFIG_NOT_OBSERVED; use the explicitly state-changing trust-configuration status operation to record that observation. Hashes prove integrity, not claim truth; without a trusted verifier signature the graph is not eligible for planning.
 
 | Input | Type | Required | Description | Constraints |
 |---|---|---|---|---|
@@ -2714,7 +2714,7 @@ Read a complete canonical Goal/Idea Graph snapshot: current node revisions/conte
 
 ### `adaptive_goal_trust_configuration_status`
 
-Read-only for workflow, graph and approval state; records an observed valid trust configuration version/fingerprint in a separate append-only local ledger to prevent downgrade. Reports config version/fingerprint, public-root fingerprints, validity/revocation and administrator change metadata without exposing PEMs. Flags shared provider IDs or roots across source-verifier and reviewer domains. Configure through the host-supported administrator environment mechanism, never through MCP arguments.
+Explicit, state-changing host-trust observation: appends effective config versions/fingerprints to the anti-rollback ledger for Goal/Idea verification, reviewer identity, approval policy, maker identity and execution approval. It does not mutate workflows, approvals, plans or tasks. Reports trust roots/fingerprints, validity/revocation and administrator metadata without exposing PEMs; fails closed if any required approval domain is missing or shares provider IDs or mathematical roots with another domain. It does not provision trust or grant execution authority.
 
 This tool accepts no named input properties.
 
@@ -6231,6 +6231,183 @@ Read-only rebuild and revalidation of the persisted review-only candidate, exact
   },
   "required": [
     "job_id"
+  ]
+}
+```
+
+</details>
+
+### `adaptive_goal_reviewer_attestation_ingest`
+
+State-changing, evidence-only ingestion of an externally signed reviewer identity attestation. Rebuilds the current candidate and verifies the independent Goal/Idea snapshot, configured reviewer trust root, exact candidate/plan/action-intent hashes, scope, expiry, nonce/replay protection and canonical atomic readback. It never issues a signature, accepts caller identity claims as proof, grants workflow approval, pins a plan, creates tasks, dispatches, or authorizes execution. The external provider must authenticate the reviewer and authorize the requested scope before signing; test-local keys are never production trust.
+
+| Input | Type | Required | Description | Constraints |
+|---|---|---|---|---|
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `attestation` | `object` | Yes | — | no additional properties; required fields: `schema_version`, `kind`, `provider_id`, `trust_root_sha256`, `nonce`, `issued_at`, `expires_at`, `reviewer_subject`, `scope`, `decision`, `candidate`, `signature_algorithm`, `signature` |
+
+<details>
+<summary>Full input schema (JSON)</summary>
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "adaptive_goal_verified_reviewer_attestation"
+          ]
+        },
+        "provider_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "trust_root_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "nonce": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "reviewer_subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "agg.action_intent.review"
+          ]
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "reviewed_for_candidate_only"
+          ]
+        },
+        "candidate": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "wrapper_job_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "candidate_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "candidate_fingerprint": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "candidate_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "immutable_plan_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "reviewed_action_intent_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "reviewed_task_input_contract_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "semantic_policy_version": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
+            },
+            "semantic_verification_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "role_contract_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "wrapper_job_id",
+            "candidate_id",
+            "candidate_fingerprint",
+            "candidate_hash",
+            "immutable_plan_hash",
+            "reviewed_action_intent_hash",
+            "reviewed_task_input_contract_hash",
+            "semantic_policy_version",
+            "semantic_verification_hash",
+            "role_contract_hash"
+          ]
+        },
+        "signature_algorithm": {
+          "type": "string",
+          "enum": [
+            "Ed25519"
+          ]
+        },
+        "signature": {
+          "type": "string",
+          "minLength": 80,
+          "maxLength": 512,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "provider_id",
+        "trust_root_sha256",
+        "nonce",
+        "issued_at",
+        "expires_at",
+        "reviewer_subject",
+        "scope",
+        "decision",
+        "candidate",
+        "signature_algorithm",
+        "signature"
+      ]
+    }
+  },
+  "required": [
+    "job_id",
+    "attestation"
   ]
 }
 ```
@@ -10764,11 +10941,12 @@ Read-only diagnosis of active-job liveness using durable job/task/event timestam
 
 ### `workflow_preflight`
 
-Read-only feasibility check of a proposal or approved immutable plan. Compiles in memory without creating/changing a plan, checks workflow/version compatibility, role capability/permission contracts, scoped workspace-write roots, and plan/hash consistency. Run before workflow_approve; approval independently repeats the gate. A ready result is not approval or execution.
+Read-only feasibility check of a proposal or approved immutable plan. For an AGG Execution Graph candidate, also pass approval_evidence containing the host-authority-signed current policy, authenticated maker attestation and checker votes. Verifies policy/quorum/action/plan/evidence bindings without persisting approval or advancing workflow state. A ready result is not approval or execution.
 
 | Input | Type | Required | Description | Constraints |
 |---|---|---|---|---|
 | `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
+| `approval_evidence` | `object` | No | — | no additional properties; required fields: `schema_version`, `policy`, `maker_attestation`, `decisions` |
 
 <details>
 <summary>Full input schema (JSON)</summary>
@@ -10782,6 +10960,558 @@ Read-only feasibility check of a proposal or approved immutable plan. Compiles i
       "type": "string",
       "minLength": 1,
       "maxLength": 200
+    },
+    "approval_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
+            },
+            "provider_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "trust_root_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "nonce": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "issued_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "signature_algorithm": {
+              "type": "string",
+              "enum": [
+                "Ed25519"
+              ]
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 80,
+              "maxLength": 512,
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "adaptive_goal_execution_approval_policy"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "agg.approval.policy"
+              ]
+            },
+            "policy_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "policy_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required_approval_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "required_distinct_trust_domains": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "required_roles": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            },
+            "maker_checker_separation": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "reject_veto": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "max_vote_age_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "reviewer_registry": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "trust_domain": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "trust_root_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "subject",
+                  "role",
+                  "trust_domain",
+                  "trust_root_sha256"
+                ]
+              }
+            }
+          },
+          "required": [
+            "schema_version",
+            "kind",
+            "provider_id",
+            "trust_root_sha256",
+            "nonce",
+            "issued_at",
+            "expires_at",
+            "scope",
+            "policy_id",
+            "policy_version",
+            "required_approval_count",
+            "required_distinct_trust_domains",
+            "required_roles",
+            "maker_checker_separation",
+            "reject_veto",
+            "max_vote_age_seconds",
+            "reviewer_registry",
+            "signature_algorithm",
+            "signature"
+          ]
+        },
+        "maker_attestation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
+            },
+            "provider_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "trust_root_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "nonce": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "issued_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "signature_algorithm": {
+              "type": "string",
+              "enum": [
+                "Ed25519"
+              ]
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 80,
+              "maxLength": 512,
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "adaptive_goal_action_intent_maker_attestation"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "agg.action_intent.propose"
+              ]
+            },
+            "maker_subject": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "policy_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "policy_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "policy_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "binding": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "integer",
+                  "enum": [
+                    1
+                  ]
+                },
+                "wrapper_job_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "proposal_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "candidate_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "candidate_fingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "candidate_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "immutable_plan_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "source_snapshot_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "source_evidence_manifest_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "reviewed_action_intent_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "reviewed_task_input_contract_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "evidence_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "source_evidence_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "permission_scope_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "schema_version",
+                "wrapper_job_id",
+                "proposal_hash",
+                "candidate_id",
+                "candidate_fingerprint",
+                "candidate_hash",
+                "immutable_plan_hash",
+                "source_snapshot_hash",
+                "source_evidence_manifest_hash",
+                "reviewed_action_intent_hash",
+                "reviewed_task_input_contract_hash",
+                "evidence_hash",
+                "source_evidence_hash",
+                "permission_scope_hash"
+              ]
+            }
+          },
+          "required": [
+            "schema_version",
+            "kind",
+            "provider_id",
+            "trust_root_sha256",
+            "nonce",
+            "issued_at",
+            "expires_at",
+            "scope",
+            "maker_subject",
+            "policy_id",
+            "policy_version",
+            "policy_hash",
+            "binding",
+            "signature_algorithm",
+            "signature"
+          ]
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "schema_version": {
+                "type": "integer",
+                "enum": [
+                  1
+                ]
+              },
+              "provider_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "trust_root_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "nonce": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "issued_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "signature_algorithm": {
+                "type": "string",
+                "enum": [
+                  "Ed25519"
+                ]
+              },
+              "signature": {
+                "type": "string",
+                "minLength": 80,
+                "maxLength": 512,
+                "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "adaptive_goal_execution_approval_decision"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "agg.execution.approve"
+                ]
+              },
+              "policy_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "policy_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "policy_hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "reviewer_subject": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "reviewer_role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "trust_domain": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "approve",
+                  "reject"
+                ]
+              },
+              "binding": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "schema_version": {
+                    "type": "integer",
+                    "enum": [
+                      1
+                    ]
+                  },
+                  "wrapper_job_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "proposal_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "candidate_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "candidate_fingerprint": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "candidate_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "immutable_plan_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "source_snapshot_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "source_evidence_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "reviewed_action_intent_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "reviewed_task_input_contract_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "evidence_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "source_evidence_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "permission_scope_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "wrapper_job_id",
+                  "proposal_hash",
+                  "candidate_id",
+                  "candidate_fingerprint",
+                  "candidate_hash",
+                  "immutable_plan_hash",
+                  "source_snapshot_hash",
+                  "source_evidence_manifest_hash",
+                  "reviewed_action_intent_hash",
+                  "reviewed_task_input_contract_hash",
+                  "evidence_hash",
+                  "source_evidence_hash",
+                  "permission_scope_hash"
+                ]
+              }
+            },
+            "required": [
+              "schema_version",
+              "kind",
+              "provider_id",
+              "trust_root_sha256",
+              "nonce",
+              "issued_at",
+              "expires_at",
+              "scope",
+              "policy_id",
+              "policy_version",
+              "policy_hash",
+              "reviewer_subject",
+              "reviewer_role",
+              "trust_domain",
+              "decision",
+              "binding",
+              "signature_algorithm",
+              "signature"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy",
+        "maker_attestation",
+        "decisions"
+      ]
     }
   },
   "required": [
@@ -10794,12 +11524,13 @@ Read-only feasibility check of a proposal or approved immutable plan. Compiles i
 
 ### `workflow_approve`
 
-State-changing approval: use only after workflow_preflight is ready, the proposal and proposed immutable plan are inspected, and explicit human approval is obtained. Re-runs feasibility checks, then pins the plan; do not edit it in place afterward. Approval is not dispatch—call workflow_dispatch next.
+State-changing approval: only after inspecting the proposal and proposed immutable plan, obtaining a ready feasibility preflight, and explicitly authorizing the exact action. For an AGG Execution Graph candidate, approval_evidence is mandatory: externally signed versioned policy, independently authenticated maker/requester attestation, and distinct checker decisions satisfying the policy-defined quorum, roles, trust-domain constraints and validity windows. All signed evidence binds the exact candidate, immutable plan, action intent, permission scope and evidence hashes. Runtime re-verifies it under the approval writer lock and records the immutable binding; dispatch and action execution independently reverify current policy/trust/expiry/revocation and the exact binding. Reviewer identity or confirmation text alone is not approval.
 
 | Input | Type | Required | Description | Constraints |
 |---|---|---|---|---|
-| `job_id` | `string` | Yes | — | minLength: `1` |
+| `job_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
 | `confirmation` | `string` | Yes | — | minLength: `3`; maxLength: `2000` |
+| `approval_evidence` | `object` | No | — | no additional properties; required fields: `schema_version`, `policy`, `maker_attestation`, `decisions` |
 
 <details>
 <summary>Full input schema (JSON)</summary>
@@ -10807,22 +11538,575 @@ State-changing approval: use only after workflow_preflight is ready, the proposa
 ```json
 {
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "job_id": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 200
     },
     "confirmation": {
       "type": "string",
       "minLength": 3,
       "maxLength": 2000
+    },
+    "approval_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            1
+          ]
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
+            },
+            "provider_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "trust_root_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "nonce": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "issued_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "signature_algorithm": {
+              "type": "string",
+              "enum": [
+                "Ed25519"
+              ]
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 80,
+              "maxLength": 512,
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "adaptive_goal_execution_approval_policy"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "agg.approval.policy"
+              ]
+            },
+            "policy_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "policy_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "required_approval_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "required_distinct_trust_domains": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            },
+            "required_roles": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            },
+            "maker_checker_separation": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "reject_veto": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            },
+            "max_vote_age_seconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "reviewer_registry": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "trust_domain": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "trust_root_sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "subject",
+                  "role",
+                  "trust_domain",
+                  "trust_root_sha256"
+                ]
+              }
+            }
+          },
+          "required": [
+            "schema_version",
+            "kind",
+            "provider_id",
+            "trust_root_sha256",
+            "nonce",
+            "issued_at",
+            "expires_at",
+            "scope",
+            "policy_id",
+            "policy_version",
+            "required_approval_count",
+            "required_distinct_trust_domains",
+            "required_roles",
+            "maker_checker_separation",
+            "reject_veto",
+            "max_vote_age_seconds",
+            "reviewer_registry",
+            "signature_algorithm",
+            "signature"
+          ]
+        },
+        "maker_attestation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema_version": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
+            },
+            "provider_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "trust_root_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "nonce": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "issued_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "expires_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "signature_algorithm": {
+              "type": "string",
+              "enum": [
+                "Ed25519"
+              ]
+            },
+            "signature": {
+              "type": "string",
+              "minLength": 80,
+              "maxLength": 512,
+              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "adaptive_goal_action_intent_maker_attestation"
+              ]
+            },
+            "scope": {
+              "type": "string",
+              "enum": [
+                "agg.action_intent.propose"
+              ]
+            },
+            "maker_subject": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "policy_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "policy_version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "policy_hash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "binding": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "schema_version": {
+                  "type": "integer",
+                  "enum": [
+                    1
+                  ]
+                },
+                "wrapper_job_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "proposal_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "candidate_id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "candidate_fingerprint": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "candidate_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "immutable_plan_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "source_snapshot_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "source_evidence_manifest_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "reviewed_action_intent_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "reviewed_task_input_contract_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "evidence_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "source_evidence_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                "permission_scope_hash": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "schema_version",
+                "wrapper_job_id",
+                "proposal_hash",
+                "candidate_id",
+                "candidate_fingerprint",
+                "candidate_hash",
+                "immutable_plan_hash",
+                "source_snapshot_hash",
+                "source_evidence_manifest_hash",
+                "reviewed_action_intent_hash",
+                "reviewed_task_input_contract_hash",
+                "evidence_hash",
+                "source_evidence_hash",
+                "permission_scope_hash"
+              ]
+            }
+          },
+          "required": [
+            "schema_version",
+            "kind",
+            "provider_id",
+            "trust_root_sha256",
+            "nonce",
+            "issued_at",
+            "expires_at",
+            "scope",
+            "maker_subject",
+            "policy_id",
+            "policy_version",
+            "policy_hash",
+            "binding",
+            "signature_algorithm",
+            "signature"
+          ]
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "schema_version": {
+                "type": "integer",
+                "enum": [
+                  1
+                ]
+              },
+              "provider_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "trust_root_sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "nonce": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "issued_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "signature_algorithm": {
+                "type": "string",
+                "enum": [
+                  "Ed25519"
+                ]
+              },
+              "signature": {
+                "type": "string",
+                "minLength": 80,
+                "maxLength": 512,
+                "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "adaptive_goal_execution_approval_decision"
+                ]
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "agg.execution.approve"
+                ]
+              },
+              "policy_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "policy_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "policy_hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "reviewer_subject": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "reviewer_role": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "trust_domain": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "approve",
+                  "reject"
+                ]
+              },
+              "binding": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "schema_version": {
+                    "type": "integer",
+                    "enum": [
+                      1
+                    ]
+                  },
+                  "wrapper_job_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "proposal_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "candidate_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "candidate_fingerprint": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "candidate_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "immutable_plan_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "source_snapshot_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "source_evidence_manifest_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "reviewed_action_intent_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "reviewed_task_input_contract_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "evidence_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "source_evidence_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "permission_scope_hash": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "wrapper_job_id",
+                  "proposal_hash",
+                  "candidate_id",
+                  "candidate_fingerprint",
+                  "candidate_hash",
+                  "immutable_plan_hash",
+                  "source_snapshot_hash",
+                  "source_evidence_manifest_hash",
+                  "reviewed_action_intent_hash",
+                  "reviewed_task_input_contract_hash",
+                  "evidence_hash",
+                  "source_evidence_hash",
+                  "permission_scope_hash"
+                ]
+              }
+            },
+            "required": [
+              "schema_version",
+              "kind",
+              "provider_id",
+              "trust_root_sha256",
+              "nonce",
+              "issued_at",
+              "expires_at",
+              "scope",
+              "policy_id",
+              "policy_version",
+              "policy_hash",
+              "reviewer_subject",
+              "reviewer_role",
+              "trust_domain",
+              "decision",
+              "binding",
+              "signature_algorithm",
+              "signature"
+            ]
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "policy",
+        "maker_attestation",
+        "decisions"
+      ]
     }
   },
   "required": [
     "job_id",
     "confirmation"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 

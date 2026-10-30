@@ -76,6 +76,10 @@ const queue = [
   // Deterministic semantic policy for typed AGG action intents and provider-signed reviewer identity gates.
   'src/runtime/adaptive-goal-action-intent-policy.js',
   'src/runtime/adaptive-goal-reviewer-identity.js',
+  // Versioned signed policy/maker/checker approval verifier is selected through
+  // the server's runtimePrefix dynamic import; include it explicitly so the
+  // archive does not rely on the source-tree path at approval/dispatch time.
+  'src/runtime/adaptive-goal-approval-subsystem.js',
   'src/runtime/execution-manager.js',
   // The packaged Phase-5 recovery regression loads this module via a fixture
   // forwarder; include it in the staged test runtime closure explicitly.

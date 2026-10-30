@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { isAuthenticatedAdaptiveGoalPlanDraft } from './adaptive-goal-plan-adapter.js';
+import { ADAPTIVE_GOAL_PLAN_DRAFT_SCHEMA_VERSION, isAuthenticatedAdaptiveGoalPlanDraft } from './adaptive-goal-plan-adapter.js';
 
-export const ADAPTIVE_GOAL_EXECUTION_GRAPH_PROPOSAL_SCHEMA_VERSION = 1;
+export const ADAPTIVE_GOAL_EXECUTION_GRAPH_PROPOSAL_SCHEMA_VERSION = 2;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const STEP_ID = /^agg-step-[a-f0-9]{24}$/;
@@ -437,6 +437,12 @@ export function buildAdaptiveGoalExecutionGraphProposal({ sourcePlanProposal, re
       candidatePlanId,
       graphHash,
       draftHash,
+      // Carry the exact source Plan Graph draft so a serialized Execution Graph
+      // verifier binds each sourceNodeId to the original sourceStepId, rather
+      // than trusting a self-consistent but fully re-hashable ID rewrite.
+      // Durable consumers must still rebuild the draft from current trusted
+      // source evidence before using this proposal.
+      planGraphDraftSnapshot: JSON.parse(stableJson(draft)),
       verification: sourcePlanProposal.sourceVerification?.status === 'verified'
         ? sourcePlanProposal.sourceVerification
         : { status: 'unverified', verified: false }
@@ -475,6 +481,7 @@ export function buildAdaptiveGoalExecutionGraphProposal({ sourcePlanProposal, re
 }
 
 export function verifyAdaptiveGoalExecutionGraphProposalHash(proposal) {
+  try {
   try { assertStrictJsonValue(proposal); } catch { return false; }
   if (!isRecord(proposal) || typeof proposal.proposalHash !== 'string' || !SHA256.test(proposal.proposalHash) ||
       proposal.schemaVersion !== ADAPTIVE_GOAL_EXECUTION_GRAPH_PROPOSAL_SCHEMA_VERSION ||
@@ -505,6 +512,72 @@ export function verifyAdaptiveGoalExecutionGraphProposalHash(proposal) {
       h.sourceEvidenceHash !== hash(proposal.sourceEvidenceSnapshot) ||
       h.sourceVerificationHash !== hash(proposal.source.verification) ||
       h.workflowTemplatePlanHash !== proposal.workflowTemplate.planHash) return false;
+
+  // The serialized source draft fixes the identity mapping from each Plan
+  // Graph step to its original Goal/Idea node. Without this body, an attacker
+  // can rewrite sourceNodeId, derive a matching sourceStepId, update the node
+  // and binding IDs, and recompute every exposed proposal hash. This is a
+  // structural check only; durable callers still independently rebuild and
+  // authenticate the current source Plan Graph before approval/dispatch.
+  const sourceDraft = proposal.source.planGraphDraftSnapshot;
+  if (!isRecord(sourceDraft) || sourceDraft.schemaVersion !== ADAPTIVE_GOAL_PLAN_DRAFT_SCHEMA_VERSION ||
+      sourceDraft.kind !== 'adaptive_goal_plan_graph_draft' || sourceDraft.status !== 'review_required' ||
+      sourceDraft.draftHash !== proposal.source.draftHash || !SHA256.test(sourceDraft.draftHash || '') ||
+      !isRecord(sourceDraft.source) || sourceDraft.source.graphHash !== proposal.source.graphHash ||
+      sourceDraft.source.candidatePlanId !== proposal.source.candidatePlanId ||
+      sourceDraft.source.candidateStatus !== 'proposed' || !Array.isArray(sourceDraft.steps) ||
+      sourceDraft.steps.length !== proposal.nodes.length ||
+      stableJson(sourceDraft.source.verification) !== stableJson(proposal.source.verification)) return false;
+  const { draftHash: sourceDraftHash, ...unsignedSourceDraft } = sourceDraft;
+  if (hash(unsignedSourceDraft) !== sourceDraftHash) return false;
+  const sourceDraftSteps = new Map();
+  for (const step of sourceDraft.steps) {
+    if (!isRecord(step) || typeof step.id !== 'string' || !STEP_ID.test(step.id) || sourceDraftSteps.has(step.id) ||
+        typeof step.sourceNodeId !== 'string' || !step.sourceNodeId || step.sourceNodeId.trim() !== step.sourceNodeId ||
+        step.id !== `agg-step-${hash(`${proposal.source.graphHash}\n${proposal.source.candidatePlanId}\n${step.sourceNodeId}`).slice(0, 24)}` ||
+        typeof step.kind !== 'string' || !step.kind || typeof step.title !== 'string' || !step.title ||
+        !Array.isArray(step.dependencies) || step.dependencies.some(id => typeof id !== 'string' || !STEP_ID.test(id))) return false;
+    sourceDraftSteps.set(step.id, step);
+  }
+  for (const [index, step] of sourceDraft.steps.entries()) {
+    if (new Set(step.dependencies).size !== step.dependencies.length ||
+        step.dependencies.some(id => !sourceDraftSteps.has(id) || sourceDraft.steps.findIndex(candidate => candidate.id === id) >= index)) return false;
+  }
+
+  // The binding table is the identity bridge between Plan Graph steps and
+  // Execution Graph role contracts. Recomputed unkeyed hashes alone cannot
+  // establish that bridge: require a one-to-one mapping and compare every
+  // semantic binding field against the corresponding node contract.
+  if (proposal.bindings.length !== proposal.nodes.length) return false;
+  const bindingByStep = new Map();
+  const boundTaskIds = new Set();
+  for (const binding of proposal.bindings) {
+    if (!isRecord(binding) || typeof binding.stepId !== 'string' || !STEP_ID.test(binding.stepId) ||
+        typeof binding.taskId !== 'string' || !TASK_ID.test(binding.taskId) ||
+        typeof binding.role !== 'string' || !binding.role ||
+        typeof binding.capability !== 'string' || !binding.capability ||
+        typeof binding.roleContractId !== 'string' || !binding.roleContractId ||
+        !Number.isSafeInteger(binding.roleContractVersion) || binding.roleContractVersion < 1 ||
+        bindingByStep.has(binding.stepId) || boundTaskIds.has(binding.taskId)) return false;
+    bindingByStep.set(binding.stepId, binding);
+    boundTaskIds.add(binding.taskId);
+  }
+  if (proposal.nodes.some(node => !isRecord(node) || typeof node.sourceStepId !== 'string' ||
+      !STEP_ID.test(node.sourceStepId) || typeof node.id !== 'string' ||
+      node.id !== `agg-eg-step-${hash(`${proposal.source.draftHash}\u0000${node.sourceStepId}`).slice(0, 24)}`)) return false;
+  for (const node of proposal.nodes) {
+    // Plan Graph step IDs are derived from the exact source graph hash,
+    // selected candidate identity, and Goal/Idea node ID. Recompute that
+    // mapping here so changing sourceNodeId in a serialized Execution Graph
+    // cannot pass merely by re-hashing the outer proposal envelope.
+    if (typeof node.sourceNodeId !== 'string' || !node.sourceNodeId || node.sourceNodeId.trim() !== node.sourceNodeId ||
+        node.sourceStepId !== `agg-step-${hash(`${proposal.source.graphHash}\n${proposal.source.candidatePlanId}\n${node.sourceNodeId}`).slice(0, 24)}`) return false;
+    const sourceStep = sourceDraftSteps.get(node.sourceStepId);
+    if (!sourceStep || node.sourceNodeId !== sourceStep.sourceNodeId || node.kind !== sourceStep.kind || node.title !== sourceStep.title) return false;
+    const binding = bindingByStep.get(node.sourceStepId);
+    if (!binding || binding.role !== node.roleContract?.role || binding.capability !== node.roleContract?.capability ||
+        binding.roleContractId !== node.roleContract?.id || binding.roleContractVersion !== node.roleContract?.version) return false;
+  }
 
   const contractSnapshots = proposal.nodes.map(node => ({
     stepId: node.sourceStepId,
@@ -563,6 +636,8 @@ export function verifyAdaptiveGoalExecutionGraphProposalHash(proposal) {
     nodeIds.add(node.id);
     nodeBySourceStep.set(node.sourceStepId, node);
   }
+  if ([...bindingByStep.keys()].some(stepId => !nodeBySourceStep.has(stepId))) return false;
+  if (sourceDraftSteps.size !== nodeBySourceStep.size || [...sourceDraftSteps.keys()].some(stepId => !nodeBySourceStep.has(stepId))) return false;
   const expectedEdges = [];
   const nodeIdsByDependency = new Map();
   for (const node of proposal.nodes) {
@@ -570,6 +645,12 @@ export function verifyAdaptiveGoalExecutionGraphProposalHash(proposal) {
         node.dependencies.some(id => typeof id !== 'string' || !nodeIds.has(id) || id === node.id)) return false;
     nodeIdsByDependency.set(node.id, node.dependencies);
     for (const dependencyId of node.dependencies) expectedEdges.push({ from: dependencyId, to: node.id, type: 'depends_on' });
+  }
+  for (const node of proposal.nodes) {
+    const sourceStep = sourceDraftSteps.get(node.sourceStepId);
+    const expectedDependencies = sourceStep.dependencies.map(stepId =>
+      proposal.nodes.find(candidate => candidate.sourceStepId === stepId)?.id);
+    if (expectedDependencies.some(id => typeof id !== 'string') || stableJson(expectedDependencies) !== stableJson(node.dependencies)) return false;
   }
   // The edge list and dependency lists can agree perfectly while both encode
   // a cycle. Verify the serialized Execution Graph is a DAG independently of
@@ -602,4 +683,10 @@ export function verifyAdaptiveGoalExecutionGraphProposalHash(proposal) {
   if (stableJson(expectedEvidence) !== stableJson([...proposal.evidenceSnapshot].sort((a, b) => a.reference.localeCompare(b.reference)))) return false;
 
   return true;
+  } catch {
+    // This function validates untrusted serialized data. Malformed nested
+    // shapes must fail closed as `false`, never escape as an exception from a
+    // readback verifier.
+    return false;
+  }
 }

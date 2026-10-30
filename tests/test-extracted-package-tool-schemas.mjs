@@ -24,10 +24,32 @@ try {
   assert.equal(unpack.status, 0, `candidate extraction failed: ${unpack.stderr}`);
   const manifest = JSON.parse(fs.readFileSync(path.join(extracted, 'manifest.json'), 'utf8'));
   const packageMetadata = JSON.parse(fs.readFileSync(path.join(extracted, 'package.json'), 'utf8'));
+  const trustConfigEnvironmentBindings = {
+    goal_idea_verifier_trust_config_json: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
+    action_intent_reviewer_trust_config_json: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON',
+    approval_policy_trust_config_json: 'AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON',
+    action_intent_maker_trust_config_json: 'AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON',
+    execution_approval_trust_config_json: 'AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON'
+  };
+  assert.deepEqual(Object.keys(manifest.user_config || {}).sort(),
+    Object.keys(trustConfigEnvironmentBindings).sort(),
+    'extracted candidate manifest must expose all five administrator-managed AGG trust domains');
+  for (const [configKey, environmentName] of Object.entries(trustConfigEnvironmentBindings)) {
+    const config = manifest.user_config[configKey];
+    assert.equal(config.type, 'string', `${configKey}: trust configuration must be a JSON string`);
+    assert.equal(config.default, '', `${configKey}: trust configuration must default to blank`);
+    assert.equal(config.required, false, `${configKey}: trust configuration must remain optional and fail closed when absent`);
+    assert.match(config.description || '', /public Ed25519 keys only/i,
+      `${configKey}: trust configuration must prohibit private-key provisioning through package UI`);
+    assert.equal(manifest.server?.mcp_config?.env?.[environmentName], `\${user_config.${configKey}}`,
+      `${environmentName}: packaged host binding must map to the corresponding administrator input`);
+  }
   assert.deepEqual(Object.keys(packageMetadata).sort(),
-    ['description', 'engines', 'main', 'name', 'scripts', 'type', 'version'].sort(),
+    ['description', 'engines', 'main', 'name', 'runtimeEntryPoint', 'scripts', 'type', 'version'].sort(),
     'local-only package metadata must contain only the explicitly reviewed runtime fields');
   assert.equal(packageMetadata.main, manifest.server?.entry_point, 'packaged Node entry point must match the manifest');
+  assert.equal(packageMetadata.runtimeEntryPoint, manifest.server?.entry_point,
+    'packaged runtimeEntryPoint must match the manifest and package main');
   assert.equal(packageMetadata.type, 'module');
   assert.equal(packageMetadata.version, manifest.version, 'packaged package.json version must match the MCP manifest');
   assert.equal(packageMetadata.engines?.node, '>=22.13.0', 'packaged runtime must declare its actual built-in node:sqlite requirement');
@@ -44,13 +66,23 @@ try {
     { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} },
     { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'adaptive_goal_trust_configuration_status', arguments: {} } }
   ].map(value => JSON.stringify(value)).join('\n') + '\n';
+  const optionalToolFlags = [
+    ['adaptive_goal_phase2_shadow_search', 'AGG_PHASE2_SHADOW_TOOL_ENABLED'],
+    ['adaptive_goal_phase3_mcts_shadow_search', 'AGG_PHASE3_MCTS_TOOL_ENABLED'],
+    ['adaptive_goal_knowledge_capture_workflow_outcome', 'AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED']
+  ];
+  const manifestToolNames = new Set(manifest.tools.map(tool => tool.name));
+  const optionalToolEnvironment = optionalToolFlags.every(([name]) => manifestToolNames.has(name))
+    ? Object.fromEntries(optionalToolFlags.map(([, environmentName]) => [environmentName, '1']))
+    : {};
   const smokeEnv = {
     ...process.env,
     OPENAI_API_KEY: '',
     CHAT_ON_STERIODS_DATA_DIR: path.join(temp, 'data'),
     CHAT_ON_STERIODS_WORKSPACE: extracted,
     WORKFLOW_DATA_DIR: path.join(temp, 'data'),
-    WORKFLOW_DB: path.join(temp, 'data', 'workflow.db')
+    WORKFLOW_DB: path.join(temp, 'data', 'workflow.db'),
+    ...optionalToolEnvironment
   };
   for (const key of [
     'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
@@ -77,12 +109,18 @@ try {
   assert.equal(tools.length, manifest.tools.length, 'runtime exposure count must match manifest declarations');
   assert.deepEqual(tools.map(tool => tool.name).sort(), manifest.tools.map(tool => tool.name).sort(),
     'runtime tool names must exactly match package manifest names');
+  const manifestToolsByName = new Map(manifest.tools.map(tool => [tool.name, tool]));
+  for (const name of ['adaptive_goal_knowledge_snapshot_get', 'adaptive_goal_trust_configuration_status', 'adaptive_goal_reviewer_attestation_ingest']) {
+    assert.equal(tools.find(tool => tool.name === name)?.description, manifestToolsByName.get(name)?.description,
+      `${name}: manifest description must accurately reflect the runtime trust-ledger read/write boundary`);
+  }
   assert.equal(lines[2].id, 3);
-  assert.equal(lines[2].result?.isError, false, 'trust configuration status must be a read-only diagnostic and not a protocol error');
+  assert.equal(lines[2].result?.isError, false, 'explicit trust-configuration observation must complete without a protocol error');
   const trustStatus = lines[2].result?.structuredContent ?? JSON.parse(lines[2].result?.content?.find(item => item.type === 'text')?.text || '{}');
   assert.equal(trustStatus.status, 'blocked', 'missing production trust roots must remain visibly blocked in the exact extracted runtime');
   assert.equal(trustStatus.domains?.goal_idea_verifier?.available, false);
   assert.equal(trustStatus.domains?.action_intent_reviewer?.available, false);
+  assert.equal(trustStatus.approvalSubsystem?.status, 'blocked', 'missing production approval policy/maker/checker trust roots must remain blocked');
   assert.doesNotMatch(JSON.stringify(trustStatus), /BEGIN PRIVATE KEY|PRIVATE KEY-----/,
     'trust diagnostics must never reveal private key material');
 
@@ -121,6 +159,45 @@ try {
       `${name}: required input contract must not be weakened`);
   };
   assertRequired('adaptive_goal_trust_configuration_status', []);
+  assertRequired('adaptive_goal_reviewer_attestation_ingest', ['job_id', 'attestation']);
+  const reviewerIngestSchema = schemaFor('adaptive_goal_reviewer_attestation_ingest');
+  assert.equal(reviewerIngestSchema.additionalProperties, false);
+  const reviewerAttestationSchema = reviewerIngestSchema.properties.attestation;
+  assert.equal(reviewerAttestationSchema.additionalProperties, false);
+  assert.deepEqual([...reviewerAttestationSchema.required].sort(),
+    ['candidate', 'decision', 'expires_at', 'issued_at', 'kind', 'nonce', 'provider_id', 'reviewer_subject', 'schema_version', 'scope', 'signature', 'signature_algorithm', 'trust_root_sha256'].sort(),
+    'reviewer attestation ingestion must require the full signed identity/scope/expiry/candidate envelope');
+  assert.equal(reviewerAttestationSchema.properties.signature_algorithm.enum[0], 'Ed25519');
+  assert.deepEqual(reviewerAttestationSchema.properties.decision.enum, ['reviewed_for_candidate_only'],
+    'reviewer identity attestation must not be represented as workflow approval');
+  assert.equal(reviewerAttestationSchema.properties.candidate.additionalProperties, false,
+    'candidate binding must reject unrecognized fields');
+  const approvalEvidenceSchema = {
+    policy: schemaFor('workflow_approve').properties.approval_evidence?.properties?.policy,
+    maker: schemaFor('workflow_approve').properties.approval_evidence?.properties?.maker_attestation,
+    decision: schemaFor('workflow_approve').properties.approval_evidence?.properties?.decisions?.items
+  };
+  assertRequired('workflow_preflight', ['job_id']);
+  assert.equal(schemaFor('workflow_preflight').properties.approval_evidence.additionalProperties, false,
+    'workflow preflight may accept evidence but must not accept undeclared fields');
+  assertRequired('workflow_approve', ['job_id', 'confirmation']);
+  assert.equal(schemaFor('workflow_approve').additionalProperties, false);
+  assert.ok(approvalEvidenceSchema.policy && approvalEvidenceSchema.maker && approvalEvidenceSchema.decision,
+    'workflow_approve must expose a versioned, nested approval evidence contract');
+  assert.equal(approvalEvidenceSchema.policy.additionalProperties, false);
+  assert.equal(approvalEvidenceSchema.maker.additionalProperties, false);
+  assert.equal(approvalEvidenceSchema.decision.additionalProperties, false);
+  assert.equal(approvalEvidenceSchema.policy.properties.kind.enum[0], 'adaptive_goal_execution_approval_policy');
+  assert.equal(approvalEvidenceSchema.policy.properties.required_approval_count.minimum, 1,
+    'quorum is explicitly supplied by the signed policy and has no hidden runtime default');
+  assert.equal(approvalEvidenceSchema.policy.properties.maker_checker_separation.enum[0], true);
+  assert.equal(approvalEvidenceSchema.maker.properties.kind.enum[0], 'adaptive_goal_action_intent_maker_attestation');
+  assert.equal(approvalEvidenceSchema.decision.properties.kind.enum[0], 'adaptive_goal_execution_approval_decision');
+  assert.deepEqual([...approvalEvidenceSchema.maker.properties.binding.required].sort(),
+    ['schema_version','wrapper_job_id','proposal_hash','candidate_id','candidate_fingerprint','candidate_hash',
+      'immutable_plan_hash','source_snapshot_hash','source_evidence_manifest_hash','reviewed_action_intent_hash',
+      'reviewed_task_input_contract_hash','evidence_hash','source_evidence_hash','permission_scope_hash'].sort(),
+    'maker and checker evidence must bind to the exact immutable plan/action/scope/evidence contract');
   const workflowCreate = schemaFor('workflow_create');
   assertRequired('workflow_create', ['title', 'task']);
   assert.equal(workflowCreate.properties.title.type, 'string');
@@ -205,6 +282,8 @@ try {
 
   const workflowApprove = schemaFor('workflow_approve');
   assertRequired('workflow_approve', ['job_id', 'confirmation']);
+  assert.ok(workflowApprove.properties.approval_evidence,
+    'AGG workflow approval requires a distinct signed policy/maker/checker evidence contract');
   assert.equal(workflowApprove.properties.job_id.type, 'string');
   assert.equal(workflowApprove.properties.confirmation.minLength, 3);
   assert.equal(workflowApprove.properties.confirmation.maxLength, 2000);

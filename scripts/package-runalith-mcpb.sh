@@ -7,10 +7,13 @@ const [packagePath, manifestPath] = process.argv.slice(2);
 const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const entry = pkg.runtimeEntryPoint;
+const expectedRuntimeArg = '${__dirname}/' + entry;
 if (typeof entry !== 'string' || !/^[A-Za-z0-9._/-]+$/.test(entry) || entry.startsWith('/') ||
     entry.split('/').some(part => !part || part === '.' || part === '..') ||
-    manifest.server?.entry_point !== entry || pkg.version !== manifest.version) {
-  throw new Error('package.json and plugin/manifest.json must agree on a safe versioned runtime entry point and version');
+    manifest.server?.entry_point !== entry || pkg.version !== manifest.version ||
+    manifest.server?.mcp_config?.command !== 'node' ||
+    JSON.stringify(manifest.server?.mcp_config?.args) !== JSON.stringify([expectedRuntimeArg])) {
+  throw new Error('package.json and plugin/manifest.json must agree on package version, safe versioned entry point and exact MCP launch arguments');
 }
 process.stdout.write(entry);
 NODE
@@ -34,7 +37,7 @@ assert_regular_source() {
   done
   [[ "$(realpath -e "$current")" == "$current" ]] || { echo "Refusing non-canonical package source: $relative" >&2; exit 2; }
 }
-for SOURCE in README.md LICENSE package.json plugin/manifest.json "$ENTRY_POINT" tests/test-runalith-plugin.js tests/test-production-behavioral-qa.js tests/test-adaptive-goal-current-scope-producer-e2e.mjs tests/test-adaptive-goal-knowledge-verifier.mjs tests/test-adaptive-goal-trust-configuration.mjs tests/test-adaptive-goal-trust-entrypoint.mjs tests/test-adaptive-goal-reviewer-identity.js tests/test-reconcile-active-workflows.mjs scripts/reconcile-active-workflows.mjs tests/test-extracted-package-tool-schemas.mjs tests/test-execution-lease-fencing.js tests/test-execution-control-process-boundary.js tests/test-mcp-stdio-backpressure.mjs tests/test-temp-dir.js tests/test-execution-batch.js tests/test-execution-batch-concurrency.js tests/test-execution-batch-terminal-recovery.js tests/test-execution-success-contract.js tests/test-phase5-recovery.js tests/test-agent-tool-guidance.js tests/test-mcp-graceful-signal-shutdown-20261017.js tests/test-mcp-shutdown-backpressure-deadline-20261017.js tests/test-mcp-eof-shutdown-framing-20261017.js tests/test-adaptive-goal-evidence-lineage.js scripts/package-runalith-mcpb.sh scripts/collect-plugin-runtime.mjs scripts/plugin-package-metadata.mjs scripts/verify-mcpb-source-alignment.mjs benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs; do
+for SOURCE in README.md LICENSE package.json plugin/manifest.json "$ENTRY_POINT" tests/test-runalith-plugin.js tests/test-production-behavioral-qa.js tests/test-adaptive-goal-current-scope-producer-e2e.mjs tests/test-adaptive-goal-approval-subsystem.mjs tests/test-adaptive-goal-knowledge-verifier.mjs tests/test-adaptive-goal-trust-configuration.mjs tests/test-adaptive-goal-trust-entrypoint.mjs tests/test-adaptive-goal-reviewer-identity.js tests/test-reconcile-active-workflows.mjs tests/test-reconcile-active-workflows-v2.mjs tests/test-external-trust-checkpoint-contract.mjs tests/test-agg-acceptance-consistency.mjs scripts/reconcile-active-workflows.mjs scripts/reconcile-active-workflows-v2.mjs scripts/lib/external-trust-checkpoint-contract.mjs scripts/lib/sqlite-external-checkpoint-transition.mjs scripts/validate-agg-trust-config.mjs scripts/verify-agg-acceptance-consistency.mjs tests/test-extracted-package-tool-schemas.mjs tests/test-execution-lease-fencing.js tests/test-execution-control-process-boundary.js tests/test-mcp-stdio-backpressure.mjs tests/test-temp-dir.js tests/test-execution-batch.js tests/test-execution-batch-concurrency.js tests/test-execution-batch-terminal-recovery.js tests/test-execution-success-contract.js tests/test-phase5-recovery.js tests/test-workflow-terminal-failure-atomicity.js tests/test-provider-pre-send-recovery.js tests/test-agent-tool-guidance.js tests/test-mcp-graceful-signal-shutdown-20261017.js tests/test-mcp-shutdown-backpressure-deadline-20261017.js tests/test-mcp-eof-shutdown-framing-20261017.js tests/test-adaptive-goal-evidence-lineage.js scripts/build-agg-live-remediation-plan.mjs tests/test-agg-live-remediation-plan.mjs scripts/package-runalith-mcpb.sh scripts/collect-plugin-runtime.mjs scripts/plugin-package-metadata.mjs scripts/verify-mcpb-source-alignment.mjs benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs; do
   assert_regular_source "$SOURCE"
 done
 
@@ -44,16 +47,23 @@ MANDATORY_VALIDATION_TESTS=(
   tests/test-execution-batch-terminal-recovery.js
   tests/test-execution-success-contract.js
   tests/test-phase5-recovery.js
+  tests/test-workflow-terminal-failure-atomicity.js
+  tests/test-provider-pre-send-recovery.js
   tests/test-agent-tool-guidance.js
   tests/test-adaptive-goal-trust-configuration.mjs
   tests/test-adaptive-goal-trust-entrypoint.mjs
+  tests/test-adaptive-goal-approval-subsystem.mjs
   tests/test-adaptive-goal-reviewer-identity.js
   tests/test-reconcile-active-workflows.mjs
+  tests/test-reconcile-active-workflows-v2.mjs
+  tests/test-external-trust-checkpoint-contract.mjs
   tests/test-adaptive-goal-knowledge-verifier.mjs
   tests/test-adaptive-goal-current-scope-producer-e2e.mjs
   tests/test-execution-lease-fencing.js
   tests/test-execution-control-process-boundary.js
   tests/test-adaptive-goal-evidence-lineage.js
+  tests/test-agg-live-remediation-plan.mjs
+  tests/test-agg-acceptance-consistency.mjs
 )
 
 VERSION="$(node -p "require('$ROOT/package.json').version")"
@@ -106,8 +116,15 @@ cp "$ROOT/tests/test-adaptive-goal-current-scope-producer-e2e.mjs" "$PAYLOAD/tes
 cp "$ROOT/tests/test-adaptive-goal-knowledge-verifier.mjs" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-adaptive-goal-trust-configuration.mjs" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-reconcile-active-workflows.mjs" "$PAYLOAD/tests/"
+cp "$ROOT/tests/test-reconcile-active-workflows-v2.mjs" "$ROOT/tests/test-external-trust-checkpoint-contract.mjs" "$PAYLOAD/tests/"
 mkdir -p "$PAYLOAD/scripts"
 cp "$ROOT/scripts/reconcile-active-workflows.mjs" "$PAYLOAD/scripts/"
+cp "$ROOT/scripts/reconcile-active-workflows-v2.mjs" "$PAYLOAD/scripts/"
+mkdir -p "$PAYLOAD/scripts/lib"
+cp "$ROOT/scripts/lib/external-trust-checkpoint-contract.mjs" "$ROOT/scripts/lib/sqlite-external-checkpoint-transition.mjs" "$PAYLOAD/scripts/lib/"
+cp "$ROOT/scripts/build-agg-live-remediation-plan.mjs" "$PAYLOAD/scripts/"
+cp "$ROOT/scripts/validate-agg-trust-config.mjs" "$PAYLOAD/scripts/"
+cp "$ROOT/scripts/verify-agg-acceptance-consistency.mjs" "$PAYLOAD/scripts/"
 cp "$ROOT/tests/test-mcp-stdio-backpressure.mjs" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-mcp-graceful-signal-shutdown-20261017.js" "$PAYLOAD/tests/"
 cp "$ROOT/tests/test-mcp-shutdown-backpressure-deadline-20261017.js" "$PAYLOAD/tests/"
@@ -263,14 +280,20 @@ run_extracted_validation_test() {
 }
 run_extracted_validation_test tests/test-execution-lease-fencing.js
 run_extracted_validation_test tests/test-execution-control-process-boundary.js
+run_extracted_validation_test tests/test-phase5-recovery.js
+run_extracted_validation_test tests/test-workflow-terminal-failure-atomicity.js
 run_extracted_validation_test tests/test-mcp-stdio-backpressure.mjs
 run_extracted_validation_test tests/test-mcp-graceful-signal-shutdown-20261017.js
 run_extracted_validation_test tests/test-mcp-shutdown-backpressure-deadline-20261017.js
 run_extracted_validation_test tests/test-mcp-eof-shutdown-framing-20261017.js
 run_extracted_validation_test tests/test-adaptive-goal-trust-configuration.mjs
 run_extracted_validation_test tests/test-adaptive-goal-trust-entrypoint.mjs
+run_extracted_validation_test tests/test-adaptive-goal-approval-subsystem.mjs
 run_extracted_validation_test tests/test-adaptive-goal-reviewer-identity.js
 run_extracted_validation_test tests/test-reconcile-active-workflows.mjs
+run_extracted_validation_test tests/test-reconcile-active-workflows-v2.mjs
+run_extracted_validation_test tests/test-external-trust-checkpoint-contract.mjs
+run_extracted_validation_test tests/test-agg-live-remediation-plan.mjs
 
 # Run the complete acceptance workflow against bytes extracted from the exact archive.
 env -u OPENAI_API_KEY node "$EXTRACTED/tests/test-adaptive-goal-current-scope-producer-e2e.mjs"

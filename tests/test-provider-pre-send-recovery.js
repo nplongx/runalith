@@ -378,6 +378,116 @@ await assert.rejects(() => provider.dispatch({ ...siblingRequests[0], dispatch_k
   'provider-side claim CAS must reject a sibling intent even if a caller bypasses scheduler preflight');
 assert.equal(posts, postsBeforeSiblingFence, 'ambiguous sibling intents must not cross the remote POST boundary');
 
+// A stale dispatcher may pass its early lease check just before another
+// coordinator terminalizes the parent Job. The one-way claim CAS must recheck
+// the durable Job/task state, not rely on the earlier in-memory decision.
+now += 3000;
+const terminalRaceJob = store.createJob({
+  conversationKey: `pre-send-terminal-race-${process.pid}`, title: 'Terminal state must win before send claim'
+});
+store.transition(terminalRaceJob.job_id, 'EXECUTING');
+const terminalRaceTask = store.ensureTask(terminalRaceJob.job_id, {
+  role: 'engineer', description: 'must not claim dispatch after Job terminalization'
+});
+const terminalRaceLease = store.acquireTaskLease(terminalRaceTask.task_id, {
+  leaseId: `lease-pre-send-terminal-race-${process.pid}`, workerId: 'stale-scheduler', ttlMs: 5 * 60 * 1000
+});
+const terminalRaceRequest = createExecutionRequest({
+  job_id: terminalRaceJob.job_id, task_id: terminalRaceTask.task_id, lease_id: terminalRaceLease.lease_id,
+  attempt: terminalRaceLease.attempt, owner_epoch: terminalRaceLease.owner_epoch, role: 'engineer',
+  input_commit: 'd'.repeat(40), task_payload_ref: `task://${terminalRaceTask.task_id}`,
+  workspace: 'ephemeral', required_evidence: ['execution.json']
+});
+const terminalRaceIdentity = createProviderDispatchIdentity(terminalRaceRequest, providerDispatchConfig(provider));
+const terminalRaceKey = providerDispatchKey(terminalRaceIdentity);
+store.db.prepare(`INSERT INTO provider_dispatch_intents
+  (dispatch_key,job_id,task_id,lease_id,attempt,owner_epoch,provider,input_commit,request_sha256,request_json,api_base,workflow,repository,event,ref,state,created_at,updated_at)
+  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DISPATCHING',?,?)`)
+  .run(terminalRaceKey, terminalRaceIdentity.job_id, terminalRaceIdentity.task_id, terminalRaceIdentity.lease_id,
+    terminalRaceIdentity.attempt, terminalRaceIdentity.owner_epoch, terminalRaceIdentity.provider, terminalRaceIdentity.input_commit,
+    terminalRaceIdentity.request_sha256, canonicalProviderDispatchRequest(terminalRaceRequest), terminalRaceIdentity.api_base,
+    terminalRaceIdentity.workflow, terminalRaceIdentity.repository, terminalRaceIdentity.event, terminalRaceIdentity.ref, nowIso, nowIso);
+const originalLeaseAssertion = provider._assertActiveDispatchLease;
+let terminalRaceInjected = false;
+provider._assertActiveDispatchLease = function (...args) {
+  const result = originalLeaseAssertion.apply(this, args);
+  if (!terminalRaceInjected) {
+    terminalRaceInjected = true;
+    store.transition(terminalRaceJob.job_id, 'CANCELLED', 'cancelled');
+  }
+  return result;
+};
+const postsBeforeTerminalRace = posts;
+try {
+  await assert.rejects(() => provider.dispatch({ ...terminalRaceRequest, dispatch_key: terminalRaceKey }),
+    /lost its durable one-way send claim before any remote side effect/);
+} finally {
+  provider._assertActiveDispatchLease = originalLeaseAssertion;
+}
+const terminalRaceIntent = store.db.prepare('SELECT * FROM provider_dispatch_intents WHERE dispatch_key=?').get(terminalRaceKey);
+assert.equal(store.getJob(terminalRaceJob.job_id).status, 'cancelled');
+assert.equal(terminalRaceIntent.dispatch_claim_id, null, 'terminal Job must prevent creation of the durable one-way send claim');
+assert.equal(terminalRaceIntent.provider_run_id, null);
+assert.equal(posts, postsBeforeTerminalRace, 'a Job terminalized between preflight and claim must not cross POST');
+
+// The opposite ordering is equally important: once the provider has acquired
+// its one-way claim, Job terminalization must defer until provider outcome is
+// authoritatively reconciled. This uses only the local mock transport above.
+now += 3000;
+const claimedRaceJob = store.createJob({
+  conversationKey: `pre-send-claimed-terminal-race-${process.pid}`, title: 'Claim must fence terminalization'
+});
+store.transition(claimedRaceJob.job_id, 'EXECUTING');
+const claimedRaceTask = store.ensureTask(claimedRaceJob.job_id, {
+  role: 'engineer', description: 'claimed provider effect blocks parent terminalization'
+});
+const claimedRaceLease = store.acquireTaskLease(claimedRaceTask.task_id, {
+  leaseId: `lease-pre-send-claimed-race-${process.pid}`, workerId: 'active-scheduler', ttlMs: 5 * 60 * 1000
+});
+const claimedRaceRequest = createExecutionRequest({
+  job_id: claimedRaceJob.job_id, task_id: claimedRaceTask.task_id, lease_id: claimedRaceLease.lease_id,
+  attempt: claimedRaceLease.attempt, owner_epoch: claimedRaceLease.owner_epoch, role: 'engineer',
+  input_commit: 'e'.repeat(40), task_payload_ref: `task://${claimedRaceTask.task_id}`,
+  workspace: 'ephemeral', required_evidence: ['execution.json']
+});
+const claimedRaceIdentity = createProviderDispatchIdentity(claimedRaceRequest, providerDispatchConfig(provider));
+const claimedRaceKey = providerDispatchKey(claimedRaceIdentity);
+store.db.prepare(`INSERT INTO provider_dispatch_intents
+  (dispatch_key,job_id,task_id,lease_id,attempt,owner_epoch,provider,input_commit,request_sha256,request_json,api_base,workflow,repository,event,ref,state,created_at,updated_at)
+  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DISPATCHING',?,?)`)
+  .run(claimedRaceKey, claimedRaceIdentity.job_id, claimedRaceIdentity.task_id, claimedRaceIdentity.lease_id,
+    claimedRaceIdentity.attempt, claimedRaceIdentity.owner_epoch, claimedRaceIdentity.provider, claimedRaceIdentity.input_commit,
+    claimedRaceIdentity.request_sha256, canonicalProviderDispatchRequest(claimedRaceRequest), claimedRaceIdentity.api_base,
+    claimedRaceIdentity.workflow, claimedRaceIdentity.repository, claimedRaceIdentity.event, claimedRaceIdentity.ref, nowIso, nowIso);
+let terminalizationError = null;
+let terminalizationAttempted = false;
+provider._assertActiveDispatchLease = function (...args) {
+  const result = originalLeaseAssertion.apply(this, args);
+  const intent = store.db.prepare('SELECT dispatch_claim_id FROM provider_dispatch_intents WHERE dispatch_key=?').get(claimedRaceKey);
+  if (intent?.dispatch_claim_id && !terminalizationAttempted) {
+    terminalizationAttempted = true;
+    try { store.transition(claimedRaceJob.job_id, 'CANCELLED', 'cancelled'); }
+    catch (error) { terminalizationError = error; }
+  }
+  return result;
+};
+const postsBeforeClaimedRace = posts;
+try {
+  await provider.dispatch({ ...claimedRaceRequest, dispatch_key: claimedRaceKey });
+} finally {
+  provider._assertActiveDispatchLease = originalLeaseAssertion;
+}
+assert.ok(terminalizationAttempted, 'test must attempt terminalization after the one-way claim exists');
+assert.match(String(terminalizationError?.message || ''), /provider outcome is unresolved/);
+assert.equal(store.getJob(claimedRaceJob.job_id).status, 'active', 'unresolved provider effect must keep its parent Job nonterminal');
+assert.notEqual(store.db.prepare('SELECT dispatch_claim_id FROM provider_dispatch_intents WHERE dispatch_key=?').get(claimedRaceKey).dispatch_claim_id, null);
+assert.equal(posts, postsBeforeClaimedRace + 1, 'the claim-winning ordering may send once but cannot be terminalized concurrently');
+assert.throws(() => store.failWorkflowVerification(claimedRaceJob.job_id, {
+  reason: 'test terminalizer must defer unresolved provider outcome', errors: ['test-only unresolved provider effect']
+}), /provider outcome is unresolved/,
+'the transactional workflow-verification failure path must enforce the same provider-outcome fence');
+assert.equal(store.getJob(claimedRaceJob.job_id).status, 'active');
+
 // Exercise the real scheduler caller, not only the lease-store method: a stale
 // scheduler may retain a pending task snapshot after the parent job is
 // terminalized. The transactional lease fence must reject before any provider

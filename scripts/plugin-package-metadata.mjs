@@ -16,6 +16,7 @@ export function projectPluginPackageMetadata(source) {
     name: source.name,
     version: source.version,
     description: source.description,
+    runtimeEntryPoint,
     main: runtimeEntryPoint,
     type: 'module',
     engines: { node: '>=22.13.0' },

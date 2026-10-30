@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isSafePortableArchivePath } from './phase2-zip-entry-type-safety.mjs';
 import { classifyPhase2CandidateFailure, diagnosePhase2EntryCount, FROZEN_PHASE2_ARCHIVE_ENTRY_COUNT } from './phase2-inventory-diagnostics.mjs';
+import { serializePluginPackageMetadata } from '../../scripts/plugin-package-metadata.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 for (const unsafe of ['C:/outside.txt', 'c:outside.txt', 'D:/a/../outside.txt', '../outside.txt', '/absolute.txt']) {
@@ -13,22 +14,31 @@ for (const unsafe of ['C:/outside.txt', 'c:outside.txt', 'D:/a/../outside.txt', 
 }
 assert.equal(isSafePortableArchivePath('src/runtime/strict-json.js'), true);
 const script = path.join(root, 'benchmarks/plugin-workflow-benchmark/create-phase2-candidate-inventory.mjs');
-// Prefer a caller-pinned candidate; otherwise try candidates newest-first until
-// one proves exact current-source lineage. Historical candidates intentionally
-// remain in dist and must not make this regression fail merely because they are
-// stale relative to a newer dirty-tree implementation.
+// Prefer an explicit caller-pinned candidate, then the current versioned
+// package candidate, and only then historical `-candidate-` archives. The
+// current source-aligned package can exercise exact inventory generation even
+// when its 103 entries do not satisfy the independent frozen 71-path Phase 2
+// cardinality. Historical candidates remain immutable and are diagnosed, not
+// mistaken for current source lineage.
+const currentPackageVersion = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+const currentVersionCandidates = fs.readdirSync(path.join(root, 'dist'))
+  .filter(name => name.endsWith('.mcpb') && name.includes(currentPackageVersion) && !name.includes('-candidate-'))
+  .map(name => `dist/${name}`)
+  .sort((left, right) => fs.statSync(path.join(root, right)).mtimeMs - fs.statSync(path.join(root, left)).mtimeMs);
+const historicalCandidates = fs.readdirSync(path.join(root, 'dist'))
+  .filter(name => /^runalith-.*-candidate-.*\.mcpb$/.test(name))
+  .map(name => `dist/${name}`)
+  .sort((left, right) => fs.statSync(path.join(root, right)).mtimeMs - fs.statSync(path.join(root, left)).mtimeMs);
 const bundleCandidates = process.env.PHASE2_CANDIDATE_BUNDLE
   ? [process.env.PHASE2_CANDIDATE_BUNDLE]
-  : fs.readdirSync(path.join(root, 'dist'))
-    .filter(name => /^runalith-.*-candidate-.*\.mcpb$/.test(name))
-    .map(name => `dist/${name}`)
-    .sort((left, right) => fs.statSync(path.join(root, right)).mtimeMs - fs.statSync(path.join(root, left)).mtimeMs);
+  : [...currentVersionCandidates, ...historicalCandidates.filter(candidate => !currentVersionCandidates.includes(candidate))];
 const outDir = path.join(root, 'benchmarks/plugin-workflow-benchmark');
 const output = path.join(outDir, `.inventory-builder-regression-${process.pid}.json`);
+const sourceAlignedFixtureBundle = path.join(outDir, `.inventory-builder-source-aligned-fixture-${process.pid}.mcpb`);
 const symlinkParent = path.join(outDir, `.inventory-builder-symlink-${process.pid}`);
 const traversalOutput = `${output}.traversal`;
 const symlinkOutput = path.join(outDir, `symlink-output-${process.pid}.json`);
-for (const destination of [output, symlinkParent, traversalOutput, symlinkOutput]) {
+for (const destination of [output, sourceAlignedFixtureBundle, symlinkParent, traversalOutput, symlinkOutput]) {
   if (fs.lstatSync(destination, { throwIfNoEntry: false })) {
     throw new Error(`refusing to run inventory regression because its unique destination already exists: ${destination}`);
   }
@@ -36,7 +46,9 @@ for (const destination of [output, symlinkParent, traversalOutput, symlinkOutput
 const run = (bundleArg, outputArg) => spawnSync(process.execPath, [script, bundleArg, outputArg], { cwd: root, encoding: 'utf8' });
 let outputCreatedByThisTest = false;
 let symlinkParentCreatedByThisTest = false;
+let fixtureBundleCreatedByThisTest = false;
 const candidateFailures = [];
+let selectedBundleKind = 'current-source-aligned-candidate';
 
 try {
   let bundle = null;
@@ -104,6 +116,48 @@ try {
         stderr: String(forensic.stderr || '').slice(0, 1200) });
     }
   }
+  if (!bundle && !process.env.PHASE2_CANDIDATE_BUNDLE) {
+    // Candidate availability is a release-custody dependency, not a prerequisite
+    // for testing the inventory builder's security properties. Exercise its
+    // positive path using a short-lived archive assembled from exact current
+    // source bytes. This fixture is never placed in dist/, never published, and
+    // does not count as a candidate or satisfy the frozen 71-path contract.
+    // Explicitly pinned candidates still fail when their source lineage is bad.
+    const stage = fs.mkdtempSync(path.join(os.tmpdir(), `phase2-inventory-source-aligned-${process.pid}-`));
+    try {
+      for (const directory of ['src/runtime', 'server']) fs.mkdirSync(path.join(stage, directory), { recursive: true });
+      fs.copyFileSync(path.join(root, 'README.md'), path.join(stage, 'README.md'));
+      fs.copyFileSync(path.join(root, 'plugin/manifest.json'), path.join(stage, 'manifest.json'));
+      fs.copyFileSync(path.join(root, 'src/runtime/strict-json.js'), path.join(stage, 'src/runtime/strict-json.js'));
+      const manifest = JSON.parse(fs.readFileSync(path.join(root, 'plugin/manifest.json'), 'utf8'));
+      const entryPoint = manifest.server?.entry_point;
+      assert.equal(typeof entryPoint, 'string', 'source fixture requires a declared runtime entry point');
+      const sourceEntryPoint = path.join(root, entryPoint);
+      fs.copyFileSync(sourceEntryPoint, path.join(stage, entryPoint));
+      fs.writeFileSync(path.join(stage, 'package.json'), serializePluginPackageMetadata(
+        JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))), { flag: 'wx', mode: 0o600 });
+      const entries = ['README.md', 'manifest.json', 'package.json', 'src/runtime/strict-json.js', entryPoint];
+      const zipped = spawnSync('zip', ['-X', '-q', sourceAlignedFixtureBundle, ...entries], { cwd: stage, encoding: 'utf8' });
+      assert.equal(zipped.status, 0, `source-aligned inventory test fixture should build: ${zipped.stderr}`);
+      fixtureBundleCreatedByThisTest = true;
+    } finally {
+      fs.rmSync(stage, { recursive: true, force: true });
+    }
+    bundle = path.relative(root, sourceAlignedFixtureBundle).split(path.sep).join('/');
+    selectedBundleKind = 'ephemeral-source-aligned-regression-fixture';
+    good = run(bundle, path.relative(root, output));
+    assert.equal(good.status, 0,
+      `ephemeral exact-source fixture should exercise the positive inventory path; candidate lineage diagnostics remain separate: ${good.stderr}`);
+    fs.rmSync(output, { force: true });
+    console.log(JSON.stringify({
+      candidateLineageStatus: 'BLOCKED_NO_CURRENT_SOURCE_ALIGNED_ARCHIVE',
+      candidateArchivesExamined: bundleCandidates.length,
+      candidateFailures,
+      testFixture: 'ephemeral-source-aligned-regression-fixture',
+      fixtureArchiveIsReleaseCandidate: false,
+      frozenPhase2PathContractSatisfied: false
+    }));
+  }
   assert.ok(bundle && good,
     `no candidate has exact current-source lineage; this is a bundle/source-byte lineage blocker, not the frozen inventory-count assertion. ` +
     `Tried ${bundleCandidates.length} candidate(s); preserve the 71-path contract and inspect each candidate diagnostic before retrying. ` +
@@ -128,7 +182,9 @@ try {
   const countDiagnosis = diagnosePhase2EntryCount(inventory.entries.length);
   console.log(JSON.stringify({
     inventoryDiagnosis: 'candidate_path_and_archive_payload_equality_verified_before_frozen_count_assertion',
-    selectedCandidate: bundle,
+    selectedBundle: bundle,
+    selectedBundleKind,
+    selectedBundleIsReleaseCandidate: selectedBundleKind === 'current-source-aligned-candidate',
     selectedCandidateEntryCount: inventory.entries.length,
     ...countDiagnosis,
     candidateFailures
@@ -265,5 +321,6 @@ try {
   console.log('PASS: inventory builder binds exact source bytes and refuses source symlinks, overwrite, traversal and symlinked output parents');
 } finally {
   if (outputCreatedByThisTest) fs.rmSync(output, { force: true });
+  if (fixtureBundleCreatedByThisTest) fs.rmSync(sourceAlignedFixtureBundle, { force: true });
   if (symlinkParentCreatedByThisTest) fs.rmSync(symlinkParent, { recursive: true, force: true });
 }

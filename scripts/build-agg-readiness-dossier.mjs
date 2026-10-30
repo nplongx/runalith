@@ -254,7 +254,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     checks: {
       sourceToBundleByteAlignment: 'PASS', sourceProvenanceAuthenticated: false,
       mcpbArchiveIntegrity: preflight.candidate?.smoke?.passed === true ? 'PASS_IN_PREFLIGHT' : 'NOT_PROVEN',
-      runtimeToolCount: alignment.manifestToolCount, expectedToolCount: 74,
+      runtimeToolCount: alignment.manifestToolCount, expectedToolCount: 75,
       isolatedE2EIsProductionEvidence: false, productionTrustEstablished: false,
       liveDatabaseMutated: false, hostRegistryMutated: false, pluginInstalledOrRestarted: false
     },

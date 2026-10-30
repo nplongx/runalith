@@ -9,6 +9,9 @@ const DEFAULT_DB = path.join(process.env.HOME || '/tmp', '.chat-on-steroids', 'a
 const TERMINAL_STATES = new Set(['COMPLETED', 'FAILED', 'CANCELLED']);
 const EVENT_KEYS = /^(task_?id|task|attempt_?id|attempt|result_?id|artifact_?id|lease_?id|worker_?id|session_?id|run_?id|role|phase|status|decision|reason|error_?code|recovery|owner|actor|exit_?code|execution_?status)$/i;
 const MAX_REPORT_JOBS = 200;
+const MAX_LINEAGE_SCAN_NODES = 50_000;
+const MAX_LINEAGE_SCAN_DEPTH = 16;
+const MAX_LINEAGE_SCAN_ARRAY_ITEMS = 10_000;
 
 function fail(code, message) { throw Object.assign(new Error(`${code}: ${message}`), { code }); }
 function hash(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
@@ -70,25 +73,68 @@ function summarizePayload(value, result = {}, depth = 0) {
   return result;
 }
 
-function correlatedTaskId(event) {
+function correlatedTaskIds(event) {
   const payload = parseJson(event.payload_json || '{}');
-  const fields = summarizePayload(payload);
-  return firstDefined(fields.task_id, fields.taskId, fields.task, fields['task.id'], fields['task.task_id'], fields['task.taskId']);
+  const taskIds = new Set();
+  const scan = { visited: 0, truncated: false };
+  const visit = (value, parentKey = '', depth = 0) => {
+    if (value === null || typeof value !== 'object') return;
+    if (depth > MAX_LINEAGE_SCAN_DEPTH || scan.visited >= MAX_LINEAGE_SCAN_NODES) {
+      scan.truncated = true;
+      return;
+    }
+    scan.visited += 1;
+    if (Array.isArray(value)) {
+      if (value.length > MAX_LINEAGE_SCAN_ARRAY_ITEMS) scan.truncated = true;
+      for (const child of value.slice(0, MAX_LINEAGE_SCAN_ARRAY_ITEMS)) {
+        if (scan.visited >= MAX_LINEAGE_SCAN_NODES) { scan.truncated = true; break; }
+        visit(child, parentKey, depth + 1);
+      }
+      return;
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (scan.visited >= MAX_LINEAGE_SCAN_NODES) { scan.truncated = true; break; }
+      scan.visited += 1;
+      const normalized = key.replace(/[^a-z]/gi, '').toLowerCase();
+      const normalizedParent = parentKey.replace(/[^a-z]/gi, '').toLowerCase();
+      if (typeof child === 'string' && child.trim() &&
+          (normalized === 'taskid' || normalized === 'task' || (normalized === 'id' && normalizedParent === 'task'))) {
+        taskIds.add(child.trim());
+      }
+      if (child !== null && typeof child === 'object') visit(child, key, depth + 1);
+      if (scan.visited >= MAX_LINEAGE_SCAN_NODES) { scan.truncated = true; break; }
+    }
+  };
+  visit(payload);
+  return { taskIds: [...taskIds], truncated: scan.truncated, nodesVisited: scan.visited };
 }
 
-function collectLineageReferences(value, result = { attemptIds: new Set(), resultIds: new Set(), artifactIds: new Set() }, depth = 0) {
-  if (!isRecord(value) || depth > 8) return result;
+function collectLineageReferences(value, result = { attemptIds: new Set(), resultIds: new Set(), artifactIds: new Set(), truncated: false, nodesVisited: 0 }, depth = 0) {
+  if (value === null || typeof value !== 'object') return result;
+  if (depth > MAX_LINEAGE_SCAN_DEPTH || result.nodesVisited >= MAX_LINEAGE_SCAN_NODES) {
+    result.truncated = true;
+    return result;
+  }
+  result.nodesVisited += 1;
+  if (Array.isArray(value)) {
+    if (value.length > MAX_LINEAGE_SCAN_ARRAY_ITEMS) result.truncated = true;
+    for (const child of value.slice(0, MAX_LINEAGE_SCAN_ARRAY_ITEMS)) {
+      if (result.nodesVisited >= MAX_LINEAGE_SCAN_NODES) { result.truncated = true; break; }
+      collectLineageReferences(child, result, depth + 1);
+    }
+    return result;
+  }
   for (const [key, item] of Object.entries(value)) {
+    if (result.nodesVisited >= MAX_LINEAGE_SCAN_NODES) { result.truncated = true; break; }
+    result.nodesVisited += 1;
     const normalized = key.replace(/[^a-z]/gi, '').toLowerCase();
     if (typeof item === 'string' && item.trim()) {
       if (normalized === 'attemptid' || normalized === 'attempt') result.attemptIds.add(item);
       else if (normalized === 'resultid') result.resultIds.add(item);
       else if (normalized === 'artifactid') result.artifactIds.add(item);
     }
-    if (isRecord(item)) collectLineageReferences(item, result, depth + 1);
-    else if (Array.isArray(item)) for (const child of item.slice(0, 100)) {
-      if (isRecord(child)) collectLineageReferences(child, result, depth + 1);
-    }
+    if (item !== null && typeof item === 'object') collectLineageReferences(item, result, depth + 1);
+    if (result.nodesVisited >= MAX_LINEAGE_SCAN_NODES) { result.truncated = true; break; }
   }
   return result;
 }
@@ -126,10 +172,62 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
       'producer_role', 'status', 'supersedes', 'content_hash'], 'WHERE task_id=?', [task.task_id], 'ORDER BY created_at DESC, rowid DESC', 'LIMIT 8');
     const leases = selectAvailable(db, 'task_leases', ['lease_id', 'task_id', 'job_id', 'attempt', 'worker_id', 'state', 'issued_at',
       'heartbeat_at', 'expires_at', 'released_at', 'last_error', 'owner_epoch'], 'WHERE task_id=?', [task.task_id], 'ORDER BY rowid DESC', 'LIMIT 5');
+    // Provider-run schemas evolved over time. Prefer exact task binding; if a
+    // legacy table only binds runs to a job, retain the rows as ambiguous
+    // evidence rather than silently dropping possible remote side effects.
+    const providerRunColumns = tableColumns(db, 'provider_runs');
+    let providerRunSchemaStatus = 'TABLE_MISSING';
+    let providerRuns = [];
+    if (providerRunColumns.size) {
+      const providerRunFields = ['provider_run_id', 'provider', 'job_id', 'task_id', 'lease_id', 'attempt', 'run_attempt',
+        'input_commit', 'workflow', 'ref', 'state', 'status', 'conclusion', 'dispatch_key', 'request_sha256', 'owner_epoch',
+        'created_at', 'updated_at'];
+      if (providerRunColumns.has('task_id')) {
+        providerRunSchemaStatus = 'TASK_BOUND_SCHEMA';
+        // Preserve malformed rows with NULL task IDs. They may represent a
+        // remote side effect whose task binding was lost; do not silently drop
+        // them from reconciliation just because this schema normally has task_id.
+        if (providerRunColumns.has('job_id')) {
+          providerRuns = selectAvailable(db, 'provider_runs', providerRunFields,
+            'WHERE job_id=? AND (task_id=? OR task_id IS NULL)', [jobId, task.task_id], 'ORDER BY updated_at, rowid')
+            .map(run => run.task_id == null ? { ...run, task_binding_status: 'UNBOUND_NULL_TASK_ID' } : run);
+        } else {
+          providerRuns = selectAvailable(db, 'provider_runs', providerRunFields,
+            'WHERE task_id=? OR task_id IS NULL', [task.task_id], 'ORDER BY updated_at, rowid')
+            .map(run => run.task_id == null ? { ...run, task_binding_status: 'UNBOUND_NULL_TASK_ID' } : run);
+        }
+      } else if (providerRunColumns.has('job_id')) {
+        providerRunSchemaStatus = 'LEGACY_JOB_ONLY_BINDING';
+        providerRuns = selectAvailable(db, 'provider_runs', providerRunFields, 'WHERE job_id=?', [jobId], 'ORDER BY updated_at, rowid')
+          .map(run => ({ ...run, task_binding_status: 'UNBOUND_AMBIGUOUS' }));
+      } else {
+        providerRunSchemaStatus = 'SCHEMA_WITHOUT_TASK_OR_JOB_BINDING';
+      }
+    }
+    const terminalProviderStates = new Set(['COMPLETED', 'SUCCEEDED', 'SUCCESS', 'FAILED', 'CANCELLED', 'CANCELED', 'TERMINAL']);
+    const nonterminalProviderRuns = providerRuns.filter(run => {
+      const state = String(run.state || run.status || '').trim().toUpperCase();
+      return !terminalProviderStates.has(state);
+    });
     const latestAttempt = attempts[0] || null;
     const activeLeases = leases.filter(lease => String(lease.state || '').toUpperCase() === 'ACTIVE');
     const updatedAge = ageMs(task.updated_at, nowMs);
     const flags = [];
+    if (nonterminalProviderRuns.length) flags.push('NONTERMINAL_PROVIDER_RUN_REQUIRES_RECONCILIATION');
+    const nonterminalUnboundProviderRuns = nonterminalProviderRuns.filter(run =>
+      run.task_binding_status === 'UNBOUND_AMBIGUOUS' || run.task_binding_status === 'UNBOUND_NULL_TASK_ID');
+    if ((providerRunSchemaStatus === 'LEGACY_JOB_ONLY_BINDING' || nonterminalUnboundProviderRuns.length) && nonterminalProviderRuns.length) {
+      flags.push('NONTERMINAL_PROVIDER_RUN_WITHOUT_TASK_BINDING');
+    }
+    const providerRunLeaseMismatches = providerRuns.filter(run => run.lease_id &&
+      !activeLeases.some(lease => lease.lease_id === run.lease_id));
+    const providerRunEpochMismatches = providerRuns.filter(run => run.lease_id && run.owner_epoch != null && activeLeases.some(lease =>
+      lease.lease_id === run.lease_id && lease.owner_epoch != null && Number(lease.owner_epoch) !== Number(run.owner_epoch)));
+    if (providerRunLeaseMismatches.length) flags.push('PROVIDER_RUN_LEASE_BINDING_MISMATCH');
+    if (providerRunEpochMismatches.length) flags.push('PROVIDER_RUN_OWNER_EPOCH_MISMATCH');
+    if (providerRunSchemaStatus === 'SCHEMA_WITHOUT_TASK_OR_JOB_BINDING' && providerRunColumns.size) {
+      flags.push('PROVIDER_RUN_SCHEMA_CANNOT_BIND_WORKFLOW_RECORDS');
+    }
     if (task.status === 'running' && Number(task.execution_attempt ?? 0) === 0 && !task.execution_started_at && task.execution_pid == null && !task.execution_session_id) {
       flags.push('RUNNING_TASK_WITHOUT_EXECUTION_METADATA');
     }
@@ -173,7 +271,8 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
         'schema_version', 'producer_role', 'content', 'evidence_json', 'status', 'supersedes', 'content_hash'],
       'WHERE task_id=?', [task.task_id], 'ORDER BY created_at, rowid'),
       leases: selectAvailable(db, 'task_leases', ['lease_id', 'task_id', 'job_id', 'attempt', 'worker_id', 'state', 'issued_at',
-        'heartbeat_at', 'expires_at', 'released_at', 'last_error', 'owner_epoch'], 'WHERE task_id=?', [task.task_id], 'ORDER BY rowid')
+        'heartbeat_at', 'expires_at', 'released_at', 'last_error', 'owner_epoch'], 'WHERE task_id=?', [task.task_id], 'ORDER BY rowid'),
+      providerRuns
     }));
     return {
       task: {
@@ -210,12 +309,27 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
         issuedAt: lease.issued_at, heartbeatAt: lease.heartbeat_at, expiresAt: lease.expires_at,
         expiredOrInvalid: String(lease.state || '').toUpperCase() === 'ACTIVE' &&
           (timestampMs(lease.expires_at) == null || timestampMs(lease.expires_at) <= nowMs), hasLastError: Boolean(lease.last_error) })),
+      providerRuns: providerRuns.map(run => ({ providerRunId: run.provider_run_id ?? null, provider: run.provider ?? null,
+        jobId: run.job_id ?? null, taskId: run.task_id ?? null, taskBindingStatus: run.task_binding_status ||
+          (providerRunColumns.has('task_id') ? 'TASK_BOUND_BY_ROW' : 'UNBOUND_AMBIGUOUS'), leaseId: run.lease_id ?? null,
+        attempt: run.attempt ?? null, runAttempt: run.run_attempt ?? null, state: run.state ?? run.status ?? null,
+        conclusion: run.conclusion ?? null, ownerEpoch: run.owner_epoch ?? null, dispatchKeyPresent: Boolean(run.dispatch_key),
+        requestSha256: run.request_sha256 ?? null, createdAt: run.created_at ?? null, updatedAt: run.updated_at ?? null })),
+      providerRunSchemaStatus,
       lineageAssessment: {
         taskId: task.task_id,
         attemptIds: attempts.map(attempt => attempt.attempt_id),
         resultIds: results.map(result => result.result_id),
         artifactIds: artifacts.map(artifact => artifact.artifact_id),
         leaseIds: leases.map(lease => lease.lease_id),
+        providerRunIds: providerRuns.map(run => run.provider_run_id).filter(Boolean),
+        providerRunSchemaStatus,
+        providerRunTaskBinding: providerRunSchemaStatus === 'TASK_BOUND_SCHEMA' ? 'TASK_BOUND_BY_SCHEMA'
+          : providerRunSchemaStatus === 'LEGACY_JOB_ONLY_BINDING' ? 'AMBIGUOUS_JOB_ONLY_BINDING' : providerRunSchemaStatus,
+        nonterminalProviderRunIds: nonterminalProviderRuns.map(run => run.provider_run_id).filter(Boolean),
+        nonterminalUnboundProviderRunCount: nonterminalUnboundProviderRuns.length,
+        providerRunLeaseMismatchIds: providerRunLeaseMismatches.map(run => run.provider_run_id).filter(Boolean),
+        providerRunOwnerEpochMismatchIds: providerRunEpochMismatches.map(run => run.provider_run_id).filter(Boolean),
         artifactJobTaskLineage: crossJobArtifacts.length ? 'mismatch' : 'consistent_or_job_id_unavailable',
         artifactProducerRoleLineage: producerRoleMismatches.length ? 'mismatch' : 'consistent_or_role_unavailable',
         successfulResultWithRunningTask: successfulResultsWhileRunning,
@@ -230,7 +344,13 @@ function listTaskRows(db, jobId, { nowMs, procRoot }) {
       lifecycleEvidence: {
         disposition: 'HOLD_UNKNOWN_UNLESS_AUTHORITATIVE_EVIDENCE_COMPLETE',
         owner: { status: 'UNVERIFIED', reason: 'authoritative owner identity is not persisted in the supported workflow schema' },
-        provider: { status: 'UNVERIFIED', reason: 'provider identity is not persisted in the supported workflow schema' },
+        provider: { status: 'UNVERIFIED', reason: providerRunSchemaStatus === 'TASK_BOUND_SCHEMA'
+          ? 'provider-run rows are observed but do not independently authenticate provider identity or remote outcome'
+          : providerRunSchemaStatus === 'LEGACY_JOB_ONLY_BINDING'
+            ? 'legacy provider-run rows lack task binding; any nonterminal run remains ambiguous across tasks in this job'
+            : providerRunSchemaStatus === 'TABLE_MISSING'
+              ? 'provider_runs table is absent from this workflow database schema'
+              : 'provider_runs schema cannot bind rows to this job/task' },
         runtime: task.execution_pid == null && !task.execution_session_id && !task.openclaw_run_id
           ? { status: 'MISSING', reason: 'no persisted execution PID, session ID, or provider run ID' }
           : { status: 'OBSERVED_NOT_AUTHENTICATED', reason: 'persisted identifiers do not independently prove current process/provider ownership' },
@@ -432,16 +552,28 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   // summaries only (never result bodies or arbitrary event content).
   const allJobEvents = selectAvailable(db, 'events', ['event_id', 'job_id', 'type', 'payload_json', 'created_at'],
     'WHERE job_id=?', [job.job_id], 'ORDER BY created_at, rowid');
+  const allJobEventsPayloadFingerprint = hash(JSON.stringify(allJobEvents.map(event => ({
+    eventId: event.event_id, type: event.type, createdAt: event.created_at,
+    payloadSha256: hash(event.payload_json || '')
+  }))));
   const eventsByTaskId = new Map();
+  const incompleteTaskCorrelationEventIds = [];
+  const incompleteTaskCorrelationByTaskId = new Set();
   for (const event of allJobEvents) {
-    const taskId = correlatedTaskId(event);
-    if (!taskId) continue;
-    const list = eventsByTaskId.get(taskId) || [];
-    list.push(event);
-    eventsByTaskId.set(taskId, list);
+    const correlation = correlatedTaskIds(event);
+    if (correlation.truncated) {
+      incompleteTaskCorrelationEventIds.push(event.event_id);
+      for (const taskId of correlation.taskIds) incompleteTaskCorrelationByTaskId.add(taskId);
+    }
+    for (const taskId of correlation.taskIds) {
+      const list = eventsByTaskId.get(taskId) || [];
+      list.push(event);
+      eventsByTaskId.set(taskId, list);
+    }
   }
   for (const entry of tasks) {
     const correlated = eventsByTaskId.get(entry.task.taskId) || [];
+    const taskCorrelationTruncated = incompleteTaskCorrelationByTaskId.has(entry.task.taskId);
     const eventPayloadFingerprint = hash(JSON.stringify(correlated.map(event => ({
       eventId: event.event_id, type: event.type, createdAt: event.created_at,
       payloadSha256: hash(event.payload_json || '')
@@ -454,7 +586,7 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
     const references = correlated.reduce((all, event) => {
       const parsed = parseJson(event.payload_json || '{}');
       return collectLineageReferences(parsed, all);
-    }, { attemptIds: new Set(), resultIds: new Set(), artifactIds: new Set() });
+    }, { attemptIds: new Set(), resultIds: new Set(), artifactIds: new Set(), truncated: false, nodesVisited: 0 });
     const durableAttemptIds = new Set(selectAvailable(db, 'attempts', ['attempt_id'], 'WHERE task_id=?', [entry.task.taskId]).map(row => row.attempt_id));
     const durableResultIds = new Set(selectAvailable(db, 'results', ['result_id'], 'WHERE task_id=?', [entry.task.taskId]).map(row => row.result_id));
     const durableArtifactIds = new Set(selectAvailable(db, 'artifacts', ['artifact_id'], 'WHERE task_id=?', [entry.task.taskId]).map(row => row.artifact_id));
@@ -464,15 +596,23 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
     if (unresolvedAttemptIds.length) entry.flags.push('EVENT_ATTEMPT_REFERENCE_UNRESOLVED');
     if (unresolvedResultIds.length) entry.flags.push('EVENT_RESULT_REFERENCE_UNRESOLVED');
     if (unresolvedArtifactIds.length) entry.flags.push('EVENT_ARTIFACT_REFERENCE_UNRESOLVED');
+    if (references.truncated) entry.flags.push('EVENT_LINEAGE_REFERENCE_SCAN_TRUNCATED');
+    if (taskCorrelationTruncated) entry.flags.push('EVENT_TASK_CORRELATION_SCAN_TRUNCATED');
     entry.flags = [...new Set(entry.flags)];
     const unresolvedReferenceCount = unresolvedAttemptIds.length + unresolvedResultIds.length + unresolvedArtifactIds.length;
     const totalReferencedCount = references.attemptIds.size + references.resultIds.size + references.artifactIds.size;
     entry.lifecycleEvidence.eventReferences = {
-      status: unresolvedReferenceCount ? 'CONFLICTING' : totalReferencedCount ? 'ALL_REFERENCES_RESOLVED' : 'NO_REFERENCES_OBSERVED',
-      completeness: totalReferencedCount ? 'OBSERVED_REFERENCES_ONLY_NOT_PROOF_OF_COMPLETE_LINEAGE' : 'ABSENCE_OF_REFERENCES_DOES_NOT_PROVE_COMPLETE_LINEAGE',
+      status: unresolvedReferenceCount ? 'CONFLICTING' : references.truncated || taskCorrelationTruncated ? 'INCOMPLETE_SCAN'
+        : totalReferencedCount ? 'ALL_REFERENCES_RESOLVED' : 'NO_REFERENCES_OBSERVED',
+      completeness: references.truncated || taskCorrelationTruncated ? 'SCAN_TRUNCATED_RECONCILIATION_INCOMPLETE'
+        : totalReferencedCount ? 'OBSERVED_REFERENCES_ONLY_NOT_PROOF_OF_COMPLETE_LINEAGE' : 'ABSENCE_OF_REFERENCES_DOES_NOT_PROVE_COMPLETE_LINEAGE',
       referencedAttemptIds: [...references.attemptIds].sort(), unresolvedAttemptIds: unresolvedAttemptIds.sort(),
       referencedResultIds: [...references.resultIds].sort(), unresolvedResultIds: unresolvedResultIds.sort(),
-      referencedArtifactIds: [...references.artifactIds].sort(), unresolvedArtifactIds: unresolvedArtifactIds.sort()
+      referencedArtifactIds: [...references.artifactIds].sort(), unresolvedArtifactIds: unresolvedArtifactIds.sort(),
+      scan: { truncated: references.truncated, nodesVisited: references.nodesVisited,
+        taskCorrelationTruncated,
+        unattributedTruncatedEventIds: incompleteTaskCorrelationEventIds.filter(eventId =>
+          !correlated.some(event => event.event_id === eventId)) }
     };
     if (entry.flags.length) entry.lifecycleEvidence.disposition = 'HOLD_CONFLICTING_EVIDENCE';
     entry.eventLineage = {
@@ -482,8 +622,10 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
       eventCount: correlated.length,
       firstEventAt: correlated[0]?.created_at || null,
       latestEventAt: correlated.at(-1)?.created_at || null,
-      truncated: false,
-      correlation: 'payload_task_id_exact_match'
+      truncated: references.truncated || taskCorrelationTruncated,
+      correlation: taskCorrelationTruncated ? 'bounded_recursive_scan_incomplete' : 'recursive_payload_task_id_match',
+      unattributedTruncatedEventIds: incompleteTaskCorrelationEventIds.filter(eventId =>
+        !correlated.some(event => event.event_id === eventId))
     };
   }
   const runtime = selectAvailable(db, 'workflow_runtime_state', ['job_id', 'phase', 'attempt', 'resume_after', 'last_error', 'updated_at'],
@@ -505,9 +647,11 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   const state = String(job.state || '').toUpperCase();
   const status = String(job.status || '').toLowerCase();
   const flags = [...new Set(tasks.flatMap(entry => entry.flags))];
+  if (incompleteTaskCorrelationEventIds.some(eventId => ![...eventsByTaskId.values()].some(events => events.some(event => event.event_id === eventId)))) {
+    flags.push('EVENT_TASK_CORRELATION_SCAN_TRUNCATED');
+  }
   const activeTaskCompletionAfterUpdate = currentTaskEntry && completionEvents.some(event => {
-    const taskId = correlatedTaskId(event);
-    return taskId === job.active_task_id && timestampMs(event.created_at) != null &&
+    return correlatedTaskIds(event).taskIds.includes(job.active_task_id) && timestampMs(event.created_at) != null &&
       timestampMs(currentTaskEntry.task.updatedAt) != null && timestampMs(event.created_at) > timestampMs(currentTaskEntry.task.updatedAt);
   });
   if (activeTaskCompletionAfterUpdate) flags.push('COMPLETION_EVENT_NEWER_THAN_ACTIVE_TASK_ROW');
@@ -571,10 +715,11 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
     latestApproval: approvals[0] ? { decision: approvals[0].decision, actor: approvals[0].actor, createdAt: approvals[0].created_at,
       proposalHash: approvals[0].proposal_hash ?? null } : null,
     allJobEventIds: allJobEvents.map(event => event.event_id),
+    allJobEventsPayloadFingerprint,
     latestEvents: events.reverse().map(event => ({ type: event.type, createdAt: event.created_at, eventId: event.event_id,
       payloadSummary: summarizePayload(parseJson(event.payload_json || '{}')) })),
     completionEventEvidence: { scannedCount: completionEvents.length, truncated: false,
-      matchingActiveTaskEventIds: completionEvents.filter(event => correlatedTaskId(event) === job.active_task_id).map(event => event.event_id) },
+      matchingActiveTaskEventIds: completionEvents.filter(event => correlatedTaskIds(event).taskIds.includes(job.active_task_id)).map(event => event.event_id) },
     tasks, flags: [...new Set(flags)], classification, ownerAction
   };
 }
@@ -609,6 +754,7 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
       resultIds: item.tasks.flatMap(entry => entry.lineageAssessment.resultIds),
       artifactIds: item.tasks.flatMap(entry => entry.lineageAssessment.artifactIds),
       leaseIds: item.tasks.flatMap(entry => entry.lineageAssessment.leaseIds),
+      allJobEventsPayloadFingerprint: item.allJobEventsPayloadFingerprint,
       latestEventIds: item.latestEvents.map(event => event.eventId).sort(),
       allJobEventIds: item.allJobEventIds
     };
@@ -630,10 +776,45 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
     };
   });
   const countBy = key => diagnostics.reduce((counts, item) => { counts[item[key]] = (counts[item[key]] || 0) + 1; return counts; }, {});
+  const taskEntries = diagnostics.flatMap(item => item.tasks);
+  const runningTaskEntries = taskEntries.filter(entry => String(entry.task.status || '').toLowerCase() === 'running');
+  const observedActivityAges = diagnostics.map(item => item.activityAgeMs)
+    .filter(value => Number.isSafeInteger(value) && value >= 0);
+  // These are diagnostic/operability measures only. They deliberately do not
+  // infer provider truth, worker death, terminal disposition, or authorization
+  // from the local SQLite snapshot. In particular, absent lease rows are a
+  // reconciliation signal, not permission to retry or terminalize a task.
+  const operabilityMetrics = {
+    status: 'DIAGNOSTIC_ONLY_NOT_RELEASE_EVIDENCE',
+    jobsWithUnverifiedOwnerIdentity: diagnostics.filter(item =>
+      item.ownerBinding?.authority === 'unresolved_owner_identity_not_persisted').length,
+    jobsWithProviderIdentityNotPersisted: diagnostics.filter(item =>
+      item.runtimeObservation?.providerIdentity === 'not_persisted_in_workflow_runtime_state_schema' ||
+      item.runtimeObservation?.status === 'missing').length,
+    oldestObservedActivityAgeMs: observedActivityAges.length ? Math.max(...observedActivityAges) : null,
+    tasksObserved: taskEntries.length,
+    runningTasksObserved: runningTaskEntries.length,
+    runningTasksWithoutActiveLeaseRows: runningTaskEntries.filter(entry =>
+      entry.lifecycleEvidence?.lease?.status === 'MISSING_NOT_PROOF_OF_WORKER_DEATH').length,
+    runningTasksMissingExecutionMetadata: runningTaskEntries.filter(entry =>
+      entry.flags.includes('RUNNING_TASK_WITHOUT_EXECUTION_METADATA')).length,
+    tasksWithReconciliationFlags: taskEntries.filter(entry => entry.flags.length > 0).length,
+    tasksWithConflictingEventReferences: taskEntries.filter(entry =>
+      entry.lifecycleEvidence?.eventReferences?.status === 'CONFLICTING').length,
+    tasksWithUnverifiedOwnerOrProvider: taskEntries.filter(entry =>
+      entry.lifecycleEvidence?.owner?.status !== 'VERIFIED' || entry.lifecycleEvidence?.provider?.status !== 'VERIFIED').length,
+    terminalDispositionProof: {
+      status: 'NOT_ASSESSED_BY_LOCAL_SQLITE_DIAGNOSTIC',
+      verifiedTerminalDispositions: 0,
+      note: 'A local diagnostic snapshot does not ingest authenticated host/provider terminal evidence and cannot establish that external effects have stopped.'
+    },
+    automaticLifecycleActionsAuthorized: false
+  };
   const tableSummary = Object.fromEntries(['jobs', 'events', 'tasks', 'results', 'artifacts', 'attempts', 'task_leases', 'approvals']
     .map(table => [table, tableExists(db, table) ? db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get().count : null]));
   return {
-    schemaVersion: 1, generatedAt: new Date(nowMs).toISOString(), readOnly: true,
+    schemaVersion: 2, generatedAt: new Date(nowMs).toISOString(), readOnly: true,
+    liveMutationPerformed: false, workflowDatabaseMutationPerformed: false, externalSecurityStoreMutationPerformed: false,
     purpose: 'owner-guided reconciliation; diagnostic report only; no lifecycle changes, lease changes, retries, approvals, or dispatch',
     scope: jobId ? 'single_job' : 'active_jobs', jobFilter: jobId, limit, staleAfterMs,
     dbPath: null, tableCounts: tableSummary,
@@ -641,6 +822,7 @@ export function buildActiveWorkflowReconciliationReport(db, { jobId = null, limi
       jobsFlaggedForReconciliation: diagnostics.filter(item => item.flags.length > 0).length,
       staleCandidates: diagnostics.filter(item => item.classification === 'stale_candidate' || item.classification === 'stale_candidate_reconciliation_required').length,
       jobsWithRunningTasksButNoActiveLeases: diagnostics.filter(item => item.runningTaskCount > 0 && item.activeLeaseCount === 0).length },
+    operabilityMetrics,
     policy: { staleCandidateIsNotProofOfWorkerDeath: true, missingLeaseDoesNotAuthorizeTerminalization: true,
       callerMustVerifyHostAndProviderState: true, noAutomaticRecovery: true },
     diagnostics,

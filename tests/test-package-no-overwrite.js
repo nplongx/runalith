@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const script = path.join(root, 'scripts/package-runalith-mcpb.sh');
+const packageRuntimeEntryPoint = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).runtimeEntryPoint;
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-no-overwrite-'));
 
 function runAt(output) {
@@ -113,22 +114,28 @@ try {
   // absence or symlink substitution must be rejected by the same preflight as
   // the manifest, runtime collector, and acceptance test.
   const schemaSourceRoot = path.join(temp, 'symlink-schema-test-project');
-  for (const directory of ['scripts', 'tests', 'plugin', 'server', 'benchmarks/plugin-workflow-benchmark']) fs.mkdirSync(path.join(schemaSourceRoot, directory), { recursive: true });
+  for (const directory of ['scripts', 'scripts/lib', 'tests', 'plugin', 'server', 'benchmarks/plugin-workflow-benchmark']) fs.mkdirSync(path.join(schemaSourceRoot, directory), { recursive: true });
   for (const relative of [
-    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.28.js',
+    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', packageRuntimeEntryPoint,
     'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js', 'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
-    'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
+    'tests/test-adaptive-goal-approval-subsystem.mjs',
+    'tests/test-adaptive-goal-approval-subsystem.mjs', 'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs', 'tests/test-adaptive-goal-reviewer-identity.js', 'tests/test-reconcile-active-workflows.mjs',
+    'tests/test-reconcile-active-workflows-v2.mjs', 'tests/test-external-trust-checkpoint-contract.mjs',
     'tests/test-execution-lease-fencing.js', 'tests/test-execution-control-process-boundary.js',
     'tests/test-mcp-stdio-backpressure.mjs', 'tests/test-temp-dir.js',
     'tests/test-execution-batch.js', 'tests/test-execution-batch-concurrency.js',
     'tests/test-execution-batch-terminal-recovery.js', 'tests/test-execution-success-contract.js',
-    'tests/test-phase5-recovery.js', 'tests/test-agent-tool-guidance.js',
+    'tests/test-phase5-recovery.js', 'tests/test-workflow-terminal-failure-atomicity.js', 'tests/test-agent-tool-guidance.js',
     'tests/test-mcp-graceful-signal-shutdown-20261017.js',
     'tests/test-mcp-shutdown-backpressure-deadline-20261017.js',
     'tests/test-mcp-eof-shutdown-framing-20261017.js', 'tests/test-adaptive-goal-evidence-lineage.js',
+    'scripts/build-agg-live-remediation-plan.mjs', 'tests/test-agg-live-remediation-plan.mjs',
+    'tests/test-agg-acceptance-consistency.mjs', 'scripts/verify-agg-acceptance-consistency.mjs',
     'scripts/package-runalith-mcpb.sh', 'scripts/collect-plugin-runtime.mjs', 'scripts/plugin-package-metadata.mjs',
-    'scripts/reconcile-active-workflows.mjs', 'scripts/verify-mcpb-source-alignment.mjs',
+    'scripts/reconcile-active-workflows.mjs', 'scripts/reconcile-active-workflows-v2.mjs',
+    'scripts/lib/external-trust-checkpoint-contract.mjs', 'scripts/lib/sqlite-external-checkpoint-transition.mjs',
+    'scripts/validate-agg-trust-config.mjs', 'scripts/verify-mcpb-source-alignment.mjs',
     'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs'
   ]) fs.copyFileSync(path.join(root, relative), path.join(schemaSourceRoot, relative));
   fs.symlinkSync(externalReadme, path.join(schemaSourceRoot, 'tests/test-extracted-package-tool-schemas.mjs'));
@@ -148,19 +155,24 @@ try {
   const externalTest = path.join(temp, 'external-package-test.js');
   fs.writeFileSync(externalTest, "throw new Error('external package test must never execute');\n", { flag: 'wx', mode: 0o600 });
   const preflightInputs = [
-    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', 'server/index-v1.0.9-rc.28.js',
+    'README.md', 'LICENSE', 'package.json', 'plugin/manifest.json', packageRuntimeEntryPoint,
     'tests/test-runalith-plugin.js', 'tests/test-production-behavioral-qa.js', 'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
-    'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
+    'tests/test-adaptive-goal-approval-subsystem.mjs', 'tests/test-adaptive-goal-knowledge-verifier.mjs', 'tests/test-adaptive-goal-trust-configuration.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs', 'tests/test-adaptive-goal-reviewer-identity.js', 'tests/test-reconcile-active-workflows.mjs',
     'tests/test-extracted-package-tool-schemas.mjs',
+    'tests/test-reconcile-active-workflows-v2.mjs', 'tests/test-external-trust-checkpoint-contract.mjs',
     'tests/test-execution-lease-fencing.js', 'tests/test-execution-control-process-boundary.js',
     'tests/test-mcp-stdio-backpressure.mjs', 'tests/test-temp-dir.js',
     'tests/test-execution-batch.js', 'tests/test-execution-batch-concurrency.js',
     'tests/test-execution-batch-terminal-recovery.js', 'tests/test-execution-success-contract.js',
-    'tests/test-phase5-recovery.js', 'tests/test-agent-tool-guidance.js',
+    'tests/test-phase5-recovery.js', 'tests/test-workflow-terminal-failure-atomicity.js', 'tests/test-agent-tool-guidance.js',
     'tests/test-mcp-graceful-signal-shutdown-20261017.js',
     'tests/test-mcp-shutdown-backpressure-deadline-20261017.js',
     'tests/test-mcp-eof-shutdown-framing-20261017.js', 'tests/test-adaptive-goal-evidence-lineage.js',
+    'scripts/build-agg-live-remediation-plan.mjs', 'scripts/reconcile-active-workflows-v2.mjs',
+    'scripts/lib/external-trust-checkpoint-contract.mjs', 'scripts/lib/sqlite-external-checkpoint-transition.mjs',
+    'scripts/validate-agg-trust-config.mjs', 'tests/test-agg-live-remediation-plan.mjs',
+    'tests/test-agg-acceptance-consistency.mjs', 'scripts/verify-agg-acceptance-consistency.mjs',
     'scripts/package-runalith-mcpb.sh', 'scripts/collect-plugin-runtime.mjs', 'scripts/plugin-package-metadata.mjs',
     'scripts/reconcile-active-workflows.mjs', 'scripts/verify-mcpb-source-alignment.mjs',
     'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs'
@@ -172,7 +184,7 @@ try {
     ['tests/test-temp-dir.js', /missing or symlinked package source: tests\/test-temp-dir\.js/]
   ]) {
     const project = path.join(temp, `symlink-package-preflight-${path.basename(relative, '.js')}`);
-    for (const directory of ['scripts', 'tests', 'plugin', 'server', 'benchmarks/plugin-workflow-benchmark']) fs.mkdirSync(path.join(project, directory), { recursive: true });
+    for (const directory of ['scripts', 'scripts/lib', 'tests', 'plugin', 'server', 'benchmarks/plugin-workflow-benchmark']) fs.mkdirSync(path.join(project, directory), { recursive: true });
     for (const input of preflightInputs) {
       if (input === relative) continue;
       fs.copyFileSync(path.join(root, input), path.join(project, input));
@@ -195,7 +207,7 @@ try {
   fs.mkdirSync(path.join(symlinkRuntimeRoot, 'server'), { recursive: true });
   fs.mkdirSync(symlinkRuntimeStage);
   fs.copyFileSync(path.join(root, 'package.json'), path.join(symlinkRuntimeRoot, 'package.json'));
-  fs.copyFileSync(path.join(root, 'server/index-v1.0.9-rc.28.js'), path.join(symlinkRuntimeRoot, 'server/index-v1.0.9-rc.28.js'));
+  fs.copyFileSync(path.join(root, packageRuntimeEntryPoint), path.join(symlinkRuntimeRoot, packageRuntimeEntryPoint));
   fs.symlinkSync(externalReadme, path.join(symlinkRuntimeRoot, 'server/index.js'));
   const symlinkRuntimeBuild = spawnSync(process.execPath, [collector, symlinkRuntimeRoot, symlinkRuntimeStage], { cwd: root, encoding: 'utf8' });
   assert.notEqual(symlinkRuntimeBuild.status, 0, 'runtime collector must reject symlinked source dependencies');

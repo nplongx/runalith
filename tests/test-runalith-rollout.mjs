@@ -277,6 +277,39 @@ test('preflight diagnostic report publication is exclusive and unsupported optio
   assert.match(checkpointWithoutCandidate.stderr + checkpointWithoutCandidate.stdout, /preflight requires --candidate/);
 });
 
+test('preflight preserves structured blocked evidence when a structurally valid candidate has stale source/runtime identity', () => {
+  const destination = path.join(testRoot, `source-mismatch-preflight-${crypto.randomUUID()}.json`);
+  const result = spawnSync(process.execPath, [path.join(ROOT, 'scripts/runalith-rollout.mjs'), 'preflight',
+    '--candidate', candidatePath, '--report', destination], { encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 3, result.stderr || result.stdout);
+  assert.ok(fs.existsSync(destination), 'a source/runtime mismatch must persist blocked diagnostic evidence');
+  const report = JSON.parse(fs.readFileSync(destination, 'utf8'));
+  assert.equal(report.command, 'preflight');
+  assert.equal(report.status, 'BLOCKED');
+  assert.equal(report.readOnly, true);
+  assert.equal(report.liveMutationPerformed, false);
+  assert.equal(report.workflowDatabaseMutationPerformed, false);
+  assert.equal(report.externalSecurityStoreMutationPerformed, false);
+  assert.equal(report.candidate.archiveIntegrityVerified, true);
+  assert.equal(report.candidate.verified, false, 'archive readability must not imply current-source alignment');
+  assert.equal(report.candidate.sourceAlignment.status, 'BLOCKED_CURRENT_SOURCE_IDENTITY_MISMATCH');
+  assert.equal(report.candidate.sourceAlignment.exactArchiveEntryByteMatch, false);
+  assert.equal(report.candidate.smoke.skipped, true, 'the stale candidate runtime must not be launched by this source-mismatch path');
+  assert.ok(report.decision.blockers.includes('CANDIDATE_SOURCE_ALIGNMENT_NOT_VERIFIED'));
+  for (const gate of ['PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED', 'INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED',
+    'PRODUCTION_AGG_TRUST_CONFIGURATION_NOT_VERIFIED', 'PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED',
+    'ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN', 'RUNNING_TASKS_MUST_DRAIN']) {
+    assert.ok(report.decision.blockers.includes(gate), `the downstream authority gate must remain open: ${gate}`);
+    assert.ok(report.requiredAuthorityGates.some(item => item.code === gate && item.status === 'OPEN'), gate);
+  }
+  assert.ok(report.requiredAuthorityGates.every(item => item.assessment === 'NOT_EVALUATED_AFTER_CANDIDATE_SOURCE_ALIGNMENT_FAILURE'));
+  assert.equal(hash(fs.readFileSync(candidatePath)), report.candidate.sha256, 'report binds exact captured candidate bytes');
+  assert.equal((fs.statSync(destination).mode & 0o777), 0o600);
+  assert.equal(JSON.parse(result.stdout).status, 'BLOCKED');
+  assert.equal(JSON.parse(result.stdout).canActivateNow, false);
+  assert.equal(JSON.parse(result.stdout).readOnly, true);
+});
+
 test('simulation has idempotent activation and rolls back at each tested failure boundary', () => {
   const successfulRoot = makePrivateRoot();
   const success = simulateRolloutInRoot({ bundlePath: candidatePath, root: successfulRoot, smoke: () => ({ passed: true }) });

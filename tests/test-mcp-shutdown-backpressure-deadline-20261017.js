@@ -89,7 +89,7 @@ try {
   });
   assert.equal(exitSignal, null, 'bounded shutdown must exit by explicit fail-stop, not default signal termination');
   assert.equal(exitCode, 1, 'undrainable stdout must not be reported as successful shutdown');
-  assert.match(stderr, /shutdown drain exceeded 150ms/);
+  assert.match(stderr, /shutdown drain exceeded 150ms|stdout backpressure exceeded 150ms/);
   console.log('MCP shutdown stdout-backpressure deadline and fail-stop PASS');
 } finally {
   if (!exited && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');

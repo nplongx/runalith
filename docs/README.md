@@ -5,6 +5,7 @@ This index is the starting point for users, operators, and contributors. Visit t
 ## Getting started
 
 - [Quickstart](quickstart.md) — build or connect the local MCP runtime and understand the first workflow steps.
+- [Production-readiness loop instructions](runalith-production-readiness-loop-instructions.md) — reusable, version-agnostic iteration prompt that discovers the current candidate/evidence on every run and preserves production safety boundaries.
 - [Root README](../README.md) — project purpose, capabilities, security boundaries, commands, and navigation.
 - [Testing pre-release notes for 1.0.9-rc.11](release-notes-1.0.9-rc.11.md) — published package identity, validation scope, production blockers and the no-install boundary for the current candidate.
 - [RC.11 Goal/Idea → Plan → Execution Graph acceptance (2026-10-26)](goal-plan-execution-acceptance-rc11-20261026.md) — exact tag/source/package identity, release-time verification, current host observations and authority-owned blockers.
@@ -31,6 +32,13 @@ This index is the starting point for users, operators, and contributors. Visit t
 
 - [Architecture](architecture.md) — runtime components, durable state, execution, and recovery boundaries.
 - [Adaptive Goal Graph system guide](adaptive-goal-graph.md) — current AGG architecture end-to-end: bounded graph search, persistent Goal/Idea knowledge, evidence lineage, independent verifier/reviewer trust, Plan/Execution Graph integration, telemetry, experiments and hard execution boundaries.
+- [Runalith production readiness and workflow engineering decision record (2026-10-28)](runalith-production-readiness-workflow-engineering-20261028.md) — candidate-specific blocker evidence contracts, trust/approval architecture, read-only workflow reconciliation metrics, durability patterns, workflow-engine trade-offs, negative tests and phased go/no-go criteria. This record does not authorize release or close a production gate.
+- [RC.32 rollout dossier (2026-10-28)](runalith-rollout-rc32-20261028.md) and [Goal/Idea → Plan → Execution acceptance (RC.32)](goal-plan-execution-acceptance-rc32-20261028.md) — integrated cancellation hardening, versioned trust-preflight diagnostics, current read-only lifecycle findings and the remaining authority-owned release gates.
+- [RC.37 rollout dossier (2026-10-28)](runalith-rollout-rc37-20261028.md) — schema-v2 per-record recovery lineage, bounded event-reference scanning, reviewer-trust-missing dispatch regression, candidate-bound validation and all still-open external authority gates.
+- [RC.38 rollout dossier (2026-10-28)](runalith-rollout-rc38-20261028.md) — combines current graph and lifecycle reconciliation reports into separately hash-bound, per-record remediation, while requiring same-DB identity, fresh observation time and diagnostic-only policy.
+- [RC.39 rollout dossier (2026-10-28)](runalith-rollout-rc39-20261028.md) — requires an explicit negative assertion for external-security-store mutation in schema-v2 lifecycle input and tests fail-closed behavior for a missing marker.
+- [RC.40 rollout dossier (2026-10-28)](runalith-rollout-rc40-20261028.md) — adds a package contract for exact manifest MCP launch arguments and aligns `mcp_config.args`, `main`, `npm start` and the versioned runtime entry point.
+- [RC.41 rollout dossier (2026-10-29)](runalith-rollout-rc41-20261029.md) — lifecycle send-claim/reaper race fixes and packaged provider-pre-send regression coverage. Local candidate only; rollout remains blocked pending independent authority evidence and workflow drain.
 - [AGG production trust provisioning runbook](agg-production-trust-provisioning-runbook.md) — administrator-owned public roots, JSON configuration, independent providers, rotation/revocation and the missing external monotonic checkpoint gate.
 - [RC.11 Goal/Idea → Plan → Execution acceptance](goal-plan-execution-acceptance-rc11-20261026.md) — published candidate identity and current read-only host blockers; does not authorize installation/activation.
 - [RC.11 workflow recovery guidance](goal-plan-execution-recovery-guidance-rc11-followup.md) — per-job/task read-only reconciliation and owner/provider-authorized recovery procedure.

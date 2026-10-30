@@ -2,7 +2,10 @@ import { createHash } from 'node:crypto';
 import { canonicalJson, validateExecutionPlan } from './workflow/plan.js';
 import { artifactSchemaForType } from './workflow/artifacts.js';
 import { getAgentArtifactType, getAgentContract } from './workflow/agent-contracts.js';
-import { verifyAdaptiveGoalExecutionGraphProposalHash } from './adaptive-goal-execution-graph-proposal.js';
+import {
+  ADAPTIVE_GOAL_EXECUTION_GRAPH_PROPOSAL_SCHEMA_VERSION,
+  verifyAdaptiveGoalExecutionGraphProposalHash
+} from './adaptive-goal-execution-graph-proposal.js';
 import {
   buildAdaptiveGoalReviewedTaskInputContract,
   buildAdaptiveGoalCompilerActionIntentBindings,
@@ -78,7 +81,7 @@ function validateGraphProposal(proposal) {
     /^[a-f0-9]{64}$/.test(sourceVerification?.evidenceManifestHash || '') &&
     typeof sourceVerification?.expiresAt === 'string' && Date.parse(sourceVerification.expiresAt) > Date.now();
   if (!isRecord(proposal) || proposal.kind !== 'adaptive_goal_execution_graph_proposal' ||
-      proposal.schemaVersion !== 1 || proposal.status !== 'review_required' ||
+      proposal.schemaVersion !== ADAPTIVE_GOAL_EXECUTION_GRAPH_PROPOSAL_SCHEMA_VERSION || proposal.status !== 'review_required' ||
       !verifyAdaptiveGoalExecutionGraphProposalHash(proposal) ||
       !isRecord(proposal.source) || (!sourceVerificationIsUnverified && !sourceVerificationIsTrusted) ||
       !isRecord(proposal.workflowTemplate) || !Array.isArray(proposal.nodes) || !proposal.nodes.length ||

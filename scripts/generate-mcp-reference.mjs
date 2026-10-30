@@ -52,7 +52,6 @@ function getRuntimeEntryPoint() {
 
 function renderReference(mcp) {
   const tools = mcp?.result?.tools;
-  const version = mcp?.initialize?.result?.serverInfo?.version ?? 'unknown';
   if (!Array.isArray(tools) || tools.length === 0) throw new Error('MCP tools/list returned no tools');
 
   const names = new Set();
@@ -71,9 +70,8 @@ function renderReference(mcp) {
     '',
     'This page is generated from the shipped stdio MCP server by the documentation generator. It describes registered tool names and input schemas returned by `tools/list`; it does not claim that every tool is safe in every workflow state. Follow the linked guides for lifecycle preconditions, permissions, evidence rules, and limitations.',
     '',
-    '- Source: `' + escMarkdown(getRuntimeEntryPoint().entryPoint) + '` and its runtime schema definitions.',
+    '- Source: the runtime entry point declared by `package.json` and its runtime schema definitions.',
     '- Server identity reported by the checked-out source: `' + escMarkdown(mcp.initialize.result.serverInfo.name) + '`.',
-    '- Source package version reported at generation time: `' + escMarkdown(version) + '`. This is source-runtime metadata, not proof of which bundle is installed in a client.',
     `- Registered tools: **${tools.length}**.`,
     '',
     '## Choosing the right operation',
@@ -230,12 +228,12 @@ async function main() {
     if (actual !== expected) {
       throw new Error('docs/MCP_REFERENCE.md is stale versus the shipped MCP tools/list output; run npm run docs:generate-reference and review the diff');
     }
-    console.log(`MCP reference check passed: ${mcp.result.tools.length} registered tools match docs/MCP_REFERENCE.md (source package ${mcp.initialize.result.serverInfo.version}).`);
+    console.log(`MCP reference check passed: ${mcp.result.tools.length} registered tools match docs/MCP_REFERENCE.md (current source runtime).`);
     return;
   }
 
   await writeFile(outputPath, expected, 'utf8');
-  console.log(`Wrote ${path.relative(repoRoot, outputPath)} from ${mcp.result.tools.length} registered MCP tools (source package ${mcp.initialize.result.serverInfo.version}).`);
+  console.log(`Wrote ${path.relative(repoRoot, outputPath)} from ${mcp.result.tools.length} registered MCP tools (current source runtime).`);
 }
 
 main().catch((error) => {

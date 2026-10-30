@@ -78,10 +78,10 @@ export function expectedAdaptiveGoalReviewerAttestationCandidate(jobId, candidat
 
 /**
  * Verify the provider-signed reviewer decision against a configured public
- * trust root and the exact current candidate. This function only reads a
- * durable, private adapter event; no MCP tool accepts a caller-supplied proof
- * or writes this event. The provider MUST authenticate the human and authorize
- * AGG_ACTION_INTENT_REVIEWER_AUTHORIZATION_SCOPE before issuing the signature.
+ * trust root and the exact current candidate. The provider MUST authenticate
+ * the human and authorize ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE before
+ * issuing the signature; runtime ingestion only transports and verifies that
+ * externally issued assertion and does not authenticate a human by itself.
  */
 export function assertAdaptiveGoalReviewerAttestation(store, jobId, candidate, { now = Date.now(), trustConfigurationDb = trustConfigurationLedgerDb } = {}) {
   if (!trustConfigurationDb || trustConfigurationDb === store?.db || typeof trustConfigurationDb.exec !== 'function' ||
@@ -189,6 +189,152 @@ export function assertAdaptiveGoalReviewerAttestation(store, jobId, candidate, {
     candidateHash: expectedCandidate.candidate_hash,
     immutablePlanHash: expectedCandidate.immutable_plan_hash
   });
+}
+
+/**
+ * Persist a provider-signed reviewer assertion through a single runtime-owned
+ * ingestion boundary. The caller supplies a loader, not a candidate snapshot:
+ * it is re-run while the workflow database writer lock is held both before and
+ * after persistence, so the attestation cannot be attached to a stale review
+ * candidate. This function never creates a signature or grants workflow
+ * approval/dispatch authority; the trusted provider remains responsible for
+ * authenticating the human and authorizing ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE.
+ */
+export function ingestAdaptiveGoalReviewerAttestation(store, jobId, attestationInput, {
+  now = Date.now(), trustConfigurationDb = trustConfigurationLedgerDb, loadCurrentCandidate
+} = {}) {
+  if (!store?.db || typeof store.db.exec !== 'function' || typeof store.db.prepare !== 'function' ||
+      store.db.isTransaction === true) {
+    fail('AGG_REVIEWER_ATTESTATION_INGEST_DATABASE_UNAVAILABLE',
+      'reviewer attestation ingestion requires an available workflow database with no caller-owned transaction');
+  }
+  if (typeof jobId !== 'string' || !jobId.trim() || typeof loadCurrentCandidate !== 'function') {
+    fail('AGG_REVIEWER_ATTESTATION_INGEST_REQUEST_INVALID',
+      'reviewer attestation ingestion requires a job ID and a runtime-owned current-candidate loader');
+  }
+  if (!Number.isSafeInteger(now) || now < 0) {
+    fail('AGG_REVIEWER_ATTESTATION_INGEST_CLOCK_INVALID', 'reviewer attestation verification time must be a non-negative safe integer');
+  }
+
+  const db = store.db;
+  let transactionOpen = false;
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    transactionOpen = true;
+
+    const current = loadCurrentCandidate();
+    const candidate = current?.candidate;
+    const source = current?.sourceGraphVerification;
+    if (!current?.found || current.status !== 'fresh' || !isRecord(candidate) ||
+        !SHA256.test(candidate.candidateHash || '') || !SHA256.test(candidate.fingerprint || '') ||
+        !SHA256.test(candidate.executionPlan?.plan_hash || '') ||
+        !isRecord(source) || !SHA256.test(source.attestationId || '') ||
+        !SHA256.test(source.snapshotHash || '') || !SHA256.test(source.evidenceManifestHash || '') ||
+        !SHA256.test(source.trustRootSha256 || '') || typeof source.providerId !== 'string' || !source.providerId.trim() ||
+        !canonicalTimestamp(source.expiresAt) || Date.parse(source.expiresAt) <= now) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_CANDIDATE_STALE',
+        'ingestion requires a freshly rebuilt candidate bound to a current independently attested Goal/Idea snapshot and evidence manifest');
+    }
+
+    const existing = db.prepare(`SELECT event_id,job_id,type,payload_json FROM events
+      WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC`).all(jobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
+    if (existing.length > 1) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_AMBIGUOUS',
+        'multiple reviewer attestation records already exist; ingestion will not repair or select among them');
+    }
+    if (existing.length === 1) {
+      let prior;
+      try { prior = JSON.parse(existing[0].payload_json); }
+      catch { fail('AGG_REVIEWER_ATTESTATION_INGEST_EXISTING_MALFORMED', 'existing reviewer attestation is malformed'); }
+      if (!isRecord(attestationInput) || canonicalJson(prior) !== canonicalJson(attestationInput)) {
+        fail('AGG_REVIEWER_ATTESTATION_INGEST_CONFLICT',
+          'a different reviewer attestation is already bound to this candidate; replacement and implicit reapproval are denied');
+      }
+      const verified = assertAdaptiveGoalReviewerAttestation(store, jobId, candidate, { now, trustConfigurationDb });
+      const readback = loadCurrentCandidate();
+      if (readback?.status !== 'fresh' || readback.reviewerIdentityVerified !== true ||
+          readback.candidateHash !== candidate.candidateHash ||
+          readback.reviewerAttestation?.attestationEventId !== verified.attestationEventId) {
+        fail('AGG_REVIEWER_ATTESTATION_INGEST_READBACK_MISMATCH',
+          'existing reviewer attestation did not reproduce the same current candidate on readback');
+      }
+      db.exec('COMMIT');
+      transactionOpen = false;
+      return {
+        stored: false, idempotent: true, verified: true, jobId,
+        candidateHash: candidate.candidateHash, immutablePlanHash: candidate.executionPlan.plan_hash,
+        attestationEventId: verified.attestationEventId,
+        approvalGranted: false, dispatchStarted: false, executionAuthorized: false
+      };
+    }
+
+    // A new reviewer identity assertion must arrive before the wrapper has
+    // crossed its ordinary approval/plan/task lifecycle. Existing approvals
+    // cannot be retroactively made valid by attaching a later signature.
+    if (current.wrapperState !== 'IDLE' || current.wrapperApproved === true ||
+        current.immutablePlanPinned === true || current.taskRowsCreated === true ||
+        current.dispatchStarted === true || current.approvalCount !== 0) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_LIFECYCLE_ADVANCED',
+        'a new reviewer assertion may only be attached to an unapproved, unpinned, undispatched review candidate');
+    }
+    if (!isRecord(attestationInput)) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_SHAPE_INVALID', 'attestation must be a provider-signed JSON object');
+    }
+    let serialized;
+    let normalized;
+    try {
+      serialized = JSON.stringify(attestationInput);
+      normalized = JSON.parse(serialized);
+    } catch (error) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_SHAPE_INVALID', `attestation is not inert JSON data: ${String(error?.message || error)}`);
+    }
+    if (!isRecord(normalized) || typeof normalized.nonce !== 'string' || !UUID.test(normalized.nonce)) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_SHAPE_INVALID', 'attestation must include a canonical UUID nonce');
+    }
+    const nonceUses = db.prepare(`SELECT COUNT(*) AS count FROM events
+      WHERE type=? AND json_extract(payload_json,'$.nonce')=?`)
+      .get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, normalized.nonce).count;
+    if (nonceUses !== 0) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_REPLAY', 'reviewer attestation nonce already exists in durable reviewer records');
+    }
+
+    const eventId = sha256(`${jobId}|${ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT}|${candidate.fingerprint}`);
+    db.prepare(`INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)`)
+      .run(eventId, jobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, serialized, new Date(now).toISOString());
+
+    // Reuse the same verifier used by the approval and dispatcher boundaries.
+    // Any schema, signature, scope, freshness, trust-root, candidate or nonce
+    // failure throws and rolls this uncommitted event back.
+    const verified = assertAdaptiveGoalReviewerAttestation(store, jobId, candidate, { now, trustConfigurationDb });
+    const readback = loadCurrentCandidate();
+    if (readback?.status !== 'fresh' || readback.reviewerIdentityVerified !== true ||
+        readback.candidateHash !== candidate.candidateHash ||
+        readback.reviewerAttestation?.attestationEventId !== verified.attestationEventId ||
+        readback.executionReviewReady !== true ||
+        readback.sourceGraphVerification?.snapshotHash !== source.snapshotHash) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_READBACK_MISMATCH',
+        'persisted reviewer evidence did not reproduce the exact current candidate, source snapshot, and review-readiness contract');
+    }
+    const persisted = db.prepare(`SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?`)
+      .get(eventId);
+    if (!persisted || persisted.job_id !== jobId || persisted.type !== ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT ||
+        persisted.payload_json !== JSON.stringify(normalized)) {
+      fail('AGG_REVIEWER_ATTESTATION_INGEST_PERSISTENCE_MISMATCH', 'durable reviewer attestation failed exact canonical persistence readback');
+    }
+    db.exec('COMMIT');
+    transactionOpen = false;
+    return {
+      stored: true, idempotent: false, verified: true, jobId,
+      candidateHash: candidate.candidateHash, immutablePlanHash: candidate.executionPlan.plan_hash,
+      attestationEventId: verified.attestationEventId,
+      approvalGranted: false, dispatchStarted: false, executionAuthorized: false
+    };
+  } catch (error) {
+    if (transactionOpen) {
+      try { db.exec('ROLLBACK'); } catch {}
+    }
+    throw error;
+  }
 }
 
 export function getAdaptiveGoalReviewerConfigurationStatus({ now = Date.now(), trustConfigurationDb = trustConfigurationLedgerDb } = {}) {

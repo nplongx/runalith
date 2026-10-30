@@ -1537,7 +1537,84 @@ async function main() {
   }
   if (args.command === 'preflight') {
     if (!args.candidate) throw new Error('preflight requires --candidate');
-    const candidateBundle = inspectBundle(args.candidate, { requireCurrentSource: true });
+    // Capture a structurally valid archive before checking source identity.
+    // A source mismatch is a release blocker, but should still produce a
+    // machine-readable fail-closed preflight result rather than abort before
+    // the operator can preserve evidence of the mismatch.
+    const candidateArchive = inspectBundle(args.candidate, { requireCurrentSource: false });
+    if (args.expectedSha256 && args.expectedSha256 !== candidateArchive.sha256) {
+      throw new Error(`candidate SHA-256 mismatch: expected ${args.expectedSha256}, observed ${candidateArchive.sha256}`);
+    }
+    let candidateBundle = candidateArchive;
+    let sourceAlignmentError = null;
+    try { candidateBundle = inspectBundle(candidateArchive.path, { requireCurrentSource: true }); }
+    catch (error) {
+      if (!String(error?.message || error).includes('candidate package does not match the versioned source runtime, manifest, and pinned historical runtime in this workspace')) throw error;
+      sourceAlignmentError = error;
+    }
+    if (sourceAlignmentError) {
+      const sourcePackage = safeJson(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'), 'repository package.json');
+      const sourceManifestBytes = fs.readFileSync(path.join(ROOT, 'plugin/manifest.json'));
+      const archivedManifestBytes = Buffer.from(run('unzip', ['-p', candidateArchive.path, 'manifest.json'], { encoding: 'buffer' }));
+      const sourceManifest = safeJson(sourceManifestBytes.toString('utf8'), 'repository plugin manifest');
+      const archivedManifest = safeJson(archivedManifestBytes.toString('utf8'), 'bundle manifest');
+      const archiveHasCurrentEntryPoint = candidateArchive.entries.includes(sourcePackage.runtimeEntryPoint);
+      const blockers = [
+        'CANDIDATE_SOURCE_ALIGNMENT_NOT_VERIFIED',
+        'PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED',
+        'INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED',
+        'PRODUCTION_AGG_TRUST_CONFIGURATION_NOT_VERIFIED',
+        'PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED',
+        'ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN',
+        'RUNNING_TASKS_MUST_DRAIN'
+      ];
+      const requiredAuthorityGates = blockers.slice(1).map(code => ({ code, status: 'OPEN', assessment: 'NOT_EVALUATED_AFTER_CANDIDATE_SOURCE_ALIGNMENT_FAILURE' }));
+      const report = {
+        schemaVersion: 1, command: 'preflight', generatedAt: new Date().toISOString(),
+        status: 'BLOCKED', readOnly: true, liveMutationPerformed: false,
+        hostLifecycleMutationPerformed: false, workflowDatabaseMutationPerformed: false,
+        externalSecurityStoreMutationPerformed: false,
+        externalCheckpoint: { status: 'NOT_REQUESTED', transition: { attempted: false, outcome: 'NOT_REQUESTED' },
+          sideEffectContract: 'No external checkpoint state is changed unless --advance-external-checkpoint is explicitly supplied.' },
+        candidate: { verified: false, archiveIntegrityVerified: true, ...candidateArchive,
+          smoke: { passed: false, skipped: true, reason: 'Candidate runtime is not launched because current source/runtime/manifest byte alignment failed.' },
+          sourceAlignment: {
+            status: 'BLOCKED_CURRENT_SOURCE_IDENTITY_MISMATCH',
+            blocker: 'CANDIDATE_SOURCE_ALIGNMENT_NOT_VERIFIED',
+            exactArchiveEntryByteMatch: false,
+            sourceVersion: sourcePackage.version,
+            candidateVersion: candidateArchive.version,
+            sourceRuntimeEntryPoint: sourcePackage.runtimeEntryPoint,
+            candidateRuntimeEntryPoint: candidateArchive.entryPoint,
+            versionMatches: sourcePackage.version === candidateArchive.version,
+            selectedEntryPointMatches: sourcePackage.runtimeEntryPoint === candidateArchive.entryPoint,
+            sourceManifestVersion: sourceManifest.version,
+            archiveManifestVersion: archivedManifest.version,
+            manifestBytesMatch: sourceManifestBytes.equals(archivedManifestBytes),
+            archiveContainsCurrentSelectedEntryPoint: archiveHasCurrentEntryPoint,
+            diagnostic: String(sourceAlignmentError.message).slice(0, 1000)
+          }
+        },
+        rollback: { verified: false, status: 'NOT_EVALUATED_AFTER_CANDIDATE_SOURCE_ALIGNMENT_FAILURE' },
+        phase2CustodyEvidence: { status: 'NOT_EVALUATED_AFTER_CANDIDATE_SOURCE_ALIGNMENT_FAILURE', verified: false },
+        releaseEvidence: { status: 'NOT_EVALUATED_AFTER_CANDIDATE_SOURCE_ALIGNMENT_FAILURE', cryptographicEvidenceVerified: false,
+          productionReleaseEligible: false, productionAuthorityEstablished: false },
+        host: { status: 'NOT_INSPECTED_AFTER_CANDIDATE_SOURCE_ALIGNMENT_FAILURE' },
+        requiredAuthorityGates,
+        decision: { status: 'BLOCKED', canActivateNow: false,
+          activationMechanism: 'Chat On Steroids host plugin manager / UI only; this CLI does not edit host registry or manage the plugin process',
+          blockers },
+        exactActionStillRequired: 'Preserve this report and obtain a candidate whose exact archive bytes match the authorized current source tree. Then rerun read-only preflight with the owner-signed canonical Phase 2 manifest, independently verified builder receipt, signed release evidence, host-provisioned trust, exact tested rollback and fresh authoritative workflow/task reconciliation. Do not activate or dispatch from this report.'
+      };
+      if (args.report) {
+        const published = writeExclusiveJsonReport(args.report, report);
+        console.log(JSON.stringify({ status: report.decision.status, reportPath: published.path,
+          reportSha256: published.sha256, reportSizeBytes: published.sizeBytes, canActivateNow: false,
+          readOnly: true, liveMutationPerformed: false, blockers: report.decision.blockers }, null, 2));
+      } else console.log(JSON.stringify(report, null, 2));
+      process.exitCode = 3;
+      return;
+    }
     if (args.expectedSha256 && args.expectedSha256 !== candidateBundle.sha256) throw new Error(`candidate SHA-256 mismatch: expected ${args.expectedSha256}, observed ${candidateBundle.sha256}`);
     const candidateSmoke = smokeCandidate(candidateBundle.path);
     let rollback = null;

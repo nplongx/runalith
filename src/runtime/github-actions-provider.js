@@ -782,19 +782,25 @@ export class GitHubActionsProvider {
     // property distinguishes the real durable store from those narrow fakes.
     if (!db || typeof db.isOpen !== 'boolean') return;
     const lease = db.prepare('SELECT * FROM task_leases WHERE lease_id=?').get(String(intent.lease_id));
+    const job = db.prepare('SELECT job_id,state,status FROM jobs WHERE job_id=?').get(String(intent.job_id));
+    const task = db.prepare('SELECT task_id,job_id,status FROM tasks WHERE task_id=?').get(String(intent.task_id));
+    const jobTerminal = !job || ['COMPLETED', 'FAILED', 'CANCELLED'].includes(String(job.state || '').toUpperCase()) ||
+      ['completed', 'failed', 'cancelled'].includes(String(job.status || '').toLowerCase());
     const valid = lease && lease.state === 'ACTIVE' &&
       String(lease.job_id) === String(intent.job_id) &&
       String(lease.task_id) === String(intent.task_id) &&
       Number(lease.attempt) === Number(intent.attempt) &&
       Number(lease.owner_epoch) === Number(intent.owner_epoch) &&
       typeof lease.expires_at === 'string' && lease.expires_at > checkedAt &&
+      !jobTerminal && String(job.status).toLowerCase() === 'active' &&
+      task && String(task.job_id) === String(intent.job_id) && task.status === 'running' &&
       String(request?.job_id) === String(intent.job_id) &&
       String(request?.task_id) === String(intent.task_id) &&
       String(request?.lease_id) === String(intent.lease_id) &&
       Number(request?.attempt) === Number(intent.attempt) &&
       Number(request?.owner_epoch) === Number(intent.owner_epoch);
     if (!valid) {
-      const error = new Error('P3 dispatch requires the exact active, unexpired durable lease at the provider send boundary');
+      const error = new Error('P3 dispatch requires the exact active, unexpired durable lease and nonterminal live Job/task at the provider send boundary');
       error.remoteOutcome = 'not_sent';
       throw error;
     }
@@ -1028,12 +1034,16 @@ export class GitHubActionsProvider {
           AND request_sha256=? AND request_json=?${nativeSqlite ? `
           AND EXISTS (SELECT 1 FROM task_leases lease WHERE lease.lease_id=? AND lease.job_id=? AND lease.task_id=?
             AND lease.attempt=? AND lease.owner_epoch=? AND lease.state='ACTIVE' AND lease.expires_at>?)
+          AND EXISTS (SELECT 1 FROM jobs job WHERE job.job_id=? AND job.status='active'
+            AND UPPER(COALESCE(job.state,'')) NOT IN ('COMPLETED','FAILED','CANCELLED'))
+          AND EXISTS (SELECT 1 FROM tasks task WHERE task.task_id=? AND task.job_id=? AND task.status='running')
           AND NOT EXISTS (SELECT 1 FROM provider_dispatch_intents sibling WHERE sibling.lease_id=? AND sibling.task_id=?
             AND sibling.attempt=? AND sibling.provider=? AND sibling.dispatch_key<>?)` : ''}`;
       const claim = this.store.db.prepare(claimSql).run(...[
         dispatchClaimId, dispatchClaimedAt, dispatchClaimedAt, String(dispatchKey), durableRequestHash, durableRequestJson,
         ...(nativeSqlite ? [String(dispatchIntent.lease_id), String(dispatchIntent.job_id), String(dispatchIntent.task_id),
           Number(dispatchIntent.attempt), Number(dispatchIntent.owner_epoch), dispatchClaimedAt,
+          String(dispatchIntent.job_id), String(dispatchIntent.task_id), String(dispatchIntent.job_id),
           String(dispatchIntent.lease_id), String(dispatchIntent.task_id), Number(dispatchIntent.attempt),
           String(dispatchIntent.provider), String(dispatchKey)] : [])
       ]);

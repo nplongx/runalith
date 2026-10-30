@@ -508,6 +508,109 @@ function id(prefix) { return prefix + '_' + crypto.randomUUID(); }
 function hash(value) { return crypto.createHash('sha256').update(String(value)).digest('hex'); }
 function eventId(jobId, type, dedupeKey = '') { return hash(`${jobId}|${type}|${dedupeKey}`); }
 
+function sqliteTableExists(database, name) {
+  return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1").get(name));
+}
+
+function sqliteColumnExists(database, table, column) {
+  return database.prepare(`PRAGMA table_info("${table}")`).all().some(item => item.name === column);
+}
+
+/** Return an unresolved remote provider effect that makes Job terminalization unsafe. */
+function findUnresolvedProviderOutcome(database, jobId, taskId = null) {
+  const hasIntents = sqliteTableExists(database, 'provider_dispatch_intents');
+  const hasRuns = sqliteTableExists(database, 'provider_runs');
+  const runHasJobId = hasRuns && sqliteColumnExists(database, 'provider_runs', 'job_id');
+  const runHasTaskId = hasRuns && sqliteColumnExists(database, 'provider_runs', 'task_id');
+  const hasLeases = sqliteTableExists(database, 'task_leases');
+  const hasNativeRuntimes = sqliteTableExists(database, 'm12_native_specialist_runtime');
+  const taskClause = taskId === null ? '' : ' AND task_id=?';
+  const args = taskId === null ? [jobId] : [jobId, taskId];
+
+  if (hasIntents) {
+    const ambiguousClaim = database.prepare(`SELECT dispatch_key,task_id FROM provider_dispatch_intents
+      WHERE job_id=?${taskClause} AND dispatch_claim_id IS NOT NULL AND provider_run_id IS NULL
+      ORDER BY dispatch_claimed_at ASC,rowid ASC LIMIT 1`).get(...args);
+    if (ambiguousClaim) return { kind: 'ambiguous_dispatch_claim', identity: ambiguousClaim.dispatch_key, taskId: ambiguousClaim.task_id };
+
+    const boundIntents = database.prepare(`SELECT dispatch_key,task_id,provider_run_id FROM provider_dispatch_intents
+      WHERE job_id=?${taskClause} AND provider_run_id IS NOT NULL ORDER BY updated_at ASC,rowid ASC`).all(...args);
+    for (const intent of boundIntents) {
+      if (!hasRuns) return { kind: 'provider_run_ledger_missing', identity: intent.dispatch_key, taskId: intent.task_id };
+      if (!runHasJobId || !runHasTaskId) return {
+        kind: 'provider_run_ledger_schema_incomplete', identity: intent.dispatch_key, taskId: intent.task_id
+      };
+      const run = database.prepare('SELECT provider_run_id,state FROM provider_runs WHERE provider_run_id=? AND job_id=? AND task_id=?')
+        .get(String(intent.provider_run_id), jobId, intent.task_id);
+      if (!run || !['COMPLETED', 'FAILED', 'CANCELLED'].includes(String(run.state || '').toUpperCase())) {
+        return { kind: run ? 'provider_run_not_terminal' : 'provider_run_binding_missing', identity: intent.provider_run_id, taskId: intent.task_id };
+      }
+    }
+  }
+
+  if (hasRuns && runHasJobId) {
+    const activeRun = database.prepare(`SELECT provider_run_id,state,${runHasTaskId ? 'task_id' : 'NULL AS task_id'} FROM provider_runs
+      WHERE job_id=?${taskId === null || !runHasTaskId ? '' : ' AND task_id=?'}
+        AND UPPER(COALESCE(state,'')) NOT IN ('COMPLETED','FAILED','CANCELLED')
+      ORDER BY ${sqliteColumnExists(database, 'provider_runs', 'created_at') ? 'created_at' : 'provider_run_id'} ASC,rowid ASC LIMIT 1`)
+      .get(...(taskId === null || !runHasTaskId ? [jobId] : args));
+    if (activeRun) return { kind: 'provider_run_not_terminal', identity: activeRun.provider_run_id, taskId: activeRun.task_id };
+  } else if (hasRuns) {
+    // A legacy provider-run table without job binding cannot safely prove that
+    // a nonterminal remote effect belongs to a different Job. Fail closed if
+    // any such run exists rather than silently skipping the ledger.
+    const unscopedRun = database.prepare(`SELECT provider_run_id,state,${runHasTaskId ? 'task_id' : 'NULL AS task_id'} FROM provider_runs
+      WHERE UPPER(COALESCE(state,'')) NOT IN ('COMPLETED','FAILED','CANCELLED') ORDER BY rowid ASC LIMIT 1`).get();
+    if (unscopedRun) return {
+      kind: 'provider_run_ledger_schema_incomplete', identity: unscopedRun.provider_run_id, taskId: unscopedRun.task_id
+    };
+  }
+
+  // Lease quarantine is an explicit record that a remote effect may still
+  // exist. The task may later be marked failed/reopened and the dispatch-intent
+  // or provider-run row may be absent (legacy providers and crash windows).
+  // Do not interpret the FAILED lease state as proof that the remote effect
+  // stopped; only a separate owner/provider reconciliation path can resolve it.
+  if (hasLeases) {
+    const quarantinedLease = database.prepare(`SELECT lease.lease_id,lease.task_id,lease.attempt FROM task_leases lease
+      WHERE lease.job_id=?${taskId === null ? '' : ' AND lease.task_id=?'} AND lease.state='FAILED'
+        AND (COALESCE(lease.last_error,'') LIKE 'REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION:%'
+          OR EXISTS (SELECT 1 FROM events event WHERE event.job_id=lease.job_id
+            AND event.type='task.lease.quarantined' AND json_valid(event.payload_json)
+            AND json_extract(event.payload_json,'$.leaseId')=lease.lease_id))
+      ORDER BY lease.issued_at ASC,lease.rowid ASC LIMIT 1`).get(...args);
+    if (quarantinedLease) return {
+      kind: 'quarantined_lease_remote_effect_unresolved',
+      identity: quarantinedLease.lease_id,
+      taskId: quarantinedLease.task_id
+    };
+  }
+
+  // Native specialist execution is a separate external-effect path from the
+  // GitHub provider ledger. ACTIVE/STALE rows remain unresolved even when task
+  // execution metadata or lease rows disagree after a crash. Unknown states
+  // fail closed; only explicit terminal runtime states stop blocking here.
+  if (hasNativeRuntimes) {
+    const nativeRuntime = database.prepare(`SELECT run_id,task_id,state FROM m12_native_specialist_runtime
+      WHERE task_id IN (SELECT task_id FROM tasks WHERE job_id=?${taskId === null ? '' : ' AND task_id=?'})
+        AND UPPER(COALESCE(state,'')) NOT IN ('COMPLETED','FAILED')
+      ORDER BY created_at ASC,rowid ASC LIMIT 1`).get(...args);
+    if (nativeRuntime) return {
+      kind: 'native_runtime_not_terminal',
+      identity: nativeRuntime.run_id,
+      taskId: nativeRuntime.task_id
+    };
+  }
+  return null;
+}
+
+function assertNoUnresolvedProviderOutcome(database, jobId, operation, taskId = null) {
+  const unresolved = findUnresolvedProviderOutcome(database, jobId, taskId);
+  if (unresolved) {
+    throw new Error(`${operation} is unsafe while provider outcome is unresolved (${unresolved.kind}: ${unresolved.identity}; task=${unresolved.taskId})`);
+  }
+}
+
 function actionIntentBindingsFromCandidate(store, jobId, requestedBindings = undefined) {
   const rows = store.db.prepare(`SELECT event_id,job_id,type,payload_json FROM events
     WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created' ORDER BY created_at ASC,rowid ASC`).all(jobId);
@@ -1268,6 +1371,7 @@ export class WorkflowStore {
         throw new Error(`workflow verification failure refuses to replace terminal job state=${job.state}/${job.status}`);
       }
       if (terminalRows.length || existingTerminal) throw new Error('workflow verification failure conflicts with existing terminal event history');
+      assertNoUnresolvedProviderOutcome(this.db, jobId, 'workflow verification failure');
       const runtime = this.getWorkflowRuntimeState(jobId);
       if (!runtime || typeof runtime.attempt !== 'number' || !Number.isSafeInteger(runtime.attempt) || runtime.attempt < 0) {
         throw new Error('workflow verification failure requires a valid durable workflow runtime attempt');
@@ -1357,6 +1461,9 @@ export class WorkflowStore {
         this.db.exec('RELEASE SAVEPOINT job_state_transition');
         return current;
       }
+      const terminalRequested = ['COMPLETED', 'FAILED', 'CANCELLED'].includes(String(state).toUpperCase()) ||
+        ['completed', 'failed', 'cancelled'].includes(String(status).toLowerCase());
+      if (terminalRequested) assertNoUnresolvedProviderOutcome(this.db, jobId, 'Job terminalization');
       if (status === 'active') {
         const allowedActiveTransitions = {
           IDLE: new Set(['IDLE', 'PROPOSED', 'DISCUSSING', 'EXECUTING']),
@@ -3201,6 +3308,23 @@ export class WorkflowStore {
       if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(batch.status)) {
         this.db.exec('RELEASE SAVEPOINT cancel_execution_batch');
         return { ...batch, items: this.listExecutionBatchItems(batchId) };
+      }
+      // A batch cancellation is an aggregate disposition, not proof that a
+      // child process has stopped. Inspect every child, not just items currently
+      // marked RUNNING: legacy/crash-window rows can incorrectly say FAILED or
+      // CANCELLED while the task still owns a running execution or open durable
+      // attempt. The manager must drain before cancelling; unresolved work must
+      // remain visible instead of being hidden by an aggregate terminal row.
+      const unresolved = this.db.prepare(`SELECT i.item_id,t.task_id,t.execution_status
+        FROM execution_batch_items i
+        JOIN tasks t ON t.task_id=i.task_id
+        WHERE i.batch_id=?
+          AND (LOWER(COALESCE(t.execution_status,''))='running'
+            OR EXISTS (SELECT 1 FROM attempts a WHERE a.task_id=t.task_id AND LOWER(COALESCE(a.status,''))='started'))
+        ORDER BY CASE WHEN i.status='RUNNING' THEN 0 ELSE 1 END, i.item_id
+        LIMIT 1`).get(batchId);
+      if (unresolved) {
+        throw new Error(`cannot cancel execution batch while task execution is unresolved; drain or reconcile first: ${batchId}/${unresolved.item_id}/${unresolved.task_id}`);
       }
       const reserve = this.db.prepare(`UPDATE execution_batches SET status=status WHERE batch_id=? AND status IN ('RUNNING','WAITING')`).run(batchId);
       if (reserve.changes !== 1) throw new Error(`execution batch cancellation lost state ownership: ${batchId}`);
@@ -6740,7 +6864,7 @@ export class WorkflowStore {
     return this.getSlackJobView(jobId);
   }
   getSlackJobView(jobId) { return this.db.prepare('SELECT * FROM slack_job_views WHERE job_id=?').get(jobId) || null; }
-  approve(jobId, rawText, actor = 'chat-on-steroids-user', { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = undefined, roleProfiles = [], actionIntentBindings = undefined } = {}) {
+  approve(jobId, rawText, actor = 'chat-on-steroids-user', { workspace = process.env.WORKFLOW_WORKSPACE, customWorkflow = null, successContract = undefined, roleProfiles = [], actionIntentBindings = undefined, approvalEvidence = undefined } = {}) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const job = this.getJob(jobId);
@@ -6752,6 +6876,57 @@ export class WorkflowStore {
       if (!proposal) {
         this.recordEvent(jobId, 'job.proposal_requested', { task: job.title }, hash(job.title));
         proposal = this.getCurrentProposal(jobId);
+      }
+      let approvalAuthorization = null;
+      if (proposal.payload?.adaptive_goal_execution_graph_proposal) {
+        // AGG action approval is a versioned policy decision, not the reviewer
+        // identity assertion or the generic host label. Verify the externally
+        // signed policy, maker attestation, checker quorum and exact plan/action
+        // binding while this BEGIN IMMEDIATE writer transaction owns the state.
+        if (typeof this.adaptiveGoalExecutionApprovalGuard !== 'function') {
+          throw new Error('AGG_APPROVAL_POLICY_GUARD_UNAVAILABLE: host runtime did not configure the signed Approval Subsystem verifier');
+        }
+        const matchingApprovalEvents = this.db.prepare(`SELECT event_id,job_id,type,payload_json,created_at FROM events
+          WHERE job_id=? AND type='approval.approved' AND json_extract(payload_json,'$.proposalHash')=? ORDER BY created_at ASC,rowid ASC`)
+          .all(jobId, proposal.proposalHash);
+        let existingApproval = null;
+        const retryingCurrentApproval = job.state === 'APPROVED' && this.isApprovalCurrent(jobId);
+        if (retryingCurrentApproval) {
+          if (matchingApprovalEvents.length !== 1) {
+            throw new Error('AGG_APPROVAL_EVIDENCE_AMBIGUOUS: current approved workflow must have exactly one approval event bound to its current proposal');
+          }
+          try { existingApproval = JSON.parse(matchingApprovalEvents[0].payload_json); }
+          catch { throw new Error('AGG_APPROVAL_EVIDENCE_UNVERIFIABLE: current approval event is malformed'); }
+          if (JSON.stringify(existingApproval) !== matchingApprovalEvents[0].payload_json ||
+              !existingApproval.approvalBinding?.signedEvidence || !approvalEvidence ||
+              canonicalJson(existingApproval.approvalBinding.signedEvidence) !== canonicalJson(approvalEvidence)) {
+            throw new Error('AGG_APPROVAL_EVIDENCE_RETRY_MISMATCH: retry must submit the exact original signed approval evidence; replacement or implicit reapproval is denied');
+          }
+        } else if (approvalEvidence === undefined) {
+          throw new Error('AGG_APPROVAL_EVIDENCE_REQUIRED: signed policy, authenticated maker attestation and quorum decisions are required for AGG action approval');
+        }
+        approvalAuthorization = this.adaptiveGoalExecutionApprovalGuard(jobId, proposal.proposalHash, approvalEvidence, {
+          mode: retryingCurrentApproval ? 'idempotent_retry' : 'new_approval',
+          existingApprovalEventId: matchingApprovalEvents[0]?.event_id || null,
+          existingApprovalBinding: existingApproval?.approvalBinding || null
+        });
+        if (!approvalAuthorization || approvalAuthorization.executionReviewReady !== true ||
+            approvalAuthorization.proposalHash !== proposal.proposalHash ||
+            typeof approvalAuthorization.candidateHash !== 'string' || !/^[a-f0-9]{64}$/.test(approvalAuthorization.candidateHash) ||
+            typeof approvalAuthorization.immutablePlanHash !== 'string' || !/^[a-f0-9]{64}$/.test(approvalAuthorization.immutablePlanHash) ||
+            typeof approvalAuthorization.sourceSnapshotHash !== 'string' || !/^[a-f0-9]{64}$/.test(approvalAuthorization.sourceSnapshotHash) ||
+            typeof approvalAuthorization.reviewerAttestationEventId !== 'string' || !/^[a-f0-9]{64}$/.test(approvalAuthorization.reviewerAttestationEventId) ||
+            !approvalAuthorization.approvalBinding || typeof approvalAuthorization.approvalBinding.binding_record_hash !== 'string' ||
+            !/^[a-f0-9]{64}$/.test(approvalAuthorization.approvalBinding.binding_record_hash)) {
+          throw new Error('AGG_APPROVAL_EVIDENCE_REJECTED: current source, reviewer, policy, maker/checker quorum, exact action scope, or immutable plan could not be revalidated under the approval lock');
+        }
+        if (retryingCurrentApproval) {
+          if (approvalAuthorization.approvalBinding.binding_record_hash !== existingApproval.approvalBinding?.binding_record_hash) {
+            throw new Error('AGG_APPROVAL_EVIDENCE_RETRY_BINDING_MISMATCH: current approval no longer reproduces its original immutable policy decision');
+          }
+          this.db.exec('COMMIT');
+          return this.getJob(jobId);
+        }
       }
       if (job.state === 'APPROVED' && this.isApprovalCurrent(jobId)) {
         this.db.exec('COMMIT');
@@ -6766,17 +6941,7 @@ export class WorkflowStore {
         // source snapshot/evidence/reviewer checks while this transaction owns
         // the SQLite writer lock, before creating the approval or immutable
         // plan. This prevents a source mutation between preflight and approval.
-        if (typeof this.adaptiveGoalExecutionApprovalGuard !== 'function') {
-          throw new Error('AGG_EXECUTION_APPROVAL_SOURCE_GUARD_UNAVAILABLE: host runtime did not configure the independent Goal/Idea + reviewer approval verifier');
-        }
-        const authorization = this.adaptiveGoalExecutionApprovalGuard(jobId, proposal.proposalHash);
-        if (!authorization || authorization.executionReviewReady !== true || authorization.proposalHash !== proposal.proposalHash ||
-            typeof authorization.candidateHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.candidateHash) ||
-            typeof authorization.immutablePlanHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.immutablePlanHash) ||
-            typeof authorization.sourceSnapshotHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.sourceSnapshotHash) ||
-            typeof authorization.reviewerAttestationEventId !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.reviewerAttestationEventId)) {
-          throw new Error('AGG_EXECUTION_APPROVAL_SOURCE_GUARD_REJECTED: source snapshot, reviewer identity, evidence or immutable plan could not be revalidated under the approval lock');
-        }
+        if (!approvalAuthorization) throw new Error('AGG_APPROVAL_EVIDENCE_MISSING: Approval Subsystem verification did not return an immutable binding record');
       }
       const approvalId = id('approval'); const ts = now();
       this.db.prepare("INSERT INTO approvals(approval_id, job_id, decision, actor, raw_text, proposal_hash, created_at) VALUES(?, ?, 'approved', ?, ?, ?, ?)").run(approvalId, jobId, actor, rawText, proposal.proposalHash, ts);
@@ -6785,7 +6950,10 @@ export class WorkflowStore {
       if (changed.changes !== 1) throw new Error(`approval lost Job state compare-and-set: ${jobId}`);
       const runtime = this.getWorkflowRuntimeState(jobId);
       if (runtime?.phase === 'PROPOSED') this.transitionWorkflowPhase(jobId, 'APPROVED', { event: 'workflow.approved', payload: { actor } });
-      this.recordEvent(jobId, 'approval.approved', { actor, rawText, proposalHash: proposal.proposalHash }, hash(`${rawText}|${proposal.proposalHash}`));
+      this.recordEvent(jobId, 'approval.approved', {
+        actor, rawText, proposalHash: proposal.proposalHash,
+        ...(approvalAuthorization ? { approvalBinding: approvalAuthorization.approvalBinding } : {})
+      }, hash(`${rawText}|${proposal.proposalHash}`));
       if (isSupportedWorkflow(this.getJob(jobId))) this.compileExecutionPlan(jobId, {
         workspace, customWorkflow, successContract: successContract ?? proposal.payload.success_contract,
         roleProfiles, actionIntentBindings
@@ -6826,9 +6994,38 @@ export class WorkflowStore {
             authorization.immutablePlanHash !== dispatchPlan.plan_hash ||
             typeof authorization.candidateHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.candidateHash) ||
             typeof authorization.sourceSnapshotHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.sourceSnapshotHash) ||
-            typeof authorization.reviewerAttestationEventId !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.reviewerAttestationEventId)) {
-          throw new Error('AGG_EXECUTION_SOURCE_VERIFICATION_GUARD_REJECTED: source snapshot, reviewer identity, or immutable plan could not be revalidated under the dispatch lock');
+            typeof authorization.reviewerAttestationEventId !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.reviewerAttestationEventId) ||
+            typeof authorization.approvalBindingHash !== 'string' || !/^[a-f0-9]{64}$/.test(authorization.approvalBindingHash)) {
+          throw new Error('AGG_EXECUTION_APPROVAL_EVIDENCE_GUARD_REJECTED: source snapshot, reviewer identity, signed policy/quorum, or immutable plan could not be revalidated under the dispatch lock');
         }
+      }
+      if (String(jobBeforeDispatch.state || '').toUpperCase() === 'EXECUTING') {
+        // A caller may retry after losing the MCP response. Return the exact
+        // already-running task only when its durable attempt lineage is
+        // unambiguous. In particular, a running task without a started attempt
+        // can represent a crash between dispatch commit and attempt creation;
+        // do not silently manufacture a new attempt or replay dispatch events.
+        const task = jobBeforeDispatch.active_task_id
+          ? this.getTask(jobBeforeDispatch.active_task_id)
+          : null;
+        const activeAttempts = task
+          ? this.db.prepare("SELECT attempt_id FROM attempts WHERE task_id=? AND status='started'").all(task.task_id)
+          : [];
+        const dispatchEvents = task
+          ? this.db.prepare("SELECT event_id,job_id,type,payload_json FROM events WHERE job_id=? AND type='task.dispatched' AND json_extract(payload_json,'$.taskId')=? ORDER BY created_at ASC,rowid ASC")
+            .all(jobId, task.task_id)
+          : [];
+        const expectedDispatchPayload = task ? JSON.stringify({ taskId: task.task_id, role, description }) : null;
+        const expectedDispatchEventId = task ? eventId(jobId, 'task.dispatched', task.task_id) : null;
+        if (!task || jobBeforeDispatch.active_task_id !== task.task_id || task.job_id !== jobId ||
+            task.status !== 'running' || task.role !== role || task.description !== description ||
+            activeAttempts.length !== 1 || dispatchEvents.length !== 1 ||
+            dispatchEvents[0].event_id !== expectedDispatchEventId || dispatchEvents[0].job_id !== jobId ||
+            dispatchEvents[0].type !== 'task.dispatched' || dispatchEvents[0].payload_json !== expectedDispatchPayload) {
+          throw new Error(`dispatch lifecycle is uncertain for already executing Job ${jobId}; refusing retry without exactly one matching running task and started attempt`);
+        }
+        this.db.exec('COMMIT');
+        return task;
       }
       const task = this.ensureTask(jobId, { role, description }); const ts = now();
       const plan = this.getExecutionPlan(jobId);
@@ -8125,6 +8322,7 @@ export class WorkflowStore {
       // process may complete/add work, change delivery evidence, or create a
       // live runtime resource between preflight and BEGIN IMMEDIATE. Recheck
       // every mutable terminalization invariant while holding the writer lock.
+      assertNoUnresolvedProviderOutcome(this.db, jobId, 'workflow terminalization');
       const lockedOpenTasks = this.db.prepare("SELECT task_id FROM tasks WHERE job_id=? AND status IN ('pending','running')").all(jobId);
       if (lockedOpenTasks.length) throw new Error(`cannot terminalize with open tasks: ${lockedOpenTasks.map(t => t.task_id).join(',')}`);
       const lockedSessions = this.db.prepare("SELECT session_id FROM agent_sessions WHERE job_id=? AND state IN ('CREATED','ACTIVE','PAUSED')").all(jobId);
@@ -8303,6 +8501,20 @@ export class WorkflowStore {
           .all(row.task_id);
         if (openAttempts.length !== 1 || openAttempts[0].attempt_id !== row.attempt_id) {
           throw new Error(`stale attempt reconciliation found ambiguous active-attempt lineage: ${row.task_id}`);
+        }
+        // Age alone does not establish worker death. A lease row (even an
+        // expired ACTIVE row), an unfinished local execution session, or an
+        // unresolved provider effect keeps ownership ambiguous. Defer to the
+        // runtime/lease/provider reconciliation path without mutating attempt,
+        // task, or Job state.
+        const activeLease = this.db.prepare("SELECT lease_id FROM task_leases WHERE job_id=? AND task_id=? AND state='ACTIVE' ORDER BY issued_at DESC,rowid DESC LIMIT 1")
+          .get(row.job_id, row.task_id);
+        const executionStillOwned = task.execution_status === 'running' ||
+          (typeof task.execution_session_id === 'string' && task.execution_session_id.trim() && !task.execution_finished_at);
+        const unresolvedProvider = findUnresolvedProviderOutcome(this.db, row.job_id, row.task_id);
+        if (activeLease || executionStillOwned || unresolvedProvider) {
+          this.db.exec('RELEASE SAVEPOINT reconcile_stale_attempt_transition');
+          continue;
         }
         const ts = now();
         const attemptUpdate = this.db.prepare("UPDATE attempts SET status='timeout',finished_at=?,error=? WHERE attempt_id=? AND status='started' AND started_at<?")

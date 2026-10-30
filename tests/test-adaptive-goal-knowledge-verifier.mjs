@@ -203,6 +203,40 @@ test('requires configured verifier and verifies exact snapshot, revisions, membe
     error => error.code === 'KNOWLEDGE_GRAPH_SNAPSHOT_STALE');
 });
 
+test('snapshot request and current-verification getters never write trust-ledger observations', t => {
+  const f = fixture(); t.after(() => { f.db.close(); f.trustDb.close(); });
+  withVerifierEnvironment(t);
+  const countHistory = () => f.trustDb.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_trust_configuration_history').get().n;
+  assert.equal(countHistory(), 0);
+
+  const request = f.verifier.getAttestationRequest(goalId);
+  assert.equal(request.eligibleForAttestation, true);
+  assert.equal(request.verifierConfiguration.audit.mode, 'read_only_no_ledger_write');
+  assert.equal(request.verifierConfiguration.observationRequired, true);
+  assert.equal(countHistory(), 0, 'building a snapshot/attestation request must not create a trust-ledger row');
+
+  const unobserved = f.verifier.getCurrentVerification(goalId);
+  assert.equal(unobserved.verified, false);
+  assert.equal(unobserved.status, 'trust_configuration_not_observed');
+  assert.ok(unobserved.blockers.some(item => item.code === 'KNOWLEDGE_TRUST_CONFIG_NOT_OBSERVED'));
+  assert.equal(countHistory(), 0, 'verification must fail closed when the current config has not been explicitly observed, without observing it itself');
+
+  const explicitObservation = f.verifier.getVerifierConfigurationStatus();
+  assert.equal(explicitObservation.currentTrustConfigurationObserved, true);
+  assert.equal(explicitObservation.audit.mode, 'explicit_trust_status_observation');
+  assert.equal(countHistory(), 1, 'only the explicit trust-status operation may record a trust configuration observation');
+  const stillUnattested = f.verifier.getCurrentVerification(goalId);
+  assert.equal(stillUnattested.verified, false);
+  assert.equal(stillUnattested.status, 'unattested');
+  assert.equal(countHistory(), 1, 'a getter must not write a second observation after explicit registration');
+
+  const accepted = f.verifier.attest(signedAttestation(request));
+  assert.equal(accepted.verified, true);
+  assert.equal(countHistory(), 1, 'the signed attestation path may idempotently verify the already-observed trust version');
+  assert.equal(f.verifier.getCurrentVerification(goalId).verified, true);
+  assert.equal(countHistory(), 1, 'current attestation readback must remain read-only');
+});
+
 test('blank optional reviewer user_config does not disable the independently configured Goal/Idea verifier', t => {
   withVerifierEnvironment(t);
   const envKeys = ['AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', 'AGG_REVIEW_IDENTITY_PROVIDER_ID', 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM'];
@@ -363,6 +397,13 @@ test('administered multi-key trust config is used for signatures and key revocat
   const afterRevocation = f.verifier.getCurrentVerification(goalId);
   assert.equal(afterRevocation.verified, false);
   assert.ok(afterRevocation.blockers.some(item => item.code === 'AGG_TRUST_ROOT_REVOKED'), JSON.stringify(afterRevocation));
+  // A read-only verification must not advance the trust ledger merely because
+  // it observed version 2. Make the authority-style observation explicit
+  // before simulating a rollback to version 1.
+  assert.equal(f.trustDb.prepare('SELECT config_version FROM adaptive_goal_trust_configuration_history WHERE domain=?').get('goal_idea_verifier').config_version, 1);
+  const observedRevocation = f.verifier.getVerifierConfigurationStatus();
+  assert.equal(observedRevocation.currentTrustConfigurationObserved, true);
+  assert.equal(f.trustDb.prepare('SELECT config_version FROM adaptive_goal_trust_configuration_history WHERE domain=?').get('goal_idea_verifier').config_version, 2);
   process.env[ADAPTIVE_GOAL_KNOWLEDGE_TRUST_CONFIG_ENV] = JSON.stringify(baseConfig);
   const afterRollback = f.verifier.getCurrentVerification(goalId);
   assert.equal(afterRollback.verified, false);

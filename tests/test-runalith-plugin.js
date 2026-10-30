@@ -13,6 +13,13 @@ import { getAgentContract } from '../src/runtime/workflow/agent-contracts.js';
 import { canonicalAdaptiveGoalActionIntentDescription, getAdaptiveGoalActionIntentSemanticPolicy } from '../src/runtime/adaptive-goal-action-intent-policy.js';
 import { ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE } from '../src/runtime/adaptive-goal-reviewer-identity.js';
 import { ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_SCOPE } from '../src/runtime/adaptive-goal-knowledge-verifier.js';
+import { adaptiveGoalPublicKeyFingerprint } from '../src/runtime/adaptive-goal-trust-configuration.js';
+import {
+  buildAdaptiveGoalApprovalBinding,
+  ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE,
+  ADAPTIVE_GOAL_MAKER_AUTHORIZATION_SCOPE,
+  ADAPTIVE_GOAL_EXECUTION_APPROVAL_SCOPE
+} from '../src/runtime/adaptive-goal-approval-subsystem.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeManifestPath = ['plugin/manifest.json', 'manifest.json']
@@ -27,16 +34,19 @@ if (typeof runtimeEntryPoint !== 'string' || !runtimeEntryPoint || path.isAbsolu
 const runtimePath = path.join(root, runtimeEntryPoint);
 const packageMetadata = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 assert.equal(packageMetadata.main, runtimeEntryPoint, 'package main must match the manifest entry point');
-if (packageMetadata.runtimeEntryPoint !== undefined) {
-  assert.equal(packageMetadata.runtimeEntryPoint, runtimeEntryPoint, 'source package runtimeEntryPoint must match the manifest entry point');
-}
+assert.equal(packageMetadata.runtimeEntryPoint, runtimeEntryPoint, 'package runtimeEntryPoint must match the manifest entry point');
 assert.equal(packageMetadata.scripts?.start, `node ${runtimeEntryPoint}`, 'npm start must launch the exact versioned runtime entry point');
+assert.deepEqual(runtimeManifest.server?.mcp_config?.args, [`${'${__dirname}/'}${runtimeEntryPoint}`],
+  'manifest MCP launch arguments must point to the same versioned runtime entry point');
 const trustConfigUserFields = {
   goal_idea_verifier_trust_config_json: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
-  action_intent_reviewer_trust_config_json: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON'
+  action_intent_reviewer_trust_config_json: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON',
+  approval_policy_trust_config_json: 'AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON',
+  action_intent_maker_trust_config_json: 'AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON',
+  execution_approval_trust_config_json: 'AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON'
 };
 assert.deepEqual(Object.keys(runtimeManifest.user_config || {}).sort(), Object.keys(trustConfigUserFields).sort(),
-  'the current MCPB must expose the two optional, host-managed trust configuration fields');
+  'the current MCPB must expose all five optional, host-managed trust configuration fields');
 for (const [configKey, environmentName] of Object.entries(trustConfigUserFields)) {
   const config = runtimeManifest.user_config[configKey];
   assert.equal(config.type, 'string', configKey + ' must accept the administrator-provisioned JSON document');
@@ -97,6 +107,47 @@ const aggReviewerTestProviderId = 'isolated-test-reviewer-provider';
 const aggKnowledgeTestKeyPair = crypto.generateKeyPairSync('ed25519');
 const aggKnowledgeTestPublicKeyPem = aggKnowledgeTestKeyPair.publicKey.export({ type: 'spki', format: 'pem' });
 const aggKnowledgeTestProviderId = 'isolated-test-goal-idea-verifier';
+const aggApprovalPolicyKeyPair = crypto.generateKeyPairSync('ed25519');
+const aggMakerIdentityKeyPair = crypto.generateKeyPairSync('ed25519');
+const aggExecutionCheckerSecurityKeyPair = crypto.generateKeyPairSync('ed25519');
+const aggExecutionCheckerPlatformKeyPair = crypto.generateKeyPairSync('ed25519');
+const aggApprovalPolicyProviderId = 'isolated-test-approval-policy-provider';
+const aggMakerIdentityProviderId = 'isolated-test-action-maker-provider';
+const aggExecutionApprovalProviderId = 'isolated-test-execution-approval-provider';
+function isolatedAggTrustConfigJson({ domain, providerId, keyEntries }) {
+  return JSON.stringify({
+    schema_version: 1,
+    domain,
+    provider_id: providerId,
+    config_version: 1,
+    updated_at: new Date(Date.now() - 1000).toISOString(),
+    updated_by: 'isolated-test-host-security-administrator',
+    change_reference: `isolated-test-${domain}-v1`,
+    keys: keyEntries.map(({ keyId, keyPair, scope }) => ({
+      key_id: keyId,
+      public_key_pem: keyPair.publicKey.export({ type: 'spki', format: 'pem' }),
+      scopes: [scope],
+      not_before: '2020-01-01T00:00:00.000Z',
+      not_after: null,
+      revoked_at: null
+    }))
+  });
+}
+const aggApprovalPolicyTrustConfigJson = isolatedAggTrustConfigJson({
+  domain: 'execution_approval_policy', providerId: aggApprovalPolicyProviderId,
+  keyEntries: [{ keyId: 'isolated-approval-policy-v1', keyPair: aggApprovalPolicyKeyPair, scope: ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE }]
+});
+const aggMakerIdentityTrustConfigJson = isolatedAggTrustConfigJson({
+  domain: 'action_intent_maker', providerId: aggMakerIdentityProviderId,
+  keyEntries: [{ keyId: 'isolated-action-maker-v1', keyPair: aggMakerIdentityKeyPair, scope: ADAPTIVE_GOAL_MAKER_AUTHORIZATION_SCOPE }]
+});
+const aggExecutionApprovalTrustConfigJson = isolatedAggTrustConfigJson({
+  domain: 'execution_approval', providerId: aggExecutionApprovalProviderId,
+  keyEntries: [
+    { keyId: 'isolated-execution-checker-security-v1', keyPair: aggExecutionCheckerSecurityKeyPair, scope: ADAPTIVE_GOAL_EXECUTION_APPROVAL_SCOPE },
+    { keyId: 'isolated-execution-checker-platform-v1', keyPair: aggExecutionCheckerPlatformKeyPair, scope: ADAPTIVE_GOAL_EXECUTION_APPROVAL_SCOPE }
+  ]
+});
 fs.mkdirSync(workspace, { recursive: true });
 fs.mkdirSync(case01AckBarrierDir, { recursive: true, mode: 0o700 });
 const env = { ...process.env, NODE_ENV: 'test', CHAT_ON_STEROIDS_DATA_DIR: dataDir, CHAT_ON_STEROIDS_WORKSPACE: workspace,
@@ -110,7 +161,10 @@ const env = { ...process.env, NODE_ENV: 'test', CHAT_ON_STEROIDS_DATA_DIR: dataD
   AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID: aggKnowledgeTestProviderId,
   AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM: aggKnowledgeTestPublicKeyPem,
   AGG_REVIEW_IDENTITY_PROVIDER_ID: aggReviewerTestProviderId,
-  AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM: aggReviewerTestPublicKeyPem };
+  AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM: aggReviewerTestPublicKeyPem,
+  AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON: aggApprovalPolicyTrustConfigJson,
+  AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON: aggMakerIdentityTrustConfigJson,
+  AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON: aggExecutionApprovalTrustConfigJson };
 delete env.OPENAI_API_KEY;
 
 function signedAggReviewerAttestation(candidate, jobId, signingKey = aggReviewerTestKeyPair.privateKey) {
@@ -154,6 +208,101 @@ function persistAggReviewerAttestation(jobId, candidate, attestation) {
     .run(eventId, jobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, JSON.stringify(attestation), new Date().toISOString());
   database.close();
   return eventId;
+}
+
+function signedAggApprovalEnvelope(unsigned, keyPair) {
+  const withAlgorithm = { ...unsigned, signature_algorithm: 'Ed25519' };
+  return {
+    ...withAlgorithm,
+    signature: crypto.sign(null, Buffer.from(canonicalJson(withAlgorithm), 'utf8'), keyPair.privateKey).toString('base64')
+  };
+}
+
+function wrapperProposalHashForApproval(jobId) {
+  const database = new DatabaseSync(path.join(dataDir, 'workflow.db'), { readOnly: true });
+  try {
+    const row = database.prepare(`SELECT payload_json FROM events WHERE job_id=?
+      AND type IN ('job.proposal_requested','job.proposal_refined') ORDER BY created_at DESC,rowid DESC LIMIT 1`).get(jobId);
+    if (!row) throw new Error(`missing durable wrapper proposal event for ${jobId}`);
+    return crypto.createHash('sha256').update(canonicalJson(JSON.parse(row.payload_json))).digest('hex');
+  } finally { database.close(); }
+}
+
+function signedAggApprovalEvidence(jobId, candidate, sourceGraphVerification) {
+  const now = Date.now();
+  const timestamp = value => new Date(value).toISOString();
+  const rootHash = keyPair => adaptiveGoalPublicKeyFingerprint(keyPair.publicKey);
+  const binding = buildAdaptiveGoalApprovalBinding({
+    jobId,
+    proposalHash: wrapperProposalHashForApproval(jobId),
+    candidate,
+    sourceGraphVerification
+  });
+  const policy = signedAggApprovalEnvelope({
+    schema_version: 1,
+    kind: 'adaptive_goal_execution_approval_policy',
+    provider_id: aggApprovalPolicyProviderId,
+    trust_root_sha256: rootHash(aggApprovalPolicyKeyPair),
+    nonce: crypto.randomUUID(),
+    issued_at: timestamp(now - 1000),
+    expires_at: timestamp(now + 10 * 60_000),
+    scope: ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE,
+    policy_id: 'isolated-plugin-execution-approval-policy-v1',
+    policy_version: 1,
+    required_approval_count: 2,
+    required_distinct_trust_domains: 2,
+    required_roles: ['security_checker', 'platform_checker'],
+    maker_checker_separation: true,
+    reject_veto: true,
+    max_vote_age_seconds: 300,
+    reviewer_registry: [
+      { subject: 'isolated-plugin-security-checker', role: 'security_checker', trust_domain: 'security-domain', trust_root_sha256: rootHash(aggExecutionCheckerSecurityKeyPair) },
+      { subject: 'isolated-plugin-platform-checker', role: 'platform_checker', trust_domain: 'platform-domain', trust_root_sha256: rootHash(aggExecutionCheckerPlatformKeyPair) }
+    ]
+  }, aggApprovalPolicyKeyPair);
+  const policyHash = crypto.createHash('sha256').update(canonicalJson(policy)).digest('hex');
+  const makerAttestation = signedAggApprovalEnvelope({
+    schema_version: 1,
+    kind: 'adaptive_goal_action_intent_maker_attestation',
+    provider_id: aggMakerIdentityProviderId,
+    trust_root_sha256: rootHash(aggMakerIdentityKeyPair),
+    nonce: crypto.randomUUID(),
+    issued_at: timestamp(now - 800),
+    expires_at: timestamp(now + 6 * 60_000),
+    scope: ADAPTIVE_GOAL_MAKER_AUTHORIZATION_SCOPE,
+    maker_subject: 'isolated-plugin-requester',
+    policy_id: policy.policy_id,
+    policy_version: policy.policy_version,
+    policy_hash: policyHash,
+    binding
+  }, aggMakerIdentityKeyPair);
+  const makeVote = (keyPair, reviewerSubject, reviewerRole, trustDomain, decision = 'approve') => signedAggApprovalEnvelope({
+    schema_version: 1,
+    kind: 'adaptive_goal_execution_approval_decision',
+    provider_id: aggExecutionApprovalProviderId,
+    trust_root_sha256: rootHash(keyPair),
+    nonce: crypto.randomUUID(),
+    issued_at: timestamp(now - 500),
+    expires_at: timestamp(now + 5 * 60_000),
+    scope: ADAPTIVE_GOAL_EXECUTION_APPROVAL_SCOPE,
+    policy_id: policy.policy_id,
+    policy_version: policy.policy_version,
+    policy_hash: policyHash,
+    reviewer_subject: reviewerSubject,
+    reviewer_role: reviewerRole,
+    trust_domain: trustDomain,
+    decision,
+    binding
+  }, keyPair);
+  return {
+    schema_version: 1,
+    policy,
+    maker_attestation: makerAttestation,
+    decisions: [
+      makeVote(aggExecutionCheckerSecurityKeyPair, 'isolated-plugin-security-checker', 'security_checker', 'security-domain'),
+      makeVote(aggExecutionCheckerPlatformKeyPair, 'isolated-plugin-platform-checker', 'platform_checker', 'platform-domain')
+    ]
+  };
 }
 
 // On POSIX, a host path such as /proc cannot be chmod'ed private. The plugin
@@ -2179,7 +2328,7 @@ try {
   const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.result?.serverInfo?.name, 'runalith-agent-orchestrator');
   const listed = await rpc('tools/list');
-  assert.equal(listed.result.tools.length, 71, 'the default RC.8 runtime exposes the three Goal/Idea verifier tools plus trust configuration diagnostics while Phase 2/3/4 opt-in tools remain hidden');
+  assert.equal(listed.result.tools.length, 72, 'the current RC.71 runtime exposes Goal/Idea verification, reviewer identity, and approval-subsystem contracts while Phase 2/3/4 opt-in tools remain hidden');
   assert(listed.result.tools.some(tool => tool.name === 'adaptive_goal_trust_configuration_status'), 'read-only trust configuration diagnostics must be exposed in the default runtime');
   assert.equal(listed.result.tools.some(tool => tool.name === 'adaptive_goal_knowledge_capture_workflow_outcome'), false);
   assert.equal(listed.result.tools.some(tool => tool.name === 'adaptive_goal_phase2_shadow_search'), false);
@@ -4750,13 +4899,25 @@ try {
   assert.equal(verifiedAggCandidate.reviewerAttestation.reviewerSubject, reviewedExecutionGraphActionIntents.review.reviewerId);
   assert.equal(verifiedAggCandidate.reviewerAttestation.authorizationScope, ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE);
 
-  const trustedAggPreflight = await tool('workflow_preflight', { job_id: executionGraphProposal.job_id });
+  // Explicitly observe the independent policy, maker, and execution-approval
+  // trust roots in this disposable test host. This is test fixture setup only;
+  // production trust remains external and unverified.
+  const aggTrustObservation = await tool('adaptive_goal_trust_configuration_status', {});
+  assert.equal(aggTrustObservation.approvalSubsystem.status, 'configured', JSON.stringify(aggTrustObservation.approvalSubsystem.blockers, null, 2));
+  const trustedAggApprovalEvidence = signedAggApprovalEvidence(
+    executionGraphProposal.job_id, verifiedAggCandidate.candidate, verifiedAggCandidate.sourceGraphVerification
+  );
+  const trustedAggPreflight = await tool('workflow_preflight', {
+    job_id: executionGraphProposal.job_id,
+    approval_evidence: trustedAggApprovalEvidence
+  });
   assert.equal(trustedAggPreflight.ready, true, JSON.stringify(trustedAggPreflight, null, 2));
   assert.equal(trustedAggPreflight.candidate_plan_hash, executionPlanCandidate.candidate.executionPlan.plan_hash);
   assert.equal(trustedAggPreflight.immutable_plan_pinned, false);
   const trustedApprovalArgs = {
     job_id: executionGraphProposal.job_id,
-    confirmation: 'Approve candidate-only AGG review after the configured test identity provider attested the exact candidate/semantic/plan fingerprint; do not grant execution authorization.'
+    confirmation: 'Approve the exact isolated test candidate only after explicit signed policy, maker identity, and two-domain checker quorum verification; this creates no production authority.',
+    approval_evidence: trustedAggApprovalEvidence
   };
 
   // Force a late failure while the approval transaction is pinning its plan.

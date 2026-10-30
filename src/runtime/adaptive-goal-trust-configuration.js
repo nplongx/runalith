@@ -120,9 +120,12 @@ export function loadAdaptiveGoalTrustConfiguration({
     const parsed = parseStrictJson(rawConfig, 'AGG public trust configuration', { maxBytes: 128 * 1024 });
     const topKeys = ['schema_version', 'domain', 'provider_id', 'config_version', 'updated_at', 'updated_by', 'change_reference', 'keys'];
     exactKeys(parsed, topKeys, 'trust configuration');
-    if (parsed.schema_version !== ADAPTIVE_GOAL_TRUST_CONFIG_SCHEMA_VERSION || parsed.domain !== domain ||
+    if (parsed.schema_version !== ADAPTIVE_GOAL_TRUST_CONFIG_SCHEMA_VERSION ||
+        !Number.isSafeInteger(parsed.config_version) || parsed.config_version < 1) {
+      fail('AGG_TRUST_CONFIG_VERSION_INVALID', `schema_version must be ${ADAPTIVE_GOAL_TRUST_CONFIG_SCHEMA_VERSION} and config_version must be a positive safe integer`);
+    }
+    if (parsed.domain !== domain ||
         typeof parsed.provider_id !== 'string' || !parsed.provider_id.trim() || parsed.provider_id.length > 200 ||
-        !Number.isSafeInteger(parsed.config_version) || parsed.config_version < 1 ||
         typeof parsed.updated_by !== 'string' || !parsed.updated_by.trim() || parsed.updated_by.length > 200 ||
         typeof parsed.change_reference !== 'string' || !parsed.change_reference.trim() || parsed.change_reference.length > 300 ||
         !Array.isArray(parsed.keys) || parsed.keys.length < 1 || parsed.keys.length > 32) {

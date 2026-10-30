@@ -87,6 +87,33 @@ try {
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE job_id=? AND type='execution.started'")
     .get(job.job_id).n, 0, 'no execution.started event may appear after the claim was recovered');
 
+  // Cancellation may win the same RUNNING-item / not-yet-prepared-task
+  // boundary. A later executor using an independent SQLite connection must
+  // lose the durable claim before creating an attempt or execution event.
+  const cancelledTask = store.createChildTask(job.job_id, {
+    parentTaskId: parent.task_id, role: 'executor',
+    description: 'cancellation wins before durable task preparation',
+    metadata: { deterministic: true, command: "node -e \"process.stdout.write('MUST_NOT_RUN_AFTER_CANCEL')\"" }
+  });
+  const cancelledBatch = store.createExecutionBatch(job.job_id, {
+    parentTaskId: parent.task_id, role: 'executor',
+    items: [{ taskId: cancelledTask.task_id, command: JSON.parse(cancelledTask.metadata_json).command }]
+  });
+  const cancelledItem = store.listExecutionBatchItems(cancelledBatch.batch_id)[0];
+  assert.ok(store.markExecutionBatchItemRunning(cancelledBatch.batch_id, cancelledItem.item_id, { expectedAttempt: 1 }));
+  assert.equal(store.cancelExecutionBatch(cancelledBatch.batch_id).status, 'CANCELLED');
+  assert.throws(() => recoveryStore.prepareExecutionForBatchClaim(cancelledTask.task_id, {
+    executionSessionId: 'exec-prepare-after-cancel-must-lose', attempt: 1,
+    command: cancelledItem.command, cwd: root, startedAt: new Date().toISOString(),
+    tmuxName: 'cos-exec-prepare-after-cancel-must-lose', boundaryIdentity: null
+  }, { batchId: cancelledBatch.batch_id, itemId: cancelledItem.item_id, batchAttempt: 1, itemAttempt: 1 }),
+  error => error?.code === 'ERR_EXECUTION_BATCH_CLAIM_LOST');
+  assert.equal(store.getTask(cancelledTask.task_id).execution_status, null);
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM attempts WHERE task_id=? AND status='started'")
+    .get(cancelledTask.task_id).n, 0, 'cancellation winner must prevent a durable started attempt');
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE job_id=? AND type='execution.started' AND json_extract(payload_json,'$.taskId')=?")
+    .get(job.job_id, cancelledTask.task_id).n, 0, 'cancellation winner must prevent execution.started');
+
   // Reverse the winner: once durable task preparation has committed under the
   // item claim, later stale-claim recovery must not classify it as unstarted.
   const protectedTask = store.createChildTask(job.job_id, {

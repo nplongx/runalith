@@ -8,6 +8,7 @@ import {
   ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT,
   ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE,
   assertAdaptiveGoalReviewerAttestation,
+  ingestAdaptiveGoalReviewerAttestation,
   getAdaptiveGoalReviewerConfigurationStatus,
   expectedAdaptiveGoalReviewerAttestationCandidate,
   configureAdaptiveGoalTrustConfigurationLedger
@@ -285,4 +286,132 @@ test('reviewer nonce replay across jobs and multiple same-candidate attestations
   persistAttestation(store, attestation, JOB_ID);
   persistAttestation(store, attestation, 'job_123e4567-e89b-42d3-a456-426614174001');
   assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now }), /nonce has been replayed/);
+});
+
+function sourceVerificationFixture() {
+  return {
+    providerId: 'independent-source-verifier-fixture',
+    attestationId: sha('source-attestation'),
+    snapshotHash: sha('current-source-snapshot'),
+    evidenceManifestHash: sha('source-evidence-manifest'),
+    trustRootSha256: sha('source-verifier-root'),
+    expiresAt: new Date(now + 5 * 60_000).toISOString()
+  };
+}
+
+function currentCandidateReadback(store, jobId, candidate) {
+  const rows = store.db.prepare(`SELECT event_id,job_id,type,payload_json FROM events
+    WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC`)
+    .all(jobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
+  let verified = null;
+  if (rows.length === 1) {
+    try { verified = assertAdaptiveGoalReviewerAttestation(store, jobId, candidate, { now, trustConfigurationDb: store.trustDb }); }
+    catch {}
+  }
+  return {
+    found: true,
+    status: 'fresh',
+    candidate,
+    candidateHash: candidate.candidateHash,
+    fingerprint: candidate.fingerprint,
+    wrapperState: 'IDLE',
+    wrapperApproved: false,
+    immutablePlanPinned: false,
+    taskRowsCreated: false,
+    dispatchStarted: false,
+    approvalCount: 0,
+    reviewerIdentityVerified: Boolean(verified?.verified),
+    reviewerAttestation: verified ? { attestationEventId: verified.attestationEventId } : null,
+    executionReviewReady: Boolean(verified?.verified && candidate.reviewedTaskInputs?.gates?.actionIntentSemanticEquivalenceVerified === true),
+    sourceGraphVerification: sourceVerificationFixture()
+  };
+}
+
+test('runtime reviewer ingestion atomically persists one provider-signed exact-candidate assertion and is idempotent on exact retry', t => {
+  environment(t);
+  const store = storeFixture();
+  t.after(() => closeStore(store));
+  const candidate = candidateFixture();
+  candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
+  const attestation = signedAttestation(candidate);
+  const options = { now, trustConfigurationDb: store.trustDb,
+    loadCurrentCandidate: () => currentCandidateReadback(store, JOB_ID, candidate) };
+
+  const first = ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, options);
+  assert.equal(first.stored, true);
+  assert.equal(first.idempotent, false);
+  assert.equal(first.verified, true);
+  assert.equal(first.approvalGranted, false);
+  assert.equal(first.dispatchStarted, false);
+  assert.equal(first.executionAuthorized, false);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type=?')
+    .get(JOB_ID, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 1);
+
+  const retry = ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, options);
+  assert.equal(retry.stored, false);
+  assert.equal(retry.idempotent, true);
+  assert.equal(retry.attestationEventId, first.attestationEventId);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type=?')
+    .get(JOB_ID, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 1,
+  'exact retry must read back the prior signed assertion without creating a second durable record');
+});
+
+test('runtime reviewer ingestion rolls back invalid signatures and candidate/plan mismatches', t => {
+  environment(t);
+  const store = storeFixture();
+  t.after(() => closeStore(store));
+  const candidate = candidateFixture();
+  candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
+  const options = { now, trustConfigurationDb: store.trustDb,
+    loadCurrentCandidate: () => currentCandidateReadback(store, JOB_ID, candidate) };
+  const invalidSignature = signedAttestation(candidate, JOB_ID, { signingKey: otherKeyPair.privateKey });
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, invalidSignature, options), /signature does not verify/);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events WHERE type=?').get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 0,
+    'invalid signature must not leave a durable reviewer assertion');
+
+  const oldPlanAttestation = signedAttestation(candidate);
+  candidate.executionPlan.plan_hash = sha('mutated-current-plan-after-signing');
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, oldPlanAttestation, options), /does not bind the exact candidate/);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events WHERE type=?').get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 0,
+    'plan mismatch must roll back the candidate-bound attestation event');
+});
+
+test('runtime reviewer ingestion rejects nonce replay across distinct candidate jobs without persisting the second event', t => {
+  environment(t);
+  const store = storeFixture();
+  t.after(() => closeStore(store));
+  const candidate = candidateFixture();
+  candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
+  const firstAttestation = signedAttestation(candidate);
+  const firstOptions = { now, trustConfigurationDb: store.trustDb,
+    loadCurrentCandidate: () => currentCandidateReadback(store, JOB_ID, candidate) };
+  ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, firstAttestation, firstOptions);
+
+  const secondJobId = 'job_123e4567-e89b-42d3-a456-426614174001';
+  const secondAttestation = signedAttestation(candidate, secondJobId, { nonce: firstAttestation.nonce });
+  const secondOptions = { now, trustConfigurationDb: store.trustDb,
+    loadCurrentCandidate: () => currentCandidateReadback(store, secondJobId, candidate) };
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, secondJobId, secondAttestation, secondOptions), /nonce already exists/);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type=?')
+    .get(secondJobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 0);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events WHERE type=?')
+    .get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 1);
+});
+
+test('runtime reviewer ingestion refuses stale source snapshots and already-approved lifecycle state', t => {
+  environment(t);
+  const store = storeFixture();
+  t.after(() => closeStore(store));
+  const candidate = candidateFixture();
+  const attestation = signedAttestation(candidate);
+  const staleOptions = { now, trustConfigurationDb: store.trustDb,
+    loadCurrentCandidate: () => ({ ...currentCandidateReadback(store, JOB_ID, candidate),
+      sourceGraphVerification: { ...sourceVerificationFixture(), expiresAt: new Date(now - 1).toISOString() } }) };
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, staleOptions), /freshly rebuilt candidate/);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events').get().count, 0);
+
+  const advancedOptions = { now, trustConfigurationDb: store.trustDb,
+    loadCurrentCandidate: () => ({ ...currentCandidateReadback(store, JOB_ID, candidate), wrapperState: 'APPROVED', wrapperApproved: true }) };
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, advancedOptions), /unapproved, unpinned, undispatched/);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events').get().count, 0);
 });

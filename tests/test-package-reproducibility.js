@@ -51,12 +51,15 @@ function packageInputSnapshot(label) {
     'README.md', 'LICENSE', 'plugin/manifest.json',
     'tests/test-runalith-plugin.js',
     'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+    'tests/test-adaptive-goal-approval-subsystem.mjs',
     'tests/test-adaptive-goal-evidence-lineage.js',
     'tests/test-adaptive-goal-knowledge-verifier.mjs',
     'tests/test-adaptive-goal-trust-configuration.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs',
     'tests/test-adaptive-goal-reviewer-identity.js',
     'tests/test-reconcile-active-workflows.mjs',
+    'tests/test-reconcile-active-workflows-v2.mjs',
+    'tests/test-external-trust-checkpoint-contract.mjs',
     'tests/test-temp-dir.js',
     'tests/test-execution-lease-fencing.js',
     'tests/test-execution-control-process-boundary.js',
@@ -66,6 +69,8 @@ function packageInputSnapshot(label) {
     'tests/test-execution-batch-terminal-recovery.js',
     'tests/test-execution-success-contract.js',
     'tests/test-phase5-recovery.js',
+    'tests/test-workflow-terminal-failure-atomicity.js',
+    'tests/test-provider-pre-send-recovery.js',
     'tests/test-agent-tool-guidance.js',
     'tests/test-mcp-stdio-backpressure.mjs',
     'tests/test-mcp-graceful-signal-shutdown-20261017.js',
@@ -73,6 +78,14 @@ function packageInputSnapshot(label) {
     'tests/test-mcp-eof-shutdown-framing-20261017.js',
     'tests/test-production-behavioral-qa.js',
     'scripts/reconcile-active-workflows.mjs',
+    'scripts/reconcile-active-workflows-v2.mjs',
+    'scripts/lib/external-trust-checkpoint-contract.mjs',
+    'scripts/lib/sqlite-external-checkpoint-transition.mjs',
+    'scripts/build-agg-live-remediation-plan.mjs',
+    'scripts/validate-agg-trust-config.mjs',
+    'scripts/verify-agg-acceptance-consistency.mjs',
+    'tests/test-agg-live-remediation-plan.mjs',
+    'tests/test-agg-acceptance-consistency.mjs',
     'scripts/package-runalith-mcpb.sh',
     'scripts/collect-plugin-runtime.mjs',
     'scripts/plugin-package-metadata.mjs',
@@ -332,6 +345,7 @@ try {
   assert.equal(firstArchive.names.length, expectedArchiveNames.size,
     'archive entry count is derived from exact expected membership, never a historical hard-coded count');
   for (const requiredTest of [
+    'tests/test-adaptive-goal-approval-subsystem.mjs',
     'tests/test-execution-lease-fencing.js',
     'tests/test-execution-control-process-boundary.js',
     'tests/test-execution-batch.js',
@@ -339,12 +353,16 @@ try {
     'tests/test-execution-batch-terminal-recovery.js',
     'tests/test-execution-success-contract.js',
     'tests/test-phase5-recovery.js',
+    'tests/test-workflow-terminal-failure-atomicity.js',
+    'tests/test-provider-pre-send-recovery.js',
     'tests/test-agent-tool-guidance.js',
     'tests/test-adaptive-goal-knowledge-verifier.mjs',
     'tests/test-adaptive-goal-trust-configuration.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs',
     'tests/test-adaptive-goal-reviewer-identity.js',
-    'tests/test-reconcile-active-workflows.mjs'
+    'tests/test-reconcile-active-workflows.mjs',
+    'tests/test-reconcile-active-workflows-v2.mjs',
+    'tests/test-external-trust-checkpoint-contract.mjs'
   ]) {
     assert.ok(firstArchive.extracted.has(requiredTest), `exact package closure must contain ${requiredTest}`);
     assert.ok(secondArchive.extracted.has(requiredTest), `second reproducible archive must contain ${requiredTest}`);
@@ -353,6 +371,10 @@ try {
     'the read-only reconciliation CLI must be present in the archive, not merely in the staging directory');
   assert.ok(secondArchive.extracted.has('scripts/reconcile-active-workflows.mjs'),
     'the second reproducible archive must include the exact read-only reconciliation CLI bytes');
+  assert.ok(firstArchive.extracted.has('scripts/validate-agg-trust-config.mjs'),
+    'the read-only operator trust-config validator must be present in the archive');
+  assert.ok(secondArchive.extracted.has('scripts/validate-agg-trust-config.mjs'),
+    'the second reproducible archive must include the exact operator trust-config validator bytes');
   assert.ok(firstArchive.extracted.has('src/runtime/strict-json.js'), 'strict JSON consumer hardening must ship its parser dependency in the MCP bundle');
   assert.ok(firstArchive.extracted.has('src/runtime/job-liveness.js'), 'runtimePrefix-loaded job liveness diagnostics must ship in the extracted MCP bundle');
   assert.ok(firstArchive.extracted.has('src/runtime/adaptive-goal-reviewed-task-inputs.js'), 'the versioned reviewed action-intent/task-input contract must ship in the extracted runtime closure');
