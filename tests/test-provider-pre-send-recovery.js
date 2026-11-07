@@ -9,7 +9,7 @@ process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { createExecutionRequest } = await import('../src/runtime/execution-contract.js');
 const { DistributedScheduler } = await import('../src/runtime/distributed-scheduler.js');
 const { GitHubActionsProvider } = await import('../src/runtime/github-actions-provider.js');
@@ -507,6 +507,217 @@ assert.equal(posts, postsBeforeTerminalParent, 'terminal parent task must be fen
 assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM provider_dispatch_intents WHERE task_id=?').get(terminalParentTask.task_id).n, 0,
   'terminal parent rejection must not leave a dispatch intent');
 
-console.log('provider full-request hash, stale-safe pre-send recovery, terminal-parent scheduler fence, and no-replay boundaries: PASS');
+// A parent can terminalize after the scheduler has persisted its dispatch
+// intent and after the provider's early lease check, but before the one-way
+// send-claim CAS. This invocation is definitely not sent; the lease must settle
+// rather than remain active under a false pending-reconciliation result.
+const racedTerminalJob = store.createJob({
+  conversationKey: `pre-send-raced-terminal-${process.pid}`, title: 'Terminal state wins before provider claim'
+});
+store.transition(racedTerminalJob.job_id, 'EXECUTING');
+const racedTerminalTask = store.ensureTask(racedTerminalJob.job_id, {
+  role: 'engineer', description: 'claim CAS must reject after parent terminalization'
+});
+const originalActiveLeaseAssertion = provider._assertActiveDispatchLease;
+let terminalizedAfterPreflight = false;
+provider._assertActiveDispatchLease = function (...args) {
+  const result = originalActiveLeaseAssertion.apply(this, args);
+  if (!terminalizedAfterPreflight) {
+    terminalizedAfterPreflight = true;
+    store.transition(racedTerminalJob.job_id, 'CANCELLED', 'cancelled');
+  }
+  return result;
+};
+const postsBeforeRacedTerminal = posts;
+let racedTerminalError;
+try {
+  await assert.rejects(() => scheduler.dispatchTask(racedTerminalTask, { inputCommit: 'b'.repeat(40) }),
+    error => { racedTerminalError = error; return /lost its durable one-way send claim/.test(error.message); });
+} finally {
+  provider._assertActiveDispatchLease = originalActiveLeaseAssertion;
+}
+assert.equal(terminalizedAfterPreflight, true);
+assert.equal(racedTerminalError?.remoteOutcome, 'not_sent');
+const racedTerminalIntent = store.db.prepare('SELECT * FROM provider_dispatch_intents WHERE task_id=?').get(racedTerminalTask.task_id);
+const racedTerminalLease = store.db.prepare('SELECT * FROM task_leases WHERE task_id=?').get(racedTerminalTask.task_id);
+const racedTerminalTaskAfter = store.getTask(racedTerminalTask.task_id);
+assert.ok(racedTerminalIntent);
+assert.equal(racedTerminalIntent.dispatch_claim_id, null);
+assert.equal(racedTerminalIntent.provider_run_id, null);
+assert.equal(racedTerminalLease.state, 'EXPIRED');
+assert.equal(racedTerminalTaskAfter.status, 'failed');
+assert.equal(racedTerminalTaskAfter.execution_status, 'failed');
+assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM provider_runs WHERE task_id=?").get(racedTerminalTask.task_id).n, 0);
+assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE job_id=? AND type='task.lease.expired'").get(racedTerminalJob.job_id).n, 1);
+assert.equal(posts, postsBeforeRacedTerminal, 'a terminalized parent must prevent the remote POST');
+const racedTerminalInventory = await scheduler.reconcileProviderDispatches();
+assert.equal(racedTerminalInventory.find(item => item.dispatchKey === racedTerminalIntent.dispatch_key)?.status, 'LEASE_STALE_NO_SEND');
+
+// A sibling intent's claim is lease/attempt-level evidence. Losing this
+// invocation's own claim must quarantine the shared lease, not cleanly expire
+// it or permit a fresh task attempt.
+const siblingClaimRaceJob = store.createJob({
+  conversationKey: `pre-send-sibling-claim-race-${process.pid}`, title: 'Sibling claim must quarantine shared lease'
+});
+store.transition(siblingClaimRaceJob.job_id, 'EXECUTING');
+const siblingClaimRaceTask = store.ensureTask(siblingClaimRaceJob.job_id, {
+  role: 'engineer', description: 'sibling send claim must quarantine this lease'
+});
+let siblingClaimInserted = false;
+let siblingClaimRaceDispatchKey = null;
+provider._assertActiveDispatchLease = function (...args) {
+  const result = originalActiveLeaseAssertion.apply(this, args);
+  if (!siblingClaimInserted) {
+    siblingClaimInserted = true;
+    const request = args[1];
+    const { dispatch_key: _dispatchKey, ...executionRequest } = request;
+    const siblingRequest = { ...executionRequest, task_payload_ref: `${executionRequest.task_payload_ref}:sibling` };
+    const siblingIdentity = createProviderDispatchIdentity(siblingRequest, providerDispatchConfig(provider));
+    siblingClaimRaceDispatchKey = providerDispatchKey(siblingIdentity);
+    const claimedAt = new Date(now).toISOString();
+    store.db.prepare(`INSERT INTO provider_dispatch_intents
+      (dispatch_key,job_id,task_id,lease_id,attempt,owner_epoch,provider,input_commit,request_sha256,request_json,api_base,workflow,repository,event,ref,state,dispatch_claim_id,dispatch_claimed_at,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DISPATCHING','sibling-remote-claim',?,?,?)`).run(
+      siblingClaimRaceDispatchKey, siblingIdentity.job_id, siblingIdentity.task_id, siblingIdentity.lease_id,
+      siblingIdentity.attempt, siblingIdentity.owner_epoch, siblingIdentity.provider, siblingIdentity.input_commit,
+      siblingIdentity.request_sha256, canonicalProviderDispatchRequest(siblingRequest), siblingIdentity.api_base,
+      siblingIdentity.workflow, siblingIdentity.repository, siblingIdentity.event, siblingIdentity.ref,
+      claimedAt, claimedAt, claimedAt);
+  }
+  return result;
+};
+const postsBeforeSiblingClaimRace = posts;
+let siblingClaimError;
+try {
+  await assert.rejects(() => scheduler.dispatchTask(siblingClaimRaceTask, { inputCommit: 'c'.repeat(40) }),
+    error => { siblingClaimError = error; return /lost its durable one-way send claim/.test(error.message); });
+} finally {
+  provider._assertActiveDispatchLease = originalActiveLeaseAssertion;
+}
+assert.equal(siblingClaimInserted, true);
+assert.equal(siblingClaimError?.remoteOutcome, 'not_sent', 'only this invocation is known not to have sent');
+const siblingClaimRaceLease = store.db.prepare('SELECT * FROM task_leases WHERE task_id=?').get(siblingClaimRaceTask.task_id);
+const siblingClaimRaceTaskAfter = store.getTask(siblingClaimRaceTask.task_id);
+const siblingClaimRaceEvents = store.db.prepare("SELECT payload_json FROM events WHERE job_id=? AND type='task.lease.quarantined'").all(siblingClaimRaceJob.job_id);
+const siblingClaimRaceIntents = store.db.prepare('SELECT * FROM provider_dispatch_intents WHERE task_id=? ORDER BY created_at,rowid').all(siblingClaimRaceTask.task_id);
+assert.equal(siblingClaimRaceLease.state, 'FAILED');
+assert.match(siblingClaimRaceLease.last_error, /^REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION:/);
+assert.equal(siblingClaimRaceTaskAfter.status, 'failed');
+assert.equal(siblingClaimRaceEvents.length, 1);
+const siblingQuarantinePayload = JSON.parse(siblingClaimRaceEvents[0].payload_json);
+assert.equal(siblingClaimRaceIntents.length, 2);
+assert.equal(siblingClaimRaceIntents.find(row => row.dispatch_key !== siblingClaimRaceDispatchKey)?.dispatch_claim_id, null,
+  'the scheduler-owned intent must remain unclaimed');
+assert.ok(siblingClaimRaceIntents.find(row => row.dispatch_key === siblingClaimRaceDispatchKey)?.dispatch_claim_id,
+  'the sibling claim must remain durable');
+assert.equal(siblingQuarantinePayload.dispatchKey, siblingClaimRaceDispatchKey);
+assert.equal(siblingQuarantinePayload.remoteEffect, 'uncertain');
+assert.equal(siblingQuarantinePayload.reconciliationRequired, true);
+assert.equal(store.getJob(siblingClaimRaceJob.job_id).status, 'active');
+assert.equal(posts, postsBeforeSiblingClaimRace, 'a sibling claim must prevent this invocation from posting');
+
+// A restart/recovery inventory must not offer a terminal parent or task as a
+// safe pre-send retry merely because its original lease has not yet expired.
+for (const recoveryMode of ['inventory', 'retry']) {
+  const terminalRecoveryJob = store.createJob({
+    conversationKey: `pre-send-terminal-recovery-${recoveryMode}-${process.pid}`,
+    title: 'Terminal parent blocks pre-send recovery'
+  });
+  store.transition(terminalRecoveryJob.job_id, 'EXECUTING');
+  const terminalRecoveryTask = store.ensureTask(terminalRecoveryJob.job_id, {
+    role: 'engineer', description: 'terminal parent cannot be retried'
+  });
+  const terminalRecoveryLease = store.acquireTaskLease(terminalRecoveryTask.task_id, {
+    leaseId: `lease-terminal-recovery-${recoveryMode}-${process.pid}`, workerId: 'recovery-operator', ttlMs: 5 * 60 * 1000
+  });
+  const terminalRecoveryRequest = createExecutionRequest({
+    job_id: terminalRecoveryJob.job_id, task_id: terminalRecoveryTask.task_id,
+    lease_id: terminalRecoveryLease.lease_id, attempt: terminalRecoveryLease.attempt,
+    owner_epoch: terminalRecoveryLease.owner_epoch, role: 'engineer', input_commit: 'd'.repeat(40),
+    task_payload_ref: `task://${terminalRecoveryTask.task_id}`, workspace: 'ephemeral', required_evidence: ['execution.json']
+  });
+  const terminalRecoveryIdentity = createProviderDispatchIdentity(terminalRecoveryRequest, providerDispatchConfig(provider));
+  const terminalRecoveryKey = providerDispatchKey(terminalRecoveryIdentity);
+  const terminalRecoveryAt = new Date(now).toISOString();
+  store.db.prepare(`INSERT INTO provider_dispatch_intents
+    (dispatch_key,job_id,task_id,lease_id,attempt,owner_epoch,provider,input_commit,request_sha256,request_json,api_base,workflow,repository,event,ref,state,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DISPATCHING',?,?)`).run(
+    terminalRecoveryKey, terminalRecoveryIdentity.job_id, terminalRecoveryIdentity.task_id,
+    terminalRecoveryIdentity.lease_id, terminalRecoveryIdentity.attempt, terminalRecoveryIdentity.owner_epoch,
+    terminalRecoveryIdentity.provider, terminalRecoveryIdentity.input_commit, terminalRecoveryIdentity.request_sha256,
+    canonicalProviderDispatchRequest(terminalRecoveryRequest), terminalRecoveryIdentity.api_base,
+    terminalRecoveryIdentity.workflow, terminalRecoveryIdentity.repository, terminalRecoveryIdentity.event,
+    terminalRecoveryIdentity.ref, terminalRecoveryAt, terminalRecoveryAt);
+  store.transition(terminalRecoveryJob.job_id, 'CANCELLED', 'cancelled');
+  const postsBeforeRecovery = posts;
+  if (recoveryMode === 'inventory') {
+    const result = await scheduler.reconcileProviderDispatches();
+    assert.equal(result.find(item => item.dispatchKey === terminalRecoveryKey)?.status, 'JOB_OR_TASK_TERMINAL_NO_SEND');
+  } else {
+    const result = await scheduler.retryPreSendDispatch(terminalRecoveryKey);
+    assert.equal(result.status, 'JOB_OR_TASK_TERMINAL_NO_SEND');
+    assert.equal(result.sent, false);
+  }
+  assert.equal(store.db.prepare('SELECT state FROM task_leases WHERE lease_id=?').get(terminalRecoveryLease.lease_id).state, 'EXPIRED');
+  assert.equal(store.getTask(terminalRecoveryTask.task_id).status, 'failed');
+  assert.equal(posts, postsBeforeRecovery, 'terminal recovery must never cross the provider POST boundary');
+}
+
+// The same parent-terminal race can occur after retryPreSendDispatch has
+// passed its recovery preflight. Its provider claim failure is a definite
+// no-send for this invocation and must settle the unclaimed lease.
+const racedRetryJob = store.createJob({
+  conversationKey: `pre-send-raced-retry-${process.pid}`, title: 'Retry terminal state wins before claim'
+});
+store.transition(racedRetryJob.job_id, 'EXECUTING');
+const racedRetryTask = store.ensureTask(racedRetryJob.job_id, {
+  role: 'engineer', description: 'pre-send retry must settle after parent terminalization'
+});
+const racedRetryLease = store.acquireTaskLease(racedRetryTask.task_id, {
+  leaseId: `lease-raced-retry-${process.pid}`, workerId: 'recovery-operator', ttlMs: 5 * 60 * 1000
+});
+const racedRetryRequest = createExecutionRequest({
+  job_id: racedRetryJob.job_id, task_id: racedRetryTask.task_id, lease_id: racedRetryLease.lease_id,
+  attempt: racedRetryLease.attempt, owner_epoch: racedRetryLease.owner_epoch, role: 'engineer',
+  input_commit: 'e'.repeat(40), task_payload_ref: `task://${racedRetryTask.task_id}`,
+  workspace: 'ephemeral', required_evidence: ['execution.json']
+});
+const racedRetryIdentity = createProviderDispatchIdentity(racedRetryRequest, providerDispatchConfig(provider));
+const racedRetryKey = providerDispatchKey(racedRetryIdentity);
+const racedRetryAt = new Date(now).toISOString();
+store.db.prepare(`INSERT INTO provider_dispatch_intents
+  (dispatch_key,job_id,task_id,lease_id,attempt,owner_epoch,provider,input_commit,request_sha256,request_json,api_base,workflow,repository,event,ref,state,created_at,updated_at)
+  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DISPATCHING',?,?)`).run(
+  racedRetryKey, racedRetryIdentity.job_id, racedRetryIdentity.task_id, racedRetryIdentity.lease_id,
+  racedRetryIdentity.attempt, racedRetryIdentity.owner_epoch, racedRetryIdentity.provider, racedRetryIdentity.input_commit,
+  racedRetryIdentity.request_sha256, canonicalProviderDispatchRequest(racedRetryRequest), racedRetryIdentity.api_base,
+  racedRetryIdentity.workflow, racedRetryIdentity.repository, racedRetryIdentity.event, racedRetryIdentity.ref,
+  racedRetryAt, racedRetryAt);
+let retryTerminalizedAfterPreflight = false;
+provider._assertActiveDispatchLease = function (...args) {
+  const result = originalActiveLeaseAssertion.apply(this, args);
+  if (!retryTerminalizedAfterPreflight) {
+    retryTerminalizedAfterPreflight = true;
+    store.transition(racedRetryJob.job_id, 'CANCELLED', 'cancelled');
+  }
+  return result;
+};
+const postsBeforeRacedRetry = posts;
+let racedRetryResult;
+try {
+  racedRetryResult = await scheduler.retryPreSendDispatch(racedRetryKey);
+} finally {
+  provider._assertActiveDispatchLease = originalActiveLeaseAssertion;
+}
+assert.equal(retryTerminalizedAfterPreflight, true);
+assert.equal(racedRetryResult.status, 'RETRY_REJECTED_NO_SEND');
+assert.equal(racedRetryResult.sent, false);
+assert.equal(racedRetryResult.lease_state, 'EXPIRED');
+assert.equal(store.db.prepare('SELECT dispatch_claim_id FROM provider_dispatch_intents WHERE dispatch_key=?').get(racedRetryKey).dispatch_claim_id, null);
+assert.equal(store.db.prepare('SELECT state FROM task_leases WHERE lease_id=?').get(racedRetryLease.lease_id).state, 'EXPIRED');
+assert.equal(store.getTask(racedRetryTask.task_id).status, 'failed');
+assert.equal(posts, postsBeforeRacedRetry, 'retry claim CAS failure after parent terminalization must not POST');
+
+console.log('provider full-request hash, stale-safe pre-send recovery, terminal-parent scheduler fence, sibling-claim quarantine, and no-replay boundaries: PASS');
 store.db.close();
 process.on('exit', () => { try { fs.rmSync(root, { recursive: true, force: true }); } catch {} });

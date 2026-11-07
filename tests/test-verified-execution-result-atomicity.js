@@ -5,12 +5,17 @@ import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tempDir } from './test-temp-dir.js';
+import {
+  canonicalProviderDispatchRequest,
+  createProviderDispatchIdentity,
+  providerDispatchKey
+} from '../src/runtime/provider-dispatch-identity.js';
 
 const root = tempDir('verified-execution-result-atomicity-');
 const dbPath = path.join(root, 'workflow.db');
 process.env.WORKFLOW_DB = dbPath;
 process.env.WORKFLOW_DATA_DIR = root;
-const storeModulePath = path.resolve(process.env.PHASE2_TEST_WORKFLOW_STORE_MODULE || fileURLToPath(new URL('../src/runtime/job-store.js', import.meta.url)));
+const storeModulePath = path.resolve(process.env.PHASE2_TEST_WORKFLOW_STORE_MODULE || fileURLToPath(new URL('../job-store.js', import.meta.url)));
 const storeModuleUrl = pathToFileURL(storeModulePath).href;
 const { WorkflowStore } = await import(storeModuleUrl);
 const store = new WorkflowStore();
@@ -56,6 +61,56 @@ function failureResultFor(fixture, providerRunId) {
     exit_code: 1,
     error: 'synthetic provider failure without output commit'
   };
+}
+
+// The public job-store entry point composes the Execution-owned provider
+// persistence participant. A result is intentionally rejected before the
+// terminal-write boundary unless its provider run and immutable dispatch
+// intent are present and bound to this exact claim. Seed a synthetic, already
+// terminal provider observation so the atomicity cases exercise the intended
+// result/attempt/lease/task/event savepoint rather than the earlier provenance
+// rejection. This fixture performs no provider/network side effect.
+function bindFailedProviderRun(fixture, result) {
+  const request = {
+    job_id: result.job_id,
+    task_id: result.task_id,
+    lease_id: result.lease_id,
+    attempt: result.attempt,
+    owner_epoch: result.owner_epoch,
+    role: fixture.task.role,
+    input_commit: result.input_commit
+  };
+  const config = {
+    provider: 'github-actions',
+    api_base: 'https://api.github.com',
+    workflow: 'runalith-worker.yml',
+    repository: 'example/runalith-worker-fixture',
+    event: 'workflow_dispatch',
+    ref: 'refs/heads/main'
+  };
+  const identity = createProviderDispatchIdentity(request, config);
+  const dispatchKey = providerDispatchKey(identity);
+  const requestJson = canonicalProviderDispatchRequest(request);
+  const ts = timestamp();
+
+  store.db.prepare(`INSERT INTO provider_dispatch_intents
+    (dispatch_key,job_id,task_id,lease_id,attempt,owner_epoch,provider,input_commit,
+     request_sha256,request_json,api_base,workflow,repository,event,ref,state,
+     provider_run_id,dispatch_claim_id,dispatch_claimed_at,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'DISPATCHED',?,?,?,?,?)`)
+    .run(dispatchKey, result.job_id, result.task_id, result.lease_id, result.attempt,
+      result.owner_epoch, identity.provider, identity.input_commit, identity.request_sha256,
+      requestJson, identity.api_base, identity.workflow, identity.repository, identity.event,
+      identity.ref, result.provider_run_id, `fixture-claim-${result.provider_run_id}`,
+      ts, ts, ts);
+  store.db.prepare(`INSERT INTO provider_runs
+    (provider_run_id,provider,job_id,task_id,lease_id,attempt,owner_epoch,input_commit,
+     dispatch_key,request_sha256,workflow,ref,state,conclusion,artifact_id,run_attempt,
+     created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?, 'COMPLETED','failure','123456',1,?,?)`)
+    .run(result.provider_run_id, identity.provider, result.job_id, result.task_id,
+      result.lease_id, result.attempt, result.owner_epoch, identity.input_commit,
+      dispatchKey, identity.request_sha256, identity.workflow, identity.ref, ts, ts);
 }
 
 function inspectIndependent(taskId, jobId) {
@@ -120,6 +175,7 @@ function assertPristineAfterReject(fixture) {
 {
   const fixture = makeLease('failure-result-rollback');
   const result = failureResultFor(fixture, `provider-failure-rollback-${process.pid}`);
+  bindFailedProviderRun(fixture, result);
   const originalRecordEvent = store.recordEvent.bind(store);
   store.recordEvent = (jobId, type, payload, dedupeKey) => {
     if (type === 'task.failed') throw new Error('injected task-failure event persistence failure');
@@ -164,6 +220,7 @@ function assertPristineAfterReject(fixture) {
 {
   const fixture = makeLease('failure-result-sigkill');
   const result = failureResultFor(fixture, `provider-failure-sigkill-${process.pid}`);
+  bindFailedProviderRun(fixture, result);
   const childCode = `
     const { WorkflowStore } = await import(${JSON.stringify(storeModuleUrl)});
     const store = new WorkflowStore();

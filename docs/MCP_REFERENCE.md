@@ -4,6 +4,7 @@ This page is generated from the shipped stdio MCP server by the documentation ge
 
 - Source: the runtime entry point declared by `package.json` and its runtime schema definitions.
 - Server identity reported by the checked-out source: `runalith-agent-orchestrator`.
+- Source package version reported at generation time: `1.0.9-rc.72`.
 - Registered tools: **75**.
 
 ## Choosing the right operation
@@ -77,7 +78,7 @@ This page is generated from the shipped stdio MCP server by the documentation ge
 | [`workflow_artifacts`](#workflow_artifacts) | Read-only listing of persisted typed artifacts and their metadata/status for a local workflow; content is redacted and bounded. Use to check artifact presence/lineage before review or synthesis, not as a replacement for schema/provenance validation. | `job_id` |
 | [`workflow_e2e_run`](#workflow_e2e_run) | State-changing convenience runner for deterministic local steps of an already-approved workflow. Use only when advancing deterministic tasks without host reasoning is sufficient; it never fabricates specialist results, approves a proposal, or self-approves synthesis. Use the coordinator/next-task path when specialist work is required. | `job_id` |
 | [`workflow_recovery_verify`](#workflow_recovery_verify) | Read-only post-recovery check of persisted workflow invariants using an independent fresh Node process against the same SQLite database. Use to verify stored-state consistency; this does not prove runtime correctness, a supervisor restart, or external service health. | `job_id` |
-| [`workflow_record_intervention`](#workflow_record_intervention) | State-changing audit note for a real manual intervention/workaround, capturing reason and what was done for future automation. Use only after an actual intervention; it does not change workflow state, approval, or security policy and must not be used to manufacture evidence. | `reason`, `workaround` |
+| [`workflow_record_intervention`](#workflow_record_intervention) | State-changing audit note for a real manual intervention/workaround, capturing reason and what was done for future automation. A task association requires its owning job_id. Record and workflow event commit together; this does not change workflow state, approval, or security policy. | `reason`, `workaround` |
 | [`workflow_interventions`](#workflow_interventions) | Read-only query of previously recorded manual interventions, optionally scoped to a workflow. Use for operational learning; it does not apply or validate a workaround. | None |
 | [`workflow_validate_artifact`](#workflow_validate_artifact) | Read-only validation of typed artifact content against a known schema/optional role. Use before persisting a candidate artifact to catch missing/invalid fields; this alone does not persist it or prove task-result lineage, approval, or overall workflow success. | `artifact_type`, `artifact` |
 | [`workflow_access_diagnostics`](#workflow_access_diagnostics) | Read-only local diagnostics for trust/config clues relevant to CHAT_NOT_TRUSTED. Use to investigate the underlying configuration; it never bypasses or changes trust policy. | None |
@@ -2320,7 +2321,7 @@ Append or revise an Idea Graph node using a stable cross-goal identity, immutabl
 |---|---|---|---|---|
 | `goal_id` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
 | `stable_key` | `string` | Yes | — | minLength: `1`; maxLength: `200` |
-| `node_type` | `string` | Yes | — | enum: `goal`, `hypothesis`, `idea`, `capability`, `experiment`, `evidence`, `condition` |
+| `node_type` | `string` | Yes | — | enum: `goal`, `hypothesis`, `idea`, `capability`, `experiment`, `evidence`, `condition`, `task` |
 | `content` | `object` | Yes | — | — |
 | `provenance` | `object` | Yes | — | no additional properties; required fields: `source`, `actor` |
 | `expected_revision` | `integer` | No | — | minimum: `0` |
@@ -2353,7 +2354,8 @@ Append or revise an Idea Graph node using a stable cross-goal identity, immutabl
         "capability",
         "experiment",
         "evidence",
-        "condition"
+        "condition",
+        "task"
       ]
     },
     "content": {
@@ -2629,7 +2631,7 @@ Search the shared append-only Idea Graph across goals, including goal/hypothesis
 | Input | Type | Required | Description | Constraints |
 |---|---|---|---|---|
 | `goal_id` | `string` | No | — | minLength: `1`; maxLength: `200` |
-| `node_type` | `string` | No | — | enum: `goal`, `hypothesis`, `idea`, `capability`, `experiment`, `evidence`, `condition` |
+| `node_type` | `string` | No | — | enum: `goal`, `hypothesis`, `idea`, `capability`, `experiment`, `evidence`, `condition`, `task` |
 | `query` | `string` | No | — | minLength: `1`; maxLength: `512` |
 | `include_unverified` | `boolean` | No | — | — |
 | `include_recovery_edges` | `boolean` | No | — | — |
@@ -2657,7 +2659,8 @@ Search the shared append-only Idea Graph across goals, including goal/hypothesis
         "capability",
         "experiment",
         "evidence",
-        "condition"
+        "condition",
+        "task"
       ]
     },
     "query": {
@@ -12715,16 +12718,16 @@ Read-only post-recovery check of persisted workflow invariants using an independ
 
 ### `workflow_record_intervention`
 
-State-changing audit note for a real manual intervention/workaround, capturing reason and what was done for future automation. Use only after an actual intervention; it does not change workflow state, approval, or security policy and must not be used to manufacture evidence.
+State-changing audit note for a real manual intervention/workaround, capturing reason and what was done for future automation. A task association requires its owning job_id. Record and workflow event commit together; this does not change workflow state, approval, or security policy.
 
 | Input | Type | Required | Description | Constraints |
 |---|---|---|---|---|
-| `job_id` | `string` | No | — | — |
-| `task_id` | `string` | No | — | — |
-| `actor` | `string` | No | — | — |
-| `reason` | `string` | Yes | — | minLength: `1` |
-| `workaround` | `string` | Yes | — | minLength: `1` |
-| `proposed_automation` | `string` | No | — | — |
+| `job_id` | `string` | No | — | minLength: `1`; maxLength: `200` |
+| `task_id` | `string` | No | — | minLength: `1`; maxLength: `200` |
+| `actor` | `string` | No | — | minLength: `1`; maxLength: `200` |
+| `reason` | `string` | Yes | — | minLength: `1`; maxLength: `4000` |
+| `workaround` | `string` | Yes | — | minLength: `1`; maxLength: `8000` |
+| `proposed_automation` | `string` | No | — | maxLength: `8000` |
 | `duration_minutes` | `number` | No | — | minimum: `0` |
 
 <details>
@@ -12733,26 +12736,36 @@ State-changing audit note for a real manual intervention/workaround, capturing r
 ```json
 {
   "type": "object",
+  "additionalProperties": false,
   "properties": {
     "job_id": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
     },
     "task_id": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
     },
     "actor": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
     },
     "reason": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 4000
     },
     "workaround": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 8000
     },
     "proposed_automation": {
-      "type": "string"
+      "type": "string",
+      "maxLength": 8000
     },
     "duration_minutes": {
       "type": "number",
@@ -12762,8 +12775,7 @@ State-changing audit note for a real manual intervention/workaround, capturing r
   "required": [
     "reason",
     "workaround"
-  ],
-  "additionalProperties": false
+  ]
 }
 ```
 

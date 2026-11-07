@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { WorkflowStore } from '../src/runtime/job-store.js';
+import { WorkflowStore } from '../job-store.js';
 import { artifactSchemaForType } from '../src/runtime/workflow/artifacts.js';
 import { getAgentInputArtifactTypes } from '../src/runtime/workflow/agent-contracts.js';
 import { standardEngineeringTaskSpecs } from '../src/runtime/workflow/catalog/standard-engineering.js';

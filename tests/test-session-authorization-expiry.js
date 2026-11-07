@@ -7,7 +7,7 @@ const dataDir = tempDir('session-authorization-expiry-');
 process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_DB = path.join(dataDir, 'workflow.db');
 
-const modulePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/runtime/job-store.js');
+const modulePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../job-store.js');
 const { WorkflowStore } = await import(pathToFileURL(modulePath));
 const store = new WorkflowStore();
 const job = store.createJob({ conversationKey: `session-auth-expiry-${process.pid}`, title: 'Session access expiry validation' });

@@ -1,0 +1,686 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/job-store.js::WorkflowStore.beginAgentRetry ordered preflight",
+  "note": "Models preflight and attempt-number planning only; Node transaction postconditions are included for audit and are not Rust persistence claims.",
+  "cases": [
+    {
+      "name": "ready-stale-session",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "READY",
+      "error_code": null,
+      "next_attempt": 2,
+      "superseded_attempt_id": "attempt-oracle",
+      "postcondition": {
+        "task_status": "running",
+        "session_state": "ACTIVE",
+        "session_attempt": 2,
+        "active_attempt_count": 1,
+        "superseded_attempt_status": "failed"
+      }
+    },
+    {
+      "name": "ready-no-open-attempt",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": []
+      },
+      "outcome": "READY",
+      "error_code": null,
+      "next_attempt": 2,
+      "superseded_attempt_id": null,
+      "postcondition": {
+        "task_status": "running",
+        "session_state": "ACTIVE",
+        "session_attempt": 2,
+        "active_attempt_count": 1,
+        "superseded_attempt_status": null
+      }
+    },
+    {
+      "name": "invalid-task-id",
+      "context": {
+        "task_id": "   ",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": false,
+        "job_id": null,
+        "job_exists": false,
+        "job_status": null,
+        "job_state": null,
+        "task_status": null,
+        "session_exists": false,
+        "session_id": null,
+        "session_task_matches": false,
+        "session_job_matches": false,
+        "has_takeover_permission": true,
+        "session_state": null,
+        "active_lease_id": null,
+        "task_execution_attempt": null,
+        "session_attempt": null,
+        "task_openclaw_run_id": null,
+        "active_attempts": []
+      },
+      "outcome": "REJECTED",
+      "error_code": "INVALID_TASK_ID",
+      "error": "retry taskId must be a non-empty string",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "invalid-actor-role",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "  ",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "INVALID_ACTOR_ROLE",
+      "error": "retry actorRole must be a non-empty string",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "invalid-reason",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "  ",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "INVALID_REASON",
+      "error": "retry reason must be a non-empty string",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "task-not-found",
+      "context": {
+        "task_id": "missing-task-for-retry-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": false,
+        "job_id": null,
+        "job_exists": false,
+        "job_status": null,
+        "job_state": null,
+        "task_status": null,
+        "session_exists": false,
+        "session_id": null,
+        "session_task_matches": false,
+        "session_job_matches": false,
+        "has_takeover_permission": true,
+        "session_state": null,
+        "active_lease_id": null,
+        "task_execution_attempt": null,
+        "session_attempt": null,
+        "task_openclaw_run_id": null,
+        "active_attempts": []
+      },
+      "outcome": "REJECTED",
+      "error_code": "TASK_NOT_FOUND",
+      "error": "task not found: missing-task-for-retry-oracle",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "job-not-executing",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "completed",
+        "job_state": "COMPLETED",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "JOB_NOT_EXECUTING",
+      "error": "task retry requires an existing task in an EXECUTING job: job-oracle",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "task-status-not-retryable",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "completed",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "TASK_STATUS_NOT_RETRYABLE",
+      "error": "task retry is not allowed from task status completed",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "session-not-found",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": false,
+        "session_id": null,
+        "session_task_matches": false,
+        "session_job_matches": false,
+        "has_takeover_permission": false,
+        "session_state": null,
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": null,
+        "task_openclaw_run_id": null,
+        "active_attempts": []
+      },
+      "outcome": "REJECTED",
+      "error_code": "SESSION_NOT_FOUND",
+      "error": "agent session not found for task: task-oracle",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "takeover-permission-denied",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": false,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "TAKEOVER_PERMISSION_DENIED",
+      "error": "Session access denied: role=architect permission=TAKEOVER session=session-oracle",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "session-state-not-retryable",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "ACTIVE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "SESSION_STATE_NOT_RETRYABLE",
+      "error": "same-task retry requires STALE, FAILED, or PAUSED session; got ACTIVE",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "active-lease",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": "lease-oracle",
+        "task_execution_attempt": 1,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "ACTIVE_LEASE",
+      "error": "same-task retry requires the prior task lease to be settled or quarantined: lease-oracle",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "malformed-task-attempt",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": -1,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "MALFORMED_ATTEMPT_IDENTITY",
+      "error": "malformed durable retry attempt identity; refusing retry",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "fractional-task-attempt",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 1.5,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "MALFORMED_ATTEMPT_IDENTITY",
+      "error": "malformed durable retry attempt identity; refusing retry",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "malformed-session-attempt",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 0,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "MALFORMED_ATTEMPT_IDENTITY",
+      "error": "malformed durable retry attempt identity; refusing retry",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "non-numeric-session-attempt",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": "not-a-number",
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "MALFORMED_ATTEMPT_IDENTITY",
+      "error": "malformed durable retry attempt identity; refusing retry",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "multiple-unresolved-attempts",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          },
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "MULTIPLE_UNRESOLVED_ATTEMPTS",
+      "error": "task has multiple unresolved runtime attempts; refusing same-task retry: task-oracle",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "attempt-binding-mismatch",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 0,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-2"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "ATTEMPT_BINDING_MISMATCH",
+      "error": "stale runtime attempt identity does not match the task binding: task-oracle",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    },
+    {
+      "name": "attempt-identity-exhausted",
+      "context": {
+        "task_id": "task-oracle",
+        "actor_role": "architect",
+        "reason": "Node retry oracle case",
+        "task_exists": true,
+        "job_id": "job-oracle",
+        "job_exists": true,
+        "job_status": "active",
+        "job_state": "EXECUTING",
+        "task_status": "running",
+        "session_exists": true,
+        "session_id": "session-oracle",
+        "session_task_matches": true,
+        "session_job_matches": true,
+        "has_takeover_permission": true,
+        "session_state": "STALE",
+        "active_lease_id": null,
+        "task_execution_attempt": 9007199254740991,
+        "session_attempt": 1,
+        "task_openclaw_run_id": "run-oracle-1",
+        "active_attempts": [
+          {
+            "attempt_id": "attempt-oracle",
+            "openclaw_run_id": "run-oracle-1"
+          }
+        ]
+      },
+      "outcome": "REJECTED",
+      "error_code": "ATTEMPT_IDENTITY_EXHAUSTED",
+      "error": "durable retry attempt identity is exhausted",
+      "next_attempt": null,
+      "superseded_attempt_id": null,
+      "postcondition": null
+    }
+  ]
+}

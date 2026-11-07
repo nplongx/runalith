@@ -1,0 +1,23 @@
+## RC.72 v7 trust-capability freshness successor — 2026-10-31
+
+A stale in-process Goal/Idea verification capability could remain accepted by Plan Graph after its signing root was revoked. The previous revocation test checked only a fresh `getCurrentVerification()` result; it did not consume the previously minted report through the Plan adapter. The gap was reproduced before the source change: `node --test --test-name-pattern='administered multi-key trust config' tests/test-adaptive-goal-knowledge-verifier.mjs` failed because the old report predicate still returned `true` after revocation.
+
+The verifier now associates each authenticated report identity with a private freshness callback. Each downstream capability check re-reads the exact current snapshot, evidence manifest and effective trust configuration through the verifier's read-only path, then matches attestation ID, provider, trust-root fingerprint, snapshot hash and evidence-manifest hash. Exceptions fail closed. This invalidates retained capabilities after root revocation, trust rollback, source/evidence mutation, or attestation replacement. The freshness check does not record a trust-ledger observation; the test confirms ledger version remains unchanged until the explicit trust-status observation operation. Report and snapshot immutability remains enforced.
+
+Validation:
+
+- Red test before patch — FAIL at the retained-report revocation assertion (`true !== false`), confirming the uncovered path.
+- `node --test tests/test-adaptive-goal-knowledge-verifier.mjs tests/test-adaptive-goal-graph.js` — PASS 46/46; log `/tmp/runalith-rc72-v7-source-verifier-graph.log`, SHA-256 `427e334e63bc4c89f6edeb891b4810ab72350f21441d4b1991496b9414b0029b`.
+- `node --test tests/test-adaptive-goal-current-scope-producer-e2e.mjs` — PASS 1/1; log `/tmp/runalith-rc72-v7-source-three-graph-e2e.log`, SHA-256 `504d52926ca963852ed0e0536744c1f62a47bab32b9fd2cff687b30da94b78fb`.
+- Extracted v7 verifier — PASS 16/16; log `/tmp/runalith-rc72-v7-extracted-verifier.log`, SHA-256 `041d62ad55e3cc118a166f7904e006b29f9bf3613bb1d78862d0ebd8dc4a22eb`.
+- Extracted v7 three-graph E2E — PASS 1/1; log `/tmp/runalith-rc72-v7-extracted-e2e.log`, SHA-256 `7df397d6d3128bd79d1ecbee5bbd1cc46c73c3ed801627a74fa040df157af63e`.
+- `node scripts/verify-mcpb-source-alignment.mjs --bundle dist/runalith-1.0.9-rc.72-engineering-successor-v7-20261031.mcpb` — PASS exact packaged dirty-tree bytes; candidate SHA-256 `81c14838b18f787eb84ec497da35e3e956799d0c63e3c1b744d81f9eb701c01b`, source snapshot SHA-256 `3ac446ff706c12050f70dc37c3b7a31c25c974255d836ae4028ca4292193d3f2`, 109 entries, 75 tools. `unzip -t` — PASS.
+- `node scripts/check-docs.mjs` — PASS, 209 Markdown files / 506 local links / 75 MCP references. `git diff --check` — PASS.
+- `npm test` — FAIL at `tests/test-agg-v2-event-callers.mjs:112`: the reviewed V2-01 drift register requires explicit source-file byte review/successor when any scanned source changes. The verifier source digest changed; no event callsite count/semantics changed. This guard was not relaxed and the register was not self-updated. Log `/tmp/runalith-rc72-v7-full-npm-test.log`, SHA-256 `cdb3bc2b3ec8f3fdb971d5621ae76872101259edf7d110f9f047c0e4aa6ff0f4`.
+- `node --test tests/test-adaptive-goal-benchmark.mjs` — BLOCKED by the immutable v165 fixture's stale source pin for the changed verifier. Historical v165 was not edited; no successor fixture was minted in this pass. Log `/tmp/runalith-rc72-v7-benchmark-stale-pin.log`, SHA-256 `ad9d8305d80155726da0c1c3ad90fe1b49f9b22413ece0669ae7674db9b65c1b`.
+
+New local engineering package: `dist/runalith-1.0.9-rc.72-engineering-successor-v7-20261031.mcpb`, 1,010,406 bytes, 109 entries, 75 tools. Package builder reports `DIRTY_GIT_TREE_BYTES_MATCHED_NO_AUTHENTICATED_BUILD_RECEIPT`; no independent builder receipt, independent verifier or candidate-bound release approval exists. Not installed or activated. v6 and all historical packages remain unchanged.
+
+The Phase 2 71-path discrepancy successor v2 binds the v7 archive and exact source snapshot, but remains `NOT_COMPUTABLE` because no contract-owner signed canonical 71-path manifest is available. The benchmark v165 predecessor and its frozen oracle remain unchanged; benchmark evidence for v7 is NOT VERIFIED pending a reviewed fixture successor. RC.23 historical archive/dossier baseline is retained; this addendum does not alter the RC.23 archive.
+
+No production trust, ledger, DB, runtime or external checkpoint was read or changed. No approval, production dispatch, drain, install or activation occurred. D-01 and all six RC.23 release gates remain OPEN. Rollout remains `BLOCKED`, `canActivateNow=false`.

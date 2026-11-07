@@ -212,74 +212,77 @@ const graph = new StateGraph(GraphState)
   .addEdge('classify', END)
   .compile();
 
-export async function evaluateLangGraph({ job, tasks = [], results = [], plan = null, runtime: suppliedRuntime = null, event = 'turn', persist = false, store = null, executeTask = null, spawnCto = null, assignChildren = null, synthesize = null, terminalize = null, project = null, signal = null }) {
+export async function evaluateLangGraph({ job, tasks = [], results = [], plan = null, runtime: suppliedRuntime = null, event = 'turn', persist = false, workflowControlPort = null, store = null, executeTask = null, spawnCto = null, assignChildren = null, synthesize = null, terminalize = null, project = null, signal = null }) {
+  // `store` remains a transitional argument alias; controllers pass the
+  // explicit, frozen WorkflowControlPort rather than the broad WorkflowStore.
+  const workflow = workflowControlPort || store;
   const throwIfAborted = () => { if (signal?.aborted) throw new Error('Request aborted by caller'); };
   throwIfAborted();
-  let runtime = store?.getWorkflowRuntimeState(job?.job_id) || suppliedRuntime;
-  if (persist && store && runtime?.phase === WorkflowPhase.PROPOSED && job?.state === 'APPROVED') {
-    store.transitionWorkflowPhase(job.job_id, WorkflowPhase.SPAWN_CTO, {
+  let runtime = workflow?.getWorkflowRuntimeState(job?.job_id) || suppliedRuntime;
+  if (persist && workflow && runtime?.phase === WorkflowPhase.PROPOSED && job?.state === 'APPROVED') {
+    workflow.transitionWorkflowPhase(job.job_id, WorkflowPhase.SPAWN_CTO, {
       event: 'workflow.transition', payload: { trigger: event }
     });
-    runtime = store.getWorkflowRuntimeState(job.job_id);
+    runtime = workflow.getWorkflowRuntimeState(job.job_id);
   }
   let reworkInProgress = false;
-  if (persist && store && runtime?.phase === WorkflowPhase.SYNTHESIZE) {
+  if (persist && workflow && runtime?.phase === WorkflowPhase.SYNTHESIZE) {
     const ctoTask = (tasks || []).find(t => t.task_id === job?.active_task_id && String(t.role).toLowerCase() === 'cto');
     if (ctoTask && String(ctoTask.status).toLowerCase() === 'completed') {
-      const decisionArtifact = store.getLatestArtifact?.(job.job_id, 'cto-decision');
+      const decisionArtifact = workflow.getLatestArtifact?.(job.job_id, 'cto-decision');
       if (decisionArtifact?.content?.decision === 'rework') {
-        store.prepareStandardEngineeringRework?.(job.job_id);
+        workflow.prepareStandardEngineeringRework?.(job.job_id);
       }
-      reworkInProgress = Boolean(store.hasEvent?.(job.job_id, 'workflow.rework.prepared') && !store.getLatestArtifact?.(job.job_id, 'cto-decision'));
+      reworkInProgress = Boolean(workflow.hasEvent?.(job.job_id, 'workflow.rework.prepared') && !workflow.getLatestArtifact?.(job.job_id, 'cto-decision'));
     }
   }
   const cto = (tasks || []).find(t => t.task_id === job?.active_task_id && String(t.role).toLowerCase() === 'cto');
   const synthesisDispatched = Boolean(
-    store?.hasEvent?.(job?.job_id, 'workflow.synthesis_dispatched')
+    workflow?.hasEvent?.(job?.job_id, 'workflow.synthesis_dispatched')
       && String(cto?.status || '').toLowerCase() === 'running'
   );
-  const decision = await graph.invoke({ job, tasks: store?.getJobTrace?.(job.job_id)?.tasks || tasks, results: store?.getJobTrace?.(job.job_id)?.results || results, plan: plan || store?.getExecutionPlan?.(job?.job_id) || null, runtime, synthesisDispatched, reworkInProgress, event });
+  const decision = await graph.invoke({ job, tasks: workflow?.getJobTrace?.(job.job_id)?.tasks || tasks, results: workflow?.getJobTrace?.(job.job_id)?.results || results, plan: plan || workflow?.getExecutionPlan?.(job?.job_id) || null, runtime, synthesisDispatched, reworkInProgress, event });
   throwIfAborted();
-  if (!persist || !store || !runtime) return decision;
-  const currentTrace = store.getJobTrace?.(job.job_id);
+  if (!persist || !workflow || !runtime) return decision;
+  const currentTrace = workflow.getJobTrace?.(job.job_id);
   const currentTasks = currentTrace?.tasks || tasks;
   const currentResults = currentTrace?.results || results;
 
   const phase = runtime.phase;
   if (decision.action === LangGraphActions.SPAWN_CTO && typeof spawnCto === 'function') {
     throwIfAborted();
-    try { await spawnCto({ job, tasks, store }); }
+    try { await spawnCto({ job, tasks, store: workflow, workflowControlPort: workflow }); }
     catch (error) { return { ...decision, action: LangGraphActions.BLOCK, reason: 'CTO spawn failed: ' + error.message }; }
   }
   if (decision.action === LangGraphActions.ASSIGN_CHILDREN && typeof assignChildren === 'function') {
     throwIfAborted();
     try {
-      await assignChildren({ job, tasks: currentTasks, store });
+      await assignChildren({ job, tasks: currentTasks, store: workflow, workflowControlPort: workflow });
     } catch (error) {
       const message = String(error?.message || error);
       const waitMatch = message.match(/PROVIDER_UNAVAILABLE:.*?retry after\s+(\d+)s/i);
       if (waitMatch) {
         const retryAfterMs = Number(waitMatch[1]) * 1000;
         const resumeAfter = new Date(Date.now() + retryAfterMs).toISOString();
-        store.setWorkflowRuntimeState(job.job_id, phase, { resumeAfter, lastError: message });
-        store.setProviderWaiting?.(job.job_id, retryAfterMs, message);
+        workflow.setWorkflowRuntimeState(job.job_id, phase, { resumeAfter, lastError: message });
+        workflow.setProviderWaiting?.(job.job_id, retryAfterMs, message);
       }
       return { ...decision, action: LangGraphActions.BLOCK, reason: `child assignment failed: ${error.message}` };
     }
   }
   if (decision.action === LangGraphActions.SYNTHESIZE && typeof synthesize === 'function') {
     throwIfAborted();
-    try { await synthesize({ job, tasks: currentTasks, results: currentResults, store }); }
+    try { await synthesize({ job, tasks: currentTasks, results: currentResults, store: workflow, workflowControlPort: workflow }); }
     catch (error) { return { ...decision, action: LangGraphActions.BLOCK, reason: `synthesis dispatch failed: ${error.message}` }; }
   }
   if (decision.action === LangGraphActions.TERMINALIZE && typeof terminalize === 'function') {
     throwIfAborted();
-    try { await terminalize({ job, tasks: currentTasks, results: currentResults, store }); }
+    try { await terminalize({ job, tasks: currentTasks, results: currentResults, store: workflow, workflowControlPort: workflow }); }
     catch (error) { return { ...decision, action: LangGraphActions.BLOCK, reason: `terminalization failed: ${error.message}` }; }
   }
   if (decision.action === LangGraphActions.PROJECT && typeof project === 'function') {
     throwIfAborted();
-    try { await project({ job, store }); }
+    try { await project({ job, store: workflow, workflowControlPort: workflow }); }
     catch (error) { return { ...decision, action: LangGraphActions.BLOCK, reason: `projection failed: ${error.message}` }; }
   }
   let next = {
@@ -296,7 +299,7 @@ export async function evaluateLangGraph({ job, tasks = [], results = [], plan = 
     next = WorkflowPhase.PROJECT;
   }
   if (next && next !== phase) {
-    try { store.transitionWorkflowPhase(job.job_id, next, { event: 'workflow.transition', payload: { trigger: event, reason: decision.reason } }); }
+    try { workflow.transitionWorkflowPhase(job.job_id, next, { event: 'workflow.transition', payload: { trigger: event, reason: decision.reason } }); }
     catch (error) { return { ...decision, action: LangGraphActions.BLOCK, reason: error.message }; }
   }
   if (decision.action === LangGraphActions.RUN_CHILDREN && typeof executeTask === 'function') {

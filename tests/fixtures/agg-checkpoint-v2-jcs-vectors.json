@@ -1,0 +1,200 @@
+{
+  "protocol_id": "runalith.agg.external-checkpoint",
+  "protocol_version": 2,
+  "profile": {
+    "max_raw_json_bytes": 1048576,
+    "max_canonical_output_bytes": 1048576,
+    "max_nesting_depth": 256,
+    "max_json_value_nodes": 1000000,
+    "integer_valued_numbers": "safe-integers-only",
+    "negative_zero": "reject",
+    "unicode": "valid-utf8-and-well-formed-scalars",
+    "duplicate_decoded_object_keys": "reject"
+  },
+  "canonicalization_vectors": [
+    {
+      "name": "utf16-key-order-and-no-unicode-normalization",
+      "input_utf8": "{\"דּ\":6,\"😀\":5,\"€\":4,\"ö\":3,\"1\":2,\"\\r\":1,\"é\":\"NFC\",\"é\":\"NFD\"}",
+      "canonical_utf8": "{\"\\r\":1,\"1\":2,\"é\":\"NFD\",\"é\":\"NFC\",\"ö\":3,\"€\":4,\"😀\":5,\"דּ\":6}"
+    },
+    {
+      "name": "ecmascript-number-serialization-safe-integer-profile",
+      "input_utf8": "{\"values\":[333333333.33333329,4.50,2e-3,1e-7,9007199254740991,9007199254740991.0]}",
+      "canonical_utf8": "{\"values\":[333333333.3333333,4.5,0.002,1e-7,9007199254740991,9007199254740991]}"
+    },
+    {
+      "name": "binary64-subnormal-and-small-exponent-formatting",
+      "input_utf8": "{\"values\":[0.000001,5e-324,1.2345678901234567,-1.234e-10]}",
+      "canonical_utf8": "{\"values\":[0.000001,5e-324,1.2345678901234567,-1.234e-10]}"
+    },
+    {
+      "name": "null-empty-values-and-json-string-escaping",
+      "input_utf8": "{\"control\":\"\\\\u000f\\\\n\",\"quote\":\"\\\\\\\"\\\\\\\\\",\"slash\":\"/\",\"empty_string\":\"\",\"empty_array\":[],\"empty_object\":{},\"null_value\":null}",
+      "canonical_utf8": "{\"control\":\"\\\\u000f\\\\n\",\"empty_array\":[],\"empty_object\":{},\"empty_string\":\"\",\"null_value\":null,\"quote\":\"\\\\\\\"\\\\\\\\\",\"slash\":\"/\"}"
+    }
+  ],
+  "strict_parse_vectors": [
+    {
+      "name": "positive-and-negative-safe-integer-endpoints",
+      "input_utf8": "{\"max\":9007199254740991,\"min\":-9007199254740991}",
+      "expected": "accept",
+      "canonical_utf8": "{\"max\":9007199254740991,\"min\":-9007199254740991}"
+    },
+    {
+      "name": "duplicate-decoded-key-with-unicode-escape-alias",
+      "input_utf8": "{\"a\":1,\"\\u0061\":2}",
+      "expected": "reject",
+      "error": "duplicate decoded object key"
+    },
+    {
+      "name": "integer-above-safe-range",
+      "input_utf8": "{\"n\":9007199254740992}",
+      "expected": "reject",
+      "error": "safe integer"
+    },
+    {
+      "name": "positive-overflow-to-infinity",
+      "input_utf8": "{\"n\":1e400}",
+      "expected": "reject",
+      "error": "finite"
+    },
+    {
+      "name": "fractional-token-rounded-to-safe-integer",
+      "input_utf8": "{\"n\":1.00000000000000000001}",
+      "expected": "reject",
+      "error": "exactly represented"
+    },
+    {
+      "name": "positive-underflow-rounded-to-zero",
+      "input_utf8": "{\"n\":1e-400}",
+      "expected": "reject",
+      "error": "exactly represented"
+    },
+    {
+      "name": "negative-zero-integer-token",
+      "input_utf8": "-0",
+      "expected": "reject",
+      "error": "negative zero"
+    },
+    {
+      "name": "negative-zero-decimal-token",
+      "input_utf8": "-0.0",
+      "expected": "reject",
+      "error": "negative zero"
+    },
+    {
+      "name": "negative-zero-exponent-token",
+      "input_utf8": "-0e0",
+      "expected": "reject",
+      "error": "negative zero"
+    },
+    {
+      "name": "lone-surrogate-value-escape",
+      "input_utf8": "{\"s\":\"\\ud800\"}",
+      "expected": "reject",
+      "error": "surrogate"
+    },
+    {
+      "name": "trailing-second-json-value",
+      "input_utf8": "{} true",
+      "expected": "reject",
+      "error": "trailing"
+    },
+    {
+      "name": "invalid-utf8-sequence",
+      "input_hex": "c328",
+      "expected": "reject",
+      "error": "UTF-8"
+    },
+    {
+      "name": "utf8-bom-is-not-permitted",
+      "input_hex": "efbbbf7b7d",
+      "expected": "reject",
+      "error": "BOM"
+    }
+  ],
+  "generated_boundary_vectors": [
+    {
+      "name": "raw-json-byte-limit-exact",
+      "operation": "parse",
+      "generator": "json_ascii_string",
+      "content_bytes": 1048574,
+      "expected": "accept",
+      "canonical_bytes": 1048576
+    },
+    {
+      "name": "raw-json-byte-limit-plus-one",
+      "operation": "parse",
+      "generator": "json_ascii_string",
+      "content_bytes": 1048575,
+      "expected": "reject",
+      "error": "byte limit"
+    },
+    {
+      "name": "nesting-depth-limit-exact",
+      "operation": "parse",
+      "generator": "nested_arrays",
+      "depth": 256,
+      "expected": "accept",
+      "canonical_bytes": 513
+    },
+    {
+      "name": "nesting-depth-limit-plus-one",
+      "operation": "parse",
+      "generator": "nested_arrays",
+      "depth": 257,
+      "expected": "reject",
+      "error": "nesting depth"
+    },
+    {
+      "name": "materialized-nesting-depth-limit-exact",
+      "operation": "canonicalize",
+      "generator": "nested_arrays",
+      "depth": 256,
+      "expected": "accept",
+      "canonical_bytes": 513
+    },
+    {
+      "name": "materialized-nesting-depth-limit-plus-one",
+      "operation": "canonicalize",
+      "generator": "nested_arrays",
+      "depth": 257,
+      "expected": "reject",
+      "error": "nesting depth"
+    },
+    {
+      "name": "canonical-output-byte-limit-exact",
+      "operation": "canonicalize",
+      "generator": "materialized_ascii_string",
+      "content_bytes": 1048574,
+      "expected": "accept",
+      "canonical_bytes": 1048576
+    },
+    {
+      "name": "canonical-output-byte-limit-plus-one",
+      "operation": "canonicalize",
+      "generator": "materialized_ascii_string",
+      "content_bytes": 1048575,
+      "expected": "reject",
+      "error": "canonical output exceeds"
+    },
+    {
+      "name": "materialized-json-node-budget-overflow",
+      "operation": "canonicalize",
+      "generator": "array_of_nulls",
+      "items": 1000000,
+      "expected": "reject",
+      "error": "maximum JSON node count exceeded"
+    }
+  ],
+  "digest_vectors": [
+    {
+      "name": "anti-replay-state-component-v1",
+      "domain": "anti_replay_state",
+      "component_version": 1,
+      "payload_utf8": "{\"nonces\":[\"n1\",\"n2\"],\"high_water\":4}",
+      "canonical_envelope_utf8": "{\"component_domain\":\"anti_replay_state\",\"component_version\":1,\"payload\":{\"high_water\":4,\"nonces\":[\"n1\",\"n2\"]},\"protocol_id\":\"runalith.agg.external-checkpoint\",\"protocol_version\":2}",
+      "sha256": "5b4bb96607a8f4ed22d12983469ba6e253bc250bfc9128d0fd055b257efb89dc"
+    }
+  ]
+}

@@ -8,7 +8,7 @@ Runalith uses host-neutral product language. The MCPB package format is a bundle
 |---|---|---|
 | **Runalith runtime** | `runalith-agent-orchestrator` | Current MCP server identity and package name. |
 | **MCP bundle** or **MCPB** | `.mcpb`, bundle-root `manifest.json` | A package/container format, not a claim of vendor-specific behavior. Client-side installation support varies. |
-| **MCP stdio server** | `server/index-v1.0.9-rc.11.js` for this RC.11 checkout; `server/index.js` is historical/compatibility input | The direct integration path for clients that launch local stdio servers. Follow `package.json` for the checked-out package's selected versioned entrypoint; historical paths and evidence must not be silently rewritten. |
+| **MCP stdio server** | `package.json.runtimeEntryPoint` selects the versioned entrypoint for the checked-out package; `server/index.js` is historical/compatibility input | The direct integration path for clients that launch local stdio servers. Read the exact `runtimeEntryPoint` value; never infer its filename from the package version or substitute a historical path. |
 | **Local dashboard** | `dashboard/public/`, existing `/api/...` routes | Read-only local UI. Do not rename routes, browser storage keys, or database identifiers in a documentation-only change. |
 | **Workflow run** or **workflow** | `job_id`, `workflow_create`, `workflow_dispatch` | “Run” describes the user's workflow instance; code and tool names retain their exact spelling. |
 | **Adaptive Goal Graph (AGG)** | `adaptive_goal_*`, `src/runtime/adaptive-goal-*.js` | A graph-planning, persistent knowledge, evidence and proposal subsystem; not a separate general-purpose execution engine. See the [AGG system guide](adaptive-goal-graph.md). |

@@ -131,6 +131,11 @@ export function buildAggLiveRemediationPlan({ dossier, reconciliation, lifecycle
   const planProposals = proposalRecords.filter(record => record.kind === 'plan_graph_proposal');
   const executionProposals = proposalRecords.filter(record => record.kind === 'execution_graph_proposal');
   const hashMismatches = (graph.findings || []).filter(record => record.detail === 'source_hash_mismatch' || record.code === 'PLANNER_SOURCE_BYTES_REPORTED_VERIFIED_BUT_CURRENT_SOURCE_INVALID');
+  const plannerSourceMismatchEvidence = (graph.plannerRuns || []).flatMap(run => (run.evidence || [])
+    .filter(evidence => evidence.revalidation === 'source_hash_mismatch' || evidence.sourceResolutionStatus === 'source_hash_mismatch')
+    .map(evidence => ({ runId: run.run_id || null, toolName: run.tool_name || null, ...evidence })));
+  const plannerSourceMismatchByRecord = new Map(plannerSourceMismatchEvidence.map(evidence =>
+    [`${evidence.runId || ''}/${evidence.evidenceReferenceSha256 || ''}`, evidence]));
   const dossierFindingsByRecord = new Map((dossier.findings || []).filter(item => item?.recordId)
     .map(item => [`${item.code || ''}\0${item.recordId}\0${item.detail || ''}`, item]));
   const missingEvidenceSteps = planProposals.flatMap(proposal => (proposal.stepEvidenceAssessments || [])
@@ -176,11 +181,13 @@ export function buildAggLiveRemediationPlan({ dossier, reconciliation, lifecycle
   const runningTasks = taskRecords.filter(task => String(task.taskStatus).toLowerCase() === 'running');
   const executingJobs = recoveryRows.filter(row => row.observedIdentity?.state === 'EXECUTING');
   const goalEmptyEvidenceFinding = (dossier.findings || []).find(finding => finding.code === 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY');
+  const goalAttestationFinding = (dossier.findings || []).find(finding => finding.code === 'GOAL_IDEA_EVIDENCE_READY_REQUIRES_INDEPENDENT_ATTESTATION');
   const targetGoalId = 'runalith-agg-e2e-20261026-clean';
   const targetGoal = (graph.goals || []).find(goal => goal.goalId === targetGoalId) || null;
   const targetGoalEvidence = targetGoal?.evidenceAssessment || null;
   const verifierMissingFinding = (dossier.findings || []).find(finding => finding.code === 'KNOWLEDGE_VERIFIER_NOT_CONFIGURED');
   const reviewerMissingFinding = (dossier.findings || []).find(finding => finding.code === 'AGG_TRUST_CONFIG_NOT_CONFIGURED');
+  const approvalTrustFindings = (dossier.findings || []).filter(finding => finding.code === 'AGG_APPROVAL_TRUST_DOMAIN_NOT_CONFIGURED');
   const proposalEvidenceFinding = (dossier.findings || []).find(finding => finding.code === 'PLAN_GRAPH_SUPPORTING_EVIDENCE_MISSING');
   const executionMissingFinding = (dossier.findings || []).find(finding => finding.code === 'EXECUTION_GRAPH_PROPOSALS_NOT_PERSISTED');
   const gateBlockers = preflight?.decision?.blockers || dossier.rc23Gates?.map(gate => gate.code) || [];
@@ -202,9 +209,23 @@ export function buildAggLiveRemediationPlan({ dossier, reconciliation, lifecycle
     certainty: 'CONFIRMED_MISMATCH_CAUSE_UNRESOLVED',
     affected: hashMismatches.map(item => {
       const enriched = dossierFindingsByRecord.get(`${item.code || ''}\0${item.recordId || ''}\0${item.detail || ''}`) || null;
+      const [runId, evidenceReferenceSha256] = String(item.recordId || '').split('/');
+      const sourceEvidence = plannerSourceMismatchByRecord.get(`${runId || ''}/${evidenceReferenceSha256 || ''}`) ||
+        plannerSourceMismatchEvidence.find(evidence => evidence.runId === runId) || null;
       return { recordId: item.recordId || null, detail: item.detail || null,
         sourceArtifact: enriched?.sourceArtifact || item.sourceArtifact || null,
-        currentSourcePath: item.sourcePath || item.path || null, claimedSha256: item.sourceHash || item.claimedHash || null,
+        plannerRunId: sourceEvidence?.runId || runId || null,
+        plannerTool: sourceEvidence?.toolName || null,
+        evidenceReferenceSha256: sourceEvidence?.evidenceReferenceSha256 || evidenceReferenceSha256 || null,
+        sourceReference: sourceEvidence?.sourceReference || null,
+        currentSourcePath: sourceEvidence?.sourceReference?.startsWith('file:')
+          ? sourceEvidence.sourceReference.slice(5).split('#sha256=')[0]
+          : item.sourcePath || item.path || null,
+        claimedSha256: sourceEvidence?.expectedSourceSha256 || item.sourceHash || item.claimedHash || null,
+        observedSourceSha256: sourceEvidence?.observedSourceSha256 || null,
+        sourceResolutionStatus: sourceEvidence?.sourceResolutionStatus || sourceEvidence?.revalidation || null,
+        sourceClassification: sourceEvidence?.classification || null,
+        sourceBlockers: sourceEvidence?.blockers || [],
         confidence: enriched?.confidence || item.confidence || 'NOT_RECORDED_BY_SOURCE',
         cause: enriched?.cause || item.cause || 'Historical capture/mutation cause is not established by available evidence.',
         owner: enriched?.owner || item.owner || 'UNRESOLVED_NOT_RECORDED',
@@ -237,6 +258,44 @@ export function buildAggLiveRemediationPlan({ dossier, reconciliation, lifecycle
     prohibited: lifecycleProhibitions,
     verifyAfter: ['Snapshot reports evidence references and a non-empty manifest; each entry resolves through active artifact and successful producer result/attempt/event lineage.', 'Verifier returns eligibleForAttestation=true only after all evidence checks pass; trusted attestation independently binds exact current revisions/hash and is read back.', 'The prior empty snapshot and its digest remain available as historical evidence.'],
     evidence: [goalEmptyEvidenceFinding.sourceArtifact, ...inputArtifacts.filter(item => /reconciliation|dossier/.test(item.name))].filter(Boolean)
+  }));
+
+  if (goalAttestationFinding) steps.push(repairStep({
+    id: 'goal-idea-independent-attestation', priority: 'P0',
+    code: 'GOAL_IDEA_EVIDENCE_READY_REQUIRES_INDEPENDENT_ATTESTATION',
+    summary: 'The current Goal/Idea snapshot has a complete durable evidence manifest eligible for attestation, but no independent verifier signature, claim-truth adjudication, independence adjudication or planning authority. Preserve the manifest; do not rebuild or mutate the graph.',
+    certainty: 'CONFIRMED_BY_CURRENT_READ_ONLY_SNAPSHOT_AND_DOSSIER',
+    affected: [{ goalId: targetGoalId,
+      snapshotHash: dossier.liveState?.graph?.snapshotHash || targetGoal?.snapshotHash || null,
+      evidenceManifestHash: dossier.liveState?.graph?.evidenceManifestHash || null,
+      evidenceManifestCount: dossier.liveState?.graph?.evidenceManifestCount ?? targetGoalEvidence?.declaredReferenceCount ?? null,
+      eligibleForAttestation: dossier.liveState?.graph?.eligibleForAttestation === true || targetGoalEvidence?.eligibleForExternalAttestation === true,
+      verified: dossier.liveState?.graph?.verified === true,
+      currentVerificationStatus: dossier.liveState?.graph?.currentVerificationStatus || null,
+      currentAttestationId: dossier.liveState?.graph?.currentAttestationId || null,
+      claimTruthVerified: dossier.liveState?.graph?.claimTruthVerified === true,
+      independenceVerified: dossier.liveState?.graph?.independenceVerified === true,
+      planningAuthorityEstablished: dossier.liveState?.graph?.planningAuthorityEstablished === true,
+      sourceFinding: goalAttestationFinding }],
+    ownerAuthority: ['Independent Goal/Idea verifier authority must adjudicate every claim and evidence independence.',
+      'Host/security administrator must supply the independently managed verifier trust configuration and effective-host/ledger evidence.',
+      'Goal/Idea graph owner must provide a fresh read-only snapshot if the bound snapshot changes.'],
+    allowedReadOnly,
+    requiredAfterAuthority: ['Obtain authority-issued verifier trust configuration through the host-managed provisioning process; do not create keys or trust roots locally.',
+      'Independently verify verifier identity, scope, key ownership, version, revocation state and external anti-rollback anchor.',
+      'Have the independent verifier adjudicate claim truth and evidence independence, then sign the exact current snapshot hash and evidence-manifest hash.',
+      'Read back the attestation through the trusted verifier API and confirm exact snapshot, manifest, verifier identity, scope and monotonic version.',
+      'Re-fetch the current snapshot immediately before planning; reject the attestation if either bound hash or revision changed.',
+      'Keep reviewer approval, action-intent policy, execution approval and dispatch authorization as separate subsequent gates.'],
+    prohibited: ['Do not rebuild or modify an already complete evidence manifest merely to obtain an attestation.',
+      'Do not self-sign, caller-sign, use test-local keys, or treat durable lineage/hash validity as claim truth or independence.',
+      'Do not treat Goal/Idea attestation as reviewer approval, execution approval or dispatch permission.', ...lifecycleProhibitions],
+    verifyAfter: ['Fresh snapshot hash and evidence-manifest hash exactly match the independently signed attestation.',
+      'Trusted verifier readback reports verified=true with a non-null attestation ID and independently adjudicated claim truth and evidence independence.',
+      'Verifier trust configuration and effective host ledger independently validate version, scope, rotation/revocation and external anti-rollback continuity.',
+      'Reviewer identity and approval policy remain independently configured and are separately verified before immutable plan pinning or dispatch.'],
+    evidence: [...(goalAttestationFinding.sourceArtifacts || []), goalAttestationFinding.sourceArtifact,
+      ...inputArtifacts.filter(item => /snapshot|trust|dossier|preflight/.test(item.name))].filter(Boolean)
   }));
 
   if (planProposals.length) steps.push(repairStep({
@@ -287,12 +346,15 @@ export function buildAggLiveRemediationPlan({ dossier, reconciliation, lifecycle
     evidence: inputArtifacts.filter(item => /reconciliation|dossier/.test(item.name))
   }));
 
-  if (verifierMissingFinding || reviewerMissingFinding) steps.push(repairStep({
+  if (verifierMissingFinding || reviewerMissingFinding || approvalTrustFindings.length) steps.push(repairStep({
     id: 'host-managed-agg-trust-provisioning', priority: 'P0', code: 'PRODUCTION_AGG_TRUST_CONFIGURATION_NOT_VERIFIED',
     summary: 'Verifier and/or reviewer production JSON trust configuration is unavailable in the observed host; do not generate roots or substitute test keys.',
     certainty: 'CONFIRMED_MISSING_FROM_CAPTURED_HOST_STATUS',
-    affected: [{ verifier: verifierMissingFinding || null, reviewer: reviewerMissingFinding || null }],
-    ownerAuthority: ['Host/security administrator for effective configuration, runtime identity and ledger.', 'Independent Goal/Idea verifier authority.', 'Separate action-intent reviewer authority.'],
+    affected: [{ verifier: verifierMissingFinding || null, reviewer: reviewerMissingFinding || null,
+      approvalDomains: approvalTrustFindings.map(finding => ({ domain: finding.sourceArtifact?.domain || null, finding })) }],
+    ownerAuthority: ['Host/security administrator for effective configuration, runtime identity and ledger.',
+      'Independent Goal/Idea verifier authority.', 'Separate action-intent reviewer authority.',
+      'Execution approval policy, action-intent maker and execution approval domain owners.'],
     allowedReadOnly,
     requiredAfterAuthority: ['Provision exact schema-v1 public-key-only JSON through host-managed user configuration; domains/scopes must be exact, provider IDs distinct, canonical Ed25519 SPKI roots disjoint.', 'Run the pair validator both directions; use positive monotonic config versions, administrator/change-reference audit, validity and revocation metadata.', 'Verify the active host process receives the configs, opens the correct append-only trust ledger, and effective fingerprints/version match its latest ledger rows.', 'Verify rotation, revocation, version-gap/anti-rollback behavior from independent authority evidence; then separately validate external checkpoint continuity.'],
     prohibited: ['Do not mint or provision production keys in the candidate workspace.', 'Do not set a test-local key as production trust, change live environment/config, mutate the trust ledger, or assert an external anchor exists from local tests.', ...lifecycleProhibitions],
@@ -365,8 +427,23 @@ export function buildAggLiveRemediationPlan({ dossier, reconciliation, lifecycle
       sourceHashMismatchCount: hashMismatches.length,
       sourceHashMismatchRecords: hashMismatches.map(item => {
         const enriched = dossierFindingsByRecord.get(`${item.code || ''}\0${item.recordId || ''}\0${item.detail || ''}`) || null;
+        const [runId, evidenceReferenceSha256] = String(item.recordId || '').split('/');
+        const sourceEvidence = plannerSourceMismatchByRecord.get(`${runId || ''}/${evidenceReferenceSha256 || ''}`) ||
+          plannerSourceMismatchEvidence.find(evidence => evidence.runId === runId) || null;
         return { recordId: item.recordId || null, detail: item.detail || null,
           sourceArtifact: enriched?.sourceArtifact || item.sourceArtifact || null,
+          plannerRunId: sourceEvidence?.runId || runId || null,
+          plannerTool: sourceEvidence?.toolName || null,
+          evidenceReferenceSha256: sourceEvidence?.evidenceReferenceSha256 || evidenceReferenceSha256 || null,
+          sourceReference: sourceEvidence?.sourceReference || null,
+          currentSourcePath: sourceEvidence?.sourceReference?.startsWith('file:')
+            ? sourceEvidence.sourceReference.slice(5).split('#sha256=')[0]
+            : item.sourcePath || item.path || null,
+          claimedSha256: sourceEvidence?.expectedSourceSha256 || item.sourceHash || item.claimedHash || null,
+          observedSourceSha256: sourceEvidence?.observedSourceSha256 || null,
+          sourceResolutionStatus: sourceEvidence?.sourceResolutionStatus || sourceEvidence?.revalidation || null,
+          sourceClassification: sourceEvidence?.classification || null,
+          sourceBlockers: sourceEvidence?.blockers || [],
           confidence: enriched?.confidence || item.confidence || 'NOT_RECORDED_BY_SOURCE',
           cause: enriched?.cause || item.cause || 'Historical capture/mutation cause is not established by available evidence.',
           owner: enriched?.owner || item.owner || 'UNRESOLVED_NOT_RECORDED',
@@ -380,9 +457,17 @@ export function buildAggLiveRemediationPlan({ dossier, reconciliation, lifecycle
       goalEvidence: { goalId: targetGoalId, nodes: targetGoal?.nodeCount ?? null, edges: targetGoal?.edgeCount ?? null,
         memberships: targetGoal?.membershipCount ?? null, evidenceRefs: targetGoalEvidence?.declaredReferenceCount ?? null,
         attestationEligible: targetGoalEvidence?.eligibleForExternalAttestation ?? null,
+        evidenceManifestHash: dossier.liveState?.graph?.evidenceManifestHash || null,
+        evidenceManifestCount: dossier.liveState?.graph?.evidenceManifestCount ?? null,
+        verified: dossier.liveState?.graph?.verified ?? null,
+        currentVerificationStatus: dossier.liveState?.graph?.currentVerificationStatus || null,
+        currentAttestationId: dossier.liveState?.graph?.currentAttestationId || null,
+        claimTruthVerified: dossier.liveState?.graph?.claimTruthVerified ?? null,
+        independenceVerified: dossier.liveState?.graph?.independenceVerified ?? null,
+        planningAuthorityEstablished: dossier.liveState?.graph?.planningAuthorityEstablished ?? null,
         snapshotHash: targetGoal?.snapshotHash || dossier.liveState?.graph?.snapshotHash || null,
         observationStatus: targetGoal ? 'OBSERVED_IN_CURRENT_GRAPH_RECONCILIATION' : 'NOT_PRESENT_IN_GRAPH_RECONCILIATION',
-        finding: goalEmptyEvidenceFinding || null },
+        finding: goalAttestationFinding || goalEmptyEvidenceFinding || null },
       planGraph: { proposalCount: planProposals.length, totalStepCount: planProposals.reduce((sum, proposal) => sum + (proposal.readinessAssessment?.stepCount || proposal.planStepIds?.length || 0), 0),
         missingSupportingEvidenceStepCount: missingEvidenceSteps.length, missingEvidenceSteps,
         missingAuthenticatedSnapshotBindingCount: missingSnapshotBindings.length,

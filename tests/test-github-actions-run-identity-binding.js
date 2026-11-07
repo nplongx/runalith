@@ -13,9 +13,10 @@ process.env.WORKFLOW_DB = dbPath;
 process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { GitHubActionsProvider } = await import('../src/runtime/github-actions-provider.js');
 const { DistributedScheduler } = await import('../src/runtime/distributed-scheduler.js');
+const { createWorkflowStatePort } = await import('../src/runtime/workflow-state-port.js');
 const { canonicalProviderDispatchRequest, createProviderDispatchIdentity, providerDispatchKey } = await import('../src/runtime/provider-dispatch-identity.js');
 const store = new WorkflowStore();
 // Ensure the provider-owned durable intent/run ledger exists before fixtures
@@ -167,6 +168,14 @@ store.db.prepare("UPDATE tasks SET status='running' WHERE task_id=?").run(firstI
 // provider ledger acquires artifact/output metadata for the stale attempt.
 const raceIntent = insertIntent('c'.repeat(64), '-collection-race');
 const raceRunId = '24682';
+const statePort = createWorkflowStatePort(store);
+const durableRaceIntent = statePort.getProviderDispatchIntent(raceIntent.dispatch_key);
+const raceClaim = statePort.claimProviderDispatchForSend({
+  intent: durableRaceIntent,
+  claimId: 'claim-run-identity-race',
+  claimedAt: new Date().toISOString()
+});
+assert.equal(raceClaim.claimed, true, 'provider-run binding must follow the exact one-way send claim');
 reconciledProvider._bindDispatchRun(raceIntent, {
   ...validRun(raceIntent, raceRunId), provider_run_id: raceRunId,
   job_id: raceIntent.job_id, task_id: raceIntent.task_id, lease_id: raceIntent.lease_id,
@@ -252,13 +261,20 @@ assert.equal(afterCollectionRace.output_commit, null, 'stale collection must not
 // intent CAS but before provider_runs insert must roll both changes back.
 const crashIntent = insertIntent('b'.repeat(64), '-crash');
 const crashKey = crashIntent.dispatch_key;
+const durableCrashIntent = statePort.getProviderDispatchIntent(crashKey);
+const crashClaim = statePort.claimProviderDispatchForSend({
+  intent: durableCrashIntent, claimId: 'claim-run-identity-crash', claimedAt: new Date().toISOString()
+});
+assert.equal(crashClaim.claimed, true, 'provider-run bind crash fixture must first own the one-way send claim');
+crashIntent.dispatch_claim_id = crashClaim.intent.dispatch_claim_id;
+crashIntent.dispatch_claimed_at = crashClaim.intent.dispatch_claimed_at;
 const crashRun = {
   provider_run_id: '77777', job_id: crashIntent.job_id, task_id: crashIntent.task_id, lease_id: crashIntent.lease_id,
   attempt: crashIntent.attempt, owner_epoch: crashIntent.owner_epoch, input_commit: crashIntent.input_commit, workflow: 'p3-worker.yml', ref: 'main',
   state: 'RUNNING', conclusion: null, html_url: null, created_at: crashIntent.created_at, run_attempt: 1
 };
 const providerModuleUrl = new URL('../src/runtime/github-actions-provider.js', import.meta.url).href;
-const storeModuleUrl = new URL('../src/runtime/job-store.js', import.meta.url).href;
+const storeModuleUrl = new URL('../job-store.js', import.meta.url).href;
 const childSource = `
   const { WorkflowStore } = await import(${JSON.stringify(storeModuleUrl)});
   const { GitHubActionsProvider } = await import(${JSON.stringify(providerModuleUrl)});

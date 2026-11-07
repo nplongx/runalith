@@ -22,13 +22,17 @@ assert.doesNotMatch(packagerSource, /SMOKE_DATA_DIR="\$EXTRACTED\/\.smoke-data"/
 assert.match(packagerSource, /unzip -q \"\$BUNDLE\" -d \"\$EXTRACTED\"/, 'packager must extract the completed archive before running MCP smoke/E2E');
 assert.match(packagerSource, /node "\$EXTRACTED\/\$ENTRY_POINT"/, 'MCP handshake must use the manifest-selected archive-extracted server bytes');
 assert.match(packagerSource, /node \"\$EXTRACTED\/tests\/test-runalith-plugin\.js\"/, 'full local MCP E2E must use archive-extracted test/runtime bytes');
+assert.match(packagerSource, /env -u NODE_TEST_CONTEXT node \"\$extracted\"/,
+  'archive-extracted Node test processes must not inherit the parent node:test IPC context');
+assert.match(packagerSource, /env -u OPENAI_API_KEY -u NODE_TEST_CONTEXT node \"\$EXTRACTED\/tests\/test-runalith-plugin\.js\"/,
+  'archive-extracted full MCP E2E must not inherit parent node:test IPC context');
 assert.doesNotMatch(packagerSource, /node \"\$PAYLOAD\/(?:server\/index\.js|tests\/test-runalith-plugin\.js)\"/, 'packager must not substitute the pre-archive staging tree for packaged E2E');
 assert.match(packagerSource, /test-extracted-package-tool-schemas\.mjs/, 'packager must validate schemas from the exact candidate archive');
 assert.match(packagerSource, /plugin-package-metadata\.mjs/, 'packager must project full-app metadata into the local-only runtime dependency closure');
 assert.match(packagerSource, /node "\$ROOT\/scripts\/verify-mcpb-source-alignment\.mjs" --bundle "\$BUNDLE" --source-root "\$ROOT"/,
   'packager must verify exact source-to-archive bytes before publishing a candidate');
-assert.match(packagerSource, /find manifest\.json README\.md LICENSE package\.json server src protocol tests scripts -type f -print/,
-  'the deterministic ZIP file list must include the read-only reconciliation CLI copied into the payload');
+assert.match(packagerSource, /find manifest\.json README\.md LICENSE package\.json job-store\.js server src protocol tests scripts -type f -print/,
+  'the deterministic ZIP file list must include the root WorkflowStore compatibility facade and runtime payload');
 const serverSource = fs.readFileSync(path.join(root, 'server/index.js'), 'utf8');
 assert.match(serverSource, /getSpecialistRoleGuidance\(contract\.role\)/, 'built-in specialist prompt builder must wire the role-specific guidance helper');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-reproducibility-'));
@@ -48,12 +52,13 @@ function packageInputSnapshot(label) {
   const stage = path.join(temp, `source-${label}`);
   fs.mkdirSync(stage);
   const explicit = [
-    'README.md', 'LICENSE', 'plugin/manifest.json',
+    'README.md', 'LICENSE', 'plugin/manifest.json', 'job-store.js',
     'tests/test-runalith-plugin.js',
     'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
     'tests/test-adaptive-goal-approval-subsystem.mjs',
     'tests/test-adaptive-goal-evidence-lineage.js',
     'tests/test-adaptive-goal-knowledge-verifier.mjs',
+    'tests/test-adaptive-goal-store-dispatch-guard.mjs',
     'tests/test-adaptive-goal-trust-configuration.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs',
     'tests/test-adaptive-goal-reviewer-identity.js',
@@ -70,6 +75,10 @@ function packageInputSnapshot(label) {
     'tests/test-execution-success-contract.js',
     'tests/test-phase5-recovery.js',
     'tests/test-workflow-terminal-failure-atomicity.js',
+    'tests/test-workspace-write-capability-service.mjs',
+    'tests/test-case01-snapshot-service-boundary.mjs',
+    'tests/test-adaptive-goal-action-intent-binding-resolver.mjs',
+    'tests/test-agent-session-store-boundary.mjs',
     'tests/test-provider-pre-send-recovery.js',
     'tests/test-agent-tool-guidance.js',
     'tests/test-mcp-stdio-backpressure.mjs',
@@ -380,8 +389,9 @@ try {
   assert.ok(firstArchive.extracted.has('src/runtime/adaptive-goal-reviewed-task-inputs.js'), 'the versioned reviewed action-intent/task-input contract must ship in the extracted runtime closure');
   assert.ok(secondArchive.extracted.has('src/runtime/adaptive-goal-reviewed-task-inputs.js'), 'the second reproducible archive must include the exact reviewed action-intent/task-input contract bytes');
   assert.ok(firstArchive.extracted.has('src/runtime/workflow/specialist-role-guidance.js'), 'the runtimePrefix-loaded specialist prompt helper must ship in the extracted MCP bundle');
-  for (const dependency of ['src/runtime/workflow/workspace-write-contract.js', 'src/runtime/workflow/recovery-compatibility.js', 'src/runtime/workflow/tool-errors.js']) {
+  for (const dependency of ['src/runtime/workflow/workspace-write-contract.js', 'src/runtime/workflow/recovery-compatibility.js', 'src/runtime/workflow/tool-errors.js', 'src/runtime/workspace-write-capability-service.js']) {
     assert.ok(firstArchive.extracted.has(dependency), `runtimePrefix-loaded workspace-write/recovery dependency must ship: ${dependency}`);
+    assert.ok(secondArchive.extracted.has(dependency), `second reproducible archive must include the same runtime dependency: ${dependency}`);
   }
 
   // Exercise the collector against a disposable source tree containing a
@@ -397,6 +407,7 @@ try {
   for (const directory of ['server', 'src', 'protocol']) {
     fs.cpSync(path.join(root, directory), path.join(fixtureRoot, directory), { recursive: true, dereference: false });
   }
+  fs.copyFileSync(path.join(root, 'job-store.js'), path.join(fixtureRoot, 'job-store.js'));
   fs.mkdirSync(path.join(fixtureRoot, 'scripts'), { recursive: true });
   fs.copyFileSync(path.join(root, 'scripts/collect-plugin-runtime.mjs'), path.join(fixtureRoot, 'scripts/collect-plugin-runtime.mjs'));
   fs.writeFileSync(path.join(fixtureRoot, 'server/collector-side-effect-fixture.js'), 'globalThis.__collectorSideEffectFixture = true;\n', { flag: 'wx' });

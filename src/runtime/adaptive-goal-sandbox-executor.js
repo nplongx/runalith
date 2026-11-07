@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { hashArtifactContent } from './workflow/artifacts.js';
-import { canonicalJson } from './workflow/plan.js';
+import { hashArtifactContent } from './workflow-contracts-public-api.js';
+import { canonicalJson } from './workflow-plan-public-api.js';
 
 export const ADAPTIVE_GOAL_SANDBOX_ACTION_ID = 'implement-fixture-validator-v1';
 export const ADAPTIVE_GOAL_SANDBOX_ACTION_CLAIMED_EVENT = 'adaptive_goal.sandbox_action_claimed';

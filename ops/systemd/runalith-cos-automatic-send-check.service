@@ -1,0 +1,14 @@
+[Unit]
+Description=Runalith Chat On Steroids automatic-send instruction preflight
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/work/chatgpt-adapter
+ExecStart=%h/.config/nvm/versions/node/v24.21.0/bin/node %h/work/chatgpt-adapter/scripts/cos-automatic-send-check.mjs --root %h/work/chatgpt-adapter --target . --host 127.0.0.1 --port 18746
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

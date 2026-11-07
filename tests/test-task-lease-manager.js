@@ -6,7 +6,7 @@ import { tempDir } from './test-temp-dir.js';
 const dataDir = tempDir('p5-lease-');
 process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_DB = path.join(dataDir, 'workflow.db');
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const store = new WorkflowStore();
 assert.throws(() => new TaskLeaseManager(store, { workerId: 'worker-invalid-ttl', ttlMs: '5000' }),
   /ttlMs must be a positive safe integer/, 'lease manager must not coerce a string TTL');

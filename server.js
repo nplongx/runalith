@@ -23,8 +23,10 @@ import { DistributedScheduler } from './src/runtime/distributed-scheduler.js';
 import { GitHubActionsProvider } from './src/runtime/github-actions-provider.js';
 import { M11RunnerProvider } from './src/runtime/m11-runner-provider.js';
 import { parseStrictJson } from './src/runtime/strict-json.js';
+import { createWorkflowStatePort } from './src/runtime/workflow-state-port.js';
 
 const LANGGRAPH_ORCHESTRATOR_MODE = process.env.LANGGRAPH_ORCHESTRATOR || 'shadow';
+const workflowState = createWorkflowStatePort(workflowStore);
 const SESSION_TRANSPORT_MODE = process.env.SESSION_TRANSPORT || 'shadow';
 const SESSION_TRANSPORT_MAX_ATTEMPTS = Math.max(1, Number(process.env.SESSION_TRANSPORT_MAX_ATTEMPTS) || 5);
 const SESSION_TRANSPORT_RETRY_BASE_MS = Math.max(0, Number(process.env.SESSION_TRANSPORT_RETRY_BASE_MS) || 2000);
@@ -35,18 +37,18 @@ const SESSION_TRANSPORT_LEASE_MS = Math.max(5_000, Number(process.env.SESSION_TR
 // its own safety margin and never accepts a lease shorter than that deadline.
 const SESSION_TRANSPORT_TIMEOUT_SECONDS = Math.max(1, Math.floor((SESSION_TRANSPORT_LEASE_MS - 10_000) / 1000));
 let sessionTransportBusy = false;
-const executionManager = new ExecutionManager(workflowStore);
-const providerAdmission = new ProviderAdmissionController(workflowStore);
+const executionManager = new ExecutionManager(null, { statePort: workflowState });
+const providerAdmission = new ProviderAdmissionController(workflowStore.db, { workflowStatePort: workflowState });
 const WORKER_PROVIDER_MODE = String(process.env.WORKFLOW_WORKER_PROVIDER || '').toLowerCase();
 let workflowWorkerProvider = null;
 if (WORKER_PROVIDER_MODE === 'mock' || process.env.M11_RUNNER_MODE === 'mock') {
-  workflowWorkerProvider = new M11RunnerProvider({ runnerId: process.env.M11_RUNNER_ID || 'm11-mock-runner', store: workflowStore });
+  workflowWorkerProvider = new M11RunnerProvider({ runnerId: process.env.M11_RUNNER_ID || 'm11-mock-runner', statePort: workflowState });
 } else if (WORKER_PROVIDER_MODE === 'github-actions') {
-  workflowWorkerProvider = new GitHubActionsProvider({ store: workflowStore });
+  workflowWorkerProvider = new GitHubActionsProvider({ statePort: workflowState });
 }
 const workflowWorkerScheduler = workflowWorkerProvider
   ? new DistributedScheduler({
-      store: workflowStore,
+      statePort: workflowState,
       provider: workflowWorkerProvider,
       maxParallel: Math.max(1, Number(process.env.WORKFLOW_WORKER_MAX_PARALLEL) || 4),
       leaseTtlMs: Math.max(30_000, Number(process.env.WORKFLOW_WORKER_LEASE_TTL_MS) || 10 * 60_000),
@@ -80,11 +82,13 @@ tmpInodeHealthTimer.unref?.();
 executionManager.cleanupOrphanedArtifacts().then(count => {
   if (count) console.log(`[Adapter:Execution] cleaned ${count} orphaned batch/execution artifact(s)`);
 }).catch(error => console.warn(`[Adapter:Execution] artifact cleanup skipped: ${error.message}`));
-const recoveryManager = new RecoveryManager(workflowStore, {
+const recoveryManager = new RecoveryManager(null, {
+  statePort: workflowState,
   sessionStaleMs: Math.max(30_000, Number(process.env.RECOVERY_SESSION_STALE_MS) || 5 * 60 * 1000),
   executionStaleMs: Math.max(10_000, Number(process.env.RECOVERY_EXECUTION_STALE_MS) || 2 * 60 * 1000),
   executionManager,
-  providerAdmission
+  providerAdmission,
+  agentSessions: workflowStore.agentSessions
 });
 
 function providerIdsFromBridge() {
@@ -124,7 +128,7 @@ function reconcileBridgeRateLimitForJob(jobId, error) {
   providerAdmission.markRateLimited('chatgpt:global', 'bridge_all_accounts_rate_limited', retryAfterMs);
   if (jobId) {
     workflowStore.setProviderWaiting(jobId, retryAfterMs, error?.message || 'bridge_all_accounts_rate_limited');
-    const leases = workflowStore.db.prepare("SELECT lease_id FROM provider_admission_leases WHERE state='ACTIVE' AND job_id=?").all(jobId);
+    const leases = providerAdmission.listActiveLeasesForJob(jobId);
     for (const lease of leases) providerAdmission.release(lease.lease_id, { success: false, reason: 'bridge provider rate limit' });
   }
   return retryAfterMs;
@@ -237,7 +241,7 @@ async function executeDurableDeterministicToolCall(toolCall, messages, targetRol
       // A native OpenClaw exec result is transport evidence only. It may exist
       // before ExecutionManager claims the durable task and must not suppress
       // deterministic recovery. Only ACTUAL EXECUTION EVIDENCE is authoritative.
-      const latest = workflowStore.db.prepare('SELECT content FROM results WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(candidate.task_id);
+      const latest = workflowState.getLatestTaskResult(candidate.task_id);
       return !/\[ACTUAL EXECUTION EVIDENCE\]/i.test(String(latest?.content || ''));
     }) || null;
   }
@@ -359,7 +363,7 @@ function recordQuarantinedProviderObservation(run, result) {
   };
   const eventId = workflowStore.recordEvent(run.job_id, 'task.execution.quarantine_observed', payload,
     `${run.lease_id}|${run.provider_run_id}|${resultSha256}`);
-  const row = workflowStore.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+  const row = workflowState.getEvent(eventId);
   if (!row || row.job_id !== run.job_id || row.type !== 'task.execution.quarantine_observed' || row.payload_json !== JSON.stringify(payload)) {
     throw new Error('quarantined provider result observation failed exact durable event readback');
   }
@@ -376,7 +380,7 @@ function recordQuarantinedProviderCollectionFailure(run, error) {
   };
   const eventId = workflowStore.recordEvent(run.job_id, 'task.execution.quarantine_collection_failed', payload,
     `${run.lease_id}|${run.provider_run_id}|collection-error|${errorSha256}`);
-  const row = workflowStore.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+  const row = workflowState.getEvent(eventId);
   if (!row || row.job_id !== run.job_id || row.type !== 'task.execution.quarantine_collection_failed' || row.payload_json !== JSON.stringify(payload)) {
     throw new Error('quarantined provider collection failure failed exact durable event readback');
   }
@@ -393,7 +397,7 @@ function recordQuarantinedProviderStatusFailure(run, error) {
   };
   const eventId = workflowStore.recordEvent(run.job_id, 'task.execution.quarantine_status_failed', payload,
     `${run.lease_id}|${run.provider_run_id}|status-error|${statusErrorSha256}`);
-  const row = workflowStore.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+  const row = workflowState.getEvent(eventId);
   if (!row || row.job_id !== run.job_id || row.type !== 'task.execution.quarantine_status_failed' || row.payload_json !== JSON.stringify(payload)) {
     throw new Error('quarantined provider status failure failed exact durable event readback');
   }
@@ -403,11 +407,7 @@ function recordQuarantinedProviderStatusFailure(run, error) {
 async function reconcileWorkflowRunner(jobId) {
   if (!workflowWorkerProvider) return [];
   if (typeof workflowWorkerScheduler?.reconcileProviderDispatches === 'function') await workflowWorkerScheduler.reconcileProviderDispatches();
-  const runs = workflowStore.db.prepare(`SELECT pr.*, l.lease_id, l.attempt AS lease_attempt,
-      l.worker_id,l.state AS lease_state,l.last_error AS lease_last_error
-    FROM provider_runs pr JOIN task_leases l ON l.lease_id=pr.lease_id
-    WHERE pr.job_id=? AND (l.state='ACTIVE' OR
-      (l.state='FAILED' AND l.last_error LIKE 'REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION:%'))`).all(jobId);
+  const runs = workflowState.listActiveProviderRunsForJob(jobId);
   const reconciled = [];
   for (const run of runs) {
     const quarantined = run.lease_state !== 'ACTIVE';
@@ -615,7 +615,7 @@ async function spawnWorkflowCto(job, tasks, store) {
     if (synthesisSpec) {
       let metadata = {}; try { metadata = parseStrictJson(cto.metadata_json || '{}'); } catch (_) {}
       metadata = { ...metadata, ...(synthesisSpec.execution || {}), workflow_plan_task_id: synthesisSpec.id, runtime_owner: 'github-runner', execution_mode: 'agent' };
-      store.db.prepare('UPDATE tasks SET metadata_json=?, updated_at=? WHERE task_id=?').run(JSON.stringify(metadata), new Date().toISOString(), cto.task_id);
+      createWorkflowStatePort(store).updateTaskMetadata(cto.task_id, metadata);
     }
     store.recordEvent(job.job_id, 'workflow.cto_coordinator_ready', {
       taskId: cto.task_id, owner: 'local-coordinator', runtimeOwner: 'github-runner'
@@ -628,7 +628,7 @@ async function spawnWorkflowCto(job, tasks, store) {
     store.startAttempt(job.job_id);
   }
   if (cto.openclaw_session_key || cto.openclaw_run_id) return;
-  const existingLease = store.db.prepare("SELECT lease_id, provider_id, expires_at FROM provider_admission_leases WHERE job_id=? AND task_id=? AND role='cto' AND state='ACTIVE' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(job.job_id, cto.task_id);
+  const existingLease = providerAdmission.findActiveLease({ jobId: job.job_id, taskId: cto.task_id, role: 'cto' });
   const admission = existingLease || admitNativeSpawn({ jobId: job.job_id, taskId: cto.task_id, role: 'cto' });
   try {
     const proposalEvent = store.getJobTrace(job.job_id)?.events?.find(e => e.type === 'job.proposal_requested');
@@ -905,8 +905,7 @@ async function terminalizeFromCtoResult(job, tasks, results, store) {
   if (!cto || !['completed'].includes(String(cto.status).toLowerCase())) throw new Error('CTO synthesis is not terminal-success');
   // Do not let caller array order choose the synthesis bytes. SQLite rowid is
   // the durable tie-breaker when created_at has millisecond precision.
-  const result = store.db.prepare('SELECT result_id,task_id,outcome,content,created_at,rowid AS durable_rowid FROM results WHERE task_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1')
-    .get(cto.task_id);
+  const result = createWorkflowStatePort(store).getLatestTaskResult(cto.task_id);
   const content = String(result?.content || '').trim();
   const adapterTimeout = '⚠️ Xin lỗi, hệ thống chưa nhận được phản hồi từ nguồn AI trong thời gian cho phép. Vui lòng thử lại ạ.';
   if (!content || content === adapterTimeout) throw new Error('CTO synthesis result is not a native completion');
@@ -3148,7 +3147,7 @@ function isImmediateSilentRequest(messages) {
           const terminal = required.every(t => t && ['completed', 'failed', 'cancelled'].includes(String(t.status).toLowerCase()));
           if (terminal) {
             const evidence = required.map(t => {
-              const result = workflowStore.db.prepare('SELECT content FROM results WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(t.task_id);
+              const result = workflowState.getLatestTaskResult(t.task_id);
               return '### ' + String(t.role).toUpperCase() + ' DURABLE RESULT\n' + (result?.content || '(missing result)');
             }).join('\n\n');
             prompt += '\n\n[DURABLE CTO SYNTHESIS EVIDENCE — SOURCE OF TRUTH]\nThe required Architect and QA child tasks are terminal. Use these durable child results directly. Do not infer missing evidence from status alone. Synthesize the actual command, output, and exit status from the evidence below. If both are successful and the evidence is complete, state that the DoD passes and complete the Job. Do not spawn replacement children.\n\n' + evidence + '\n[/DURABLE CTO SYNTHESIS EVIDENCE]';

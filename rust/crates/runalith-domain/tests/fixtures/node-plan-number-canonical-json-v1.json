@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/plan.js::canonicalJson + JSON.parse + node:crypto SHA-256",
+  "vectors": [
+    {
+      "name": "ecmascript-number-format-thresholds",
+      "input_json": "{\"fractional\":1.5,\"small_exponent\":1e-7,\"small_fixed_boundary\":1e-6,\"large_fixed\":1e20,\"large_exponent\":1e21,\"negative_zero\":-0.0}",
+      "canonical_json": "{\"fractional\":1.5,\"large_exponent\":1e+21,\"large_fixed\":100000000000000000000,\"negative_zero\":0,\"small_exponent\":1e-7,\"small_fixed_boundary\":0.000001}",
+      "sha256": "bb12d1e36ce4b6e4228d1a91c3eeef926d4811eeb011b4630289e5e8b4ffcb94"
+    },
+    {
+      "name": "rounding-and-subnormal-values",
+      "input_json": "{\"rounded_decimal\":333333333.33333329,\"decimal_boundary\":0.0000012345678901234567,\"subnormal\":5e-324,\"max_finite\":1.7976931348623157e308}",
+      "canonical_json": "{\"decimal_boundary\":0.0000012345678901234567,\"max_finite\":1.7976931348623157e+308,\"rounded_decimal\":333333333.3333333,\"subnormal\":5e-324}",
+      "sha256": "21199d450d6bcb2b422dcea9d3e57257f7bca84910595987628868708f6b0c03"
+    },
+    {
+      "name": "javascript-number-integer-rounding",
+      "input_json": "{\"unsafe_integer\":9007199254740993,\"unsigned_64_max\":18446744073709551615}",
+      "canonical_json": "{\"unsafe_integer\":9007199254740992,\"unsigned_64_max\":18446744073709552000}",
+      "sha256": "af7c9fdb1156aed822d65f2fa538a547a07cbc3eda62cf9bd5073672e889ee77"
+    }
+  ]
+}

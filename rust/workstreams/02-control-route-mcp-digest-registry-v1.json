@@ -1,0 +1,209 @@
+{
+  "registry_id": "runalith.control-route-mcp-digest-registry",
+  "schema_version": 1,
+  "status": "DRAFT_NOT_RATIFIED",
+  "created_by": "WS2",
+  "scope": "Source-pinned inventory of current Control HTTP routes, MCP tool/service mappings, digest domains, and deliberate non-mappings. Not a production route activation or cryptographic profile.",
+  "source_pins": [
+    {"path": "rust/crates/runalith-control-api/src/lib.rs", "sha256": "9044441a6fab7e15a7953d39ba2b36acacca9af7a98b7929f51cf867477bb0ce", "owner": "WS2", "scope": "HTTP route, capability, principal, body/header bounds and error mapping"},
+    {"path": "rust/crates/runalith-store/src/lib.rs", "sha256": "a08e43b192d02666f8b5956fa8122bd6acaf996524160c4414d5870e49ffe3e3", "owner": "WS2", "scope": "Store DTOs, task-result envelope digest, lease renewal and execution-fence persistence"},
+    {"path": "rust/crates/runalith-domain/src/lib.rs", "sha256": "f7d098f1d5ea47f8aaa1d825309a76a8f779d7a86a3612ccfa5d1a6756009bc3", "owner": "WS1/WS2", "scope": "serde content_hash implementation and domain types"},
+    {"path": "rust/crates/runalith-domain/src/workflow.rs", "sha256": "df230bce66076613f0d13f1af7ae7d07fbb933e6e8b027d09713b9ec5b4df6fc", "owner": "WS1", "scope": "Inner compiled workflow plan"},
+    {"path": "rust/crates/runalith-domain/src/workflow_catalog_v1.rs", "sha256": "b0dfb79a5655da1d2819849271245575dd157aa013edfefc9777cf0e06a4747f", "owner": "WS1", "scope": "CompiledPlanV1 and outer PlanDigestV1 canonical preimage"},
+    {"path": "rust/crates/runalith-protocol/src/mcp_service_v1.rs", "sha256": "1b7d7ed4090ad2d660150ae64d6bbc05f139954fb4258d4117b2cdb51758192c", "owner": "WS8", "scope": "MCP Gateway-to-service V1 DTO, size and identity validation"},
+    {"path": "rust/crates/runalith-mcp/src/lib.rs", "sha256": "3296bc5ae0e593d07fca845f225751083071093c2f2c01d0eb93c8af389429e8", "owner": "WS8", "scope": "MCP tools, read-only gateway allowlist, JSON-RPC mapping and stdio gate"},
+    {"path": "rust/workstreams/02-control-worker-boundary-v2.1.md", "sha256": "4e563b01da1658a26acb58ed2426efffa70ccde9405b43c671fd3ae4a8140c19", "owner": "WS2", "scope": "Historical draft claim/fence/renewal/provider/command crosswalk"},
+    {"path": "rust/workstreams/02-control-worker-boundary-v2.1.fixtures.json", "sha256": "4c2b29f378b06cba0bfeca3ed60a6614e2a39be18f94ee5d2c03c5578a22dfbb", "owner": "WS2", "scope": "Historical logical DTO and digest-domain fixtures; not crypto goldens"},
+    {"path": "rust/workstreams/02-control-worker-boundary-v2.1-test.py", "sha256": "b679503a74c4729a7c61ed516841f2146d83a82ad9ca66abe4c0ae5f02c3cc87", "owner": "WS2", "scope": "Historical V2.1 structural fixture validator"}
+  ],
+  "control_http": {
+    "transport": "HTTP JSON",
+    "max_request_body_bytes": 1048576,
+    "max_header_bytes": 16384,
+    "authentication": "Bearer credential is passed to host-injected ControlPrincipalVerifier; subject, issuer and capabilities are host-derived, not accepted from request JSON.",
+    "principal_fields": ["subject", "issuer", "capabilities"],
+    "generic_request_digest": "NONE_DEFINED_BY_CONTROL_HTTP_BOUNDARY",
+    "worker_authority_default": "UNCONFIGURED_FAIL_CLOSED_503",
+    "worker_routes": [
+      {"method": "POST", "path": "/v1/worker/claims/receive", "capability": "worker.claim.receive", "authority_method": "WorkerControlAuthority.receive_claim", "wire_contract": "opaque JSON Value; no schema_version fixed by route", "response": "204 when no claim; 200 with {claim: object} otherwise", "digest_profile": "NONE_DEFINED", "mcp_equivalent": null},
+      {"method": "POST", "path": "/v1/worker/claims/verify", "capability": "worker.claim.verify", "authority_method": "WorkerControlAuthority.verify_claim", "wire_contract": "opaque claim object; route checks claim.worker_id and claim.audience equal authenticated principal", "response": "200 {valid:true} on authority success", "digest_profile": "NO_CANONICAL_SIGNED_PREIMAGE_DEFINED_BY_ROUTE", "mcp_equivalent": null},
+      {"method": "POST", "path": "/v1/worker/leases/renew", "capability": "worker.lease.renew", "authority_method": "WorkerControlAuthority.renew_lease", "wire_contract": "current route body renewal_id + lease_seconds + claim object; lease_seconds 1..600; renewal_id nonempty, <=256 bytes", "store_type": "TaskLeaseRenewalRequest (unversioned internal DTO; no claim_id/schema_version)", "receipt_type": "TaskLeaseRenewal (unversioned internal DTO; no receipt_id/schema_version)", "digest_profile": "NO_REQUEST_OR_RECEIPT_DIGEST_FIELD", "draft_profile": "LeaseRenewalV1 in V2.1 fixture is proposed, not current Store wire DTO", "mcp_equivalent": null},
+      {"method": "POST", "path": "/v1/worker/results", "capability": "worker.result.publish", "authority_method": "WorkerControlAuthority.publish_result", "wire_contract": "worker_id + workflow_id + task_id + event_id + producer_id + payload_sha256 + request object", "store_type": "TaskResultEnvelope + TaskResultRequest", "digest_profile": "task_result_envelope_payload_v1", "mcp_equivalent": "workflow_record_task_result shares Store record_task_result_envelope semantics but is a distinct flattened MCP argument/auth surface"},
+      {"method": "POST", "path": "/v1/worker/provider-results", "capability": "worker.provider_result.publish", "authority_method": "WorkerControlAuthority.publish_provider_result", "wire_contract": "opaque JSON Value behind injected authority", "digest_profile": "NO_CONTROL_ROUTE_PREIMAGE_DEFINED", "mcp_equivalent": null},
+      {"method": "POST", "path": "/v1/worker/sessions/deliver", "capability": "worker.session.deliver", "authority_method": "WorkerControlAuthority.deliver_session_message", "wire_contract": "opaque JSON Value behind injected authority", "digest_profile": "NO_CONTROL_ROUTE_PREIMAGE_DEFINED", "mcp_equivalent": null},
+      {"method": "POST", "path": "/v1/worker/execution-fences", "capability": "worker.execution_fence.reserve", "authority_method": "WorkerControlAuthority.reserve_execution_fence", "wire_contract": "current Store WorkerExecutionFenceRequest is unversioned; V2 schema_version=2 request is a separate draft projection", "digest_profile": "execution_fence_side_effect_request_sha256", "mcp_equivalent": null},
+      {"method": "POST", "path": "/v1/worker/execution-fences/{fence_id}/complete", "capability": "worker.execution_fence.complete", "authority_method": "WorkerControlAuthority.complete_execution_fence", "wire_contract": "current Store WorkerExecutionFenceCompletion is unversioned; draft V2 adds schema_version, idempotency_key and acl_sha256", "digest_profile": "execution_fence_completion_sha256", "mcp_equivalent": null}
+    ],
+    "workflow_routes": [
+      {"method": "GET", "path": "/v1/workflows", "capability": "workflow.read", "service_method": "WorkflowService.list_active_workflows", "mcp_tool": "workflow_list", "mapping": "SAME_READ_OPERATION", "gateway_exposure": "READ_ONLY_ALLOWED"},
+      {"method": "POST", "path": "/v1/workflows", "capability": "workflow.create", "service_method": "WorkflowService.create_proposal", "mcp_tool": "workflow_create", "mapping": "SAME_SERVICE_OPERATION_DIFFERENT_AUTH_SURFACE", "gateway_exposure": "MUTATION_NOT_EXPOSED"},
+      {"method": "GET", "path": "/v1/workflows/{workflow_id}", "capability": "workflow.read", "service_method": "WorkflowService.get_workflow", "mcp_tool": "workflow_get", "mapping": "SAME_READ_OPERATION", "gateway_exposure": "NOT_IN_LOCAL_READ_ONLY_ALLOWLIST"},
+      {"method": "POST", "path": "/v1/workflows/{workflow_id}/approve", "capability": "workflow.approve", "service_method": "WorkflowService.approve", "mcp_tool": "workflow_approve", "mapping": "SAME_SERVICE_OPERATION_DIFFERENT_AUTH_SURFACE", "gateway_exposure": "MUTATION_NOT_EXPOSED"},
+      {"method": "POST", "path": "/v1/workflows/{workflow_id}/tasks/{task_id}/result", "capability": "workflow.result.ingest", "service_method": "WorkflowService.record_task_result_envelope", "mcp_tool": "workflow_record_task_result", "mapping": "SAME_STORE_ENVELOPE_SEMANTICS_DIFFERENT_WIRE_SHAPE", "gateway_exposure": "MUTATION_NOT_EXPOSED"},
+      {"method": "GET", "path": "/v1/workflows/{workflow_id}/events", "capability": "workflow.read", "service_method": "WorkflowService.list_workflow_events", "mcp_tool": "workflow_events", "mapping": "SAME_READ_OPERATION", "gateway_exposure": "READ_ONLY_ALLOWED"},
+      {"method": "GET", "path": "/v1/workflows/{workflow_id}/tasks/{task_id}", "capability": "workflow.read", "service_method": "WorkflowService.inspect_task_attempt", "mcp_tool": "workflow_attempt_inspect", "mapping": "SAME_READ_OPERATION", "gateway_exposure": "READ_ONLY_ALLOWED"},
+      {"method": "POST", "path": "/v1/coordinator/tick", "capability": "workflow.schedule", "service_method": "WorkflowService.coordinator_claim_next", "mcp_tool": "workflow_claim_task", "mapping": "NOT_EQUIVALENT: direct MCP task claim is not coordinator selection/parallel admission", "gateway_exposure": "MUTATION_NOT_EXPOSED"}
+    ]
+  },
+  "mcp": {
+    "transport": "JSON-RPC 2.0 over newline-delimited stdio",
+    "modern_protocol_version": "2026-07-28",
+    "legacy_protocol_version": "2025-11-25",
+    "max_frame_bytes": 1048576,
+    "max_service_message_bytes": 1048576,
+    "registered_tool_count": 62,
+    "registered_tool_names": [
+      "orchestrator_health", "workflow_recommend_resources", "workflow_ready_tasks", "custom_role_create", "custom_role_update", "custom_role_clone", "custom_role_get", "custom_role_list", "custom_workflow_create", "custom_workflow_update", "custom_workflow_clone", "custom_workflow_get", "custom_workflow_list", "custom_workflow_preview", "workflow_policy_catalog", "workflow_policy_create", "workflow_policy_list", "workflow_policy_get", "workflow_policy_update", "workflow_policy_validate", "workflow_policy_attach", "workflow_compile", "workflow_create", "workflow_get", "workflow_list", "workflow_events", "workflow_validate_artifact", "workflow_diagnose", "workflow_attempt_inspect", "agent_session_create", "agent_session_list", "agent_session_inspect", "agent_session_update", "agent_session_access_grant", "agent_session_access_revoke", "agent_session_attach", "agent_session_takeover", "agent_session_message_enqueue", "agent_session_message_claim", "agent_session_message_start", "agent_session_message_receipt", "agent_session_message_ack", "agent_session_message_uncertain", "workflow_approve", "workflow_claim_task", "workflow_record_task_result", "workflow_recovery_quarantine_expired", "workflow_verify_event_chain", "workflow_synthesize", "graph_create", "graph_node_append", "graph_edge_append", "graph_evidence_capture", "graph_snapshot_create", "graph_snapshot_get", "adaptive_goal_graph_search", "adaptive_goal_phase2_rank", "adaptive_goal_mcts_shadow_search", "adaptive_goal_plan_project", "workflow_execution_graph_get", "workflow_sandbox_execute", "workflow_provider_reconcile"
+    ],
+    "local_gateway_read_only_tools": [
+      "orchestrator_health", "workflow_recommend_resources", "workflow_ready_tasks", "custom_role_list", "custom_workflow_list", "workflow_policy_list", "workflow_compile", "workflow_list", "workflow_events", "workflow_validate_artifact", "workflow_diagnose", "workflow_attempt_inspect", "workflow_verify_event_chain", "graph_snapshot_get"
+    ],
+    "local_stdio_gate": "serve_stdio refuses to start without host-composed authenticated Gateway context; tools/list and service capability discovery expose only the explicit read-only allowlist above",
+    "json_rpc_to_service_mapping": {
+      "request_id": "Value.to_string() from JSON-RPC id; identity/correlation only, not durable idempotency",
+      "correlation_id": "stdio:{authenticated transport connection_id}",
+      "principal": "host-derived McpPrincipalV1; never accepted from request JSON",
+      "idempotency_key": "local gateway currently sets None; does not substitute JSON-RPC id",
+      "mutating_request_behavior": "McpServiceRequestV1 validation requires idempotency_key for Mutating; current local gateway request therefore fails closed as MUTATION_IDEMPOTENCY_UNAVAILABLE before the mutating handler runs"
+    },
+    "service_request_fields": ["schema_version", "request_id", "correlation_id", "principal.subject", "principal.issuer", "principal.audience", "principal.authentication_context", "operation", "capability", "side_effect_class", "name", "arguments", "idempotency_key"],
+    "service_response_binding": ["schema_version", "request_id", "service_id"],
+    "request_or_response_digest": "NONE_DEFINED_BY_McpServiceRequestV1_OR_McpServiceResponseV1",
+    "selected_non_mappings": [
+      {"mcp_tool": "workflow_claim_task", "not_http_alias_of": "/v1/coordinator/tick", "reason": "direct WorkflowService.claim_task requires explicit workflow/task/worker and bypasses coordinator ready-task selection and parallel admission"},
+      {"mcp_tool": "workflow_provider_reconcile", "not_http_alias_of": "/v1/worker/provider-results", "reason": "provider reconciliation performs lookup/reconciliation; worker provider-results is a separate producer publication boundary"},
+      {"mcp_tool": "agent_session_message_enqueue", "not_http_alias_of": "/v1/worker/sessions/deliver", "reason": "session message enqueue and worker delivery do not share the same authority DTO or route semantics"}
+    ],
+    "legacy_annotation_warning": "Source comment states workflow_recovery_quarantine_expired and workflow_provider_reconcile have readOnlyHint=true despite mutation/external side effects; explicit gateway allowlist excludes both. Treat allowlist and service side-effect policy, not annotation alone, as exposure decision."
+  },
+  "digest_domains": [
+    {
+      "id": "serde_content_hash_v1",
+      "algorithm": "SHA-256 lowercase hex",
+      "preimage": "serde_json::to_vec(value) for a Rust Serialize value",
+      "source": "runalith_domain::content_hash",
+      "canonicalization_status": "DETERMINISTIC_SERDE_BYTES_ONLY; NOT_DECLARED_RFC8785_JCS; no cross-language canonical-byte guarantee",
+      "version_status": "HELPER_EXISTS_WITHOUT_EXPLICIT_SCHEMA_VERSION"
+    },
+    {
+      "id": "workflow_proposal_hash",
+      "value_field": "WorkflowView.proposal_hash / ApprovalRequest.expected_proposal_hash",
+      "profile": "serde_content_hash_v1(WorkflowProposal)",
+      "source": "Store::create_proposal and Store::approve recomputation",
+      "not_equal_to": ["inner WorkflowPlan hash", "CompiledPlanV1 PlanDigestV1.value"]
+    },
+    {
+      "id": "workflow_inner_plan_hash",
+      "value_field": "WorkflowView.plan_hash / ApprovalRequest.expected_plan_hash",
+      "profile": "serde_content_hash_v1(WorkflowPlan)",
+      "source": "Store::create_proposal and Store::approve recomputation",
+      "not_equal_to": ["WorkflowProposal hash", "CompiledPlanV1 PlanDigestV1.value"],
+      "status": "CURRENT_STORE_INTERNAL_HASH; DO_NOT SUBSTITUTE FOR OUTER PLAN DIGEST"
+    },
+    {
+      "id": "compiled_plan_v1_outer_plan_digest",
+      "value_field": "PlanDigestV1.value",
+      "algorithm": "sha256",
+      "preimage": "CompiledPlanV1.canonical_content(): canonicalized object containing schema_version, workflow_plan, workflow_definition_pin, role_definition_pins, skill_pins and optional policy_composition; excludes plan_digest itself",
+      "canonicalization": "canonicalize_node_plan_json over the UTF-8 canonical_content string",
+      "owner": "WS1 defines digest; WS2 maps claim plan_sha256; consumers must review exact revision",
+      "claim_mapping": "WS1 A2A review requires TaskClaim.plan_sha256 to bind PlanDigestV1.value, not inner workflow_plan.plan_hash and not W8 outer payload_digest",
+      "status": "SOURCE_IMPLEMENTED; CROSS_PART CLAIM MAPPING DRAFT_NOT_RATIFIED"
+    },
+    {
+      "id": "task_claim_command_sha256_v1",
+      "value_field": "TaskClaimEnvelopeV4.command_sha256",
+      "profile": "serde_content_hash_v1(CommandRequest)",
+      "source": "V2.1 consumer fixture and WS3 draft consumer; exact Node-compatible vectors pinned in V2.1",
+      "status": "DRAFT_V4_ONLY; NOT_A_CLAIM_SIGNATURE_PREIMAGE; ACTIVE_V3_RUNTIME_UNCHANGED"
+    },
+    {
+      "id": "task_result_envelope_payload_v1",
+      "value_field": "TaskResultEnvelope.payload_sha256",
+      "profile": "serde_content_hash_v1(JSON object {workflow_id, task_id, event_id, producer_id, request})",
+      "source": "Store::record_task_result_envelope builds exact object and recomputes digest before mutation",
+      "idempotency_identity": "event_id; exact payload replay returns prior receipt/view, changed same event body conflicts",
+      "not_equal_to": ["provider payload digest", "W8 outer envelope payload_digest", "WorkerExecutionFenceRequest.request_sha256"]
+    },
+    {
+      "id": "execution_fence_side_effect_request_sha256",
+      "value_field": "WorkerExecutionFenceRequest.request_sha256 / ExecutionFenceV2RequestDraft.request_sha256",
+      "meaning": "Digest of exact protected side-effect request; W4 uses matching request_binding_sha256 in the historical V2.1 crosswalk",
+      "current_store_behavior": "opaque caller-supplied 64-hex binding stored and compared as part of immutable subject; Store does not compute its side-effect preimage",
+      "historical_v2_1_preimage": "runalith-serde-json-value-v1 over provider_id, account_binding, workflow_id, task_id, claim_id, attempt, owner_epoch, lease_id, worker_id, plan_sha256, idempotency_key and payload_sha256; excludes nested control_fence",
+      "status": "W4_PRODUCER_PROFILE_DRAFT_ONLY; CURRENT_W4_PROPOSAL_REVISION_REQUIRES_REVIEW"
+    },
+    {
+      "id": "execution_fence_store_reservation_request_digest_internal",
+      "value_field": "Store WorkerExecutionFenceRecord.receipt.request_sha256",
+      "profile": "serde_content_hash_v1(complete WorkerExecutionFenceRequest)",
+      "meaning": "Internal Store receipt metadata hash of the entire typed reservation request; not the side-effect request digest",
+      "public_projection": "MUST NOT be emitted as public request_sha256 or as an extra V2 receipt property; WS3 deny_unknown_fields consumer rejected the earlier extra control_store_request_sha256 field",
+      "status": "INTERNAL_ONLY_NOT_A_PUBLIC_V2_FIELD"
+    },
+    {
+      "id": "execution_fence_completion_sha256",
+      "value_field": "WorkerExecutionFenceCompletionResult.completion_sha256",
+      "profile": "serde_content_hash_v1(WorkerExecutionFenceCompletion)",
+      "source": "Store computes and verifies the canonical typed completion digest",
+      "status": "CURRENT_STORE_INTERNAL; V2 RECEIPT PROJECTION DRAFT"
+    },
+    {
+      "id": "execution_fence_acl_sha256",
+      "value_field": "WorkerExecutionFenceRequest.acl_sha256",
+      "meaning": "Digest of authenticated ACL decision inputs per Store field documentation",
+      "preimage": "NOT_DEFINED_BY_CURRENT_STORE_OR_CONTROL_ROUTE",
+      "warning": "Not an ACL decision, authorization result, signature or principal authentication proof"
+    },
+    {
+      "id": "execution_fence_event_sha256_and_outcome_sha256",
+      "value_field": "WorkerExecutionFenceCompletion.event_sha256 / outcome_sha256",
+      "meaning": "Caller-supplied event and outcome/evidence digests carried by the typed completion record",
+      "preimage": "NOT_FULLY_DEFINED_BY_CURRENT_STORE_DTO; do not infer from field names",
+      "status": "DRAFT_CROSS_PART PROFILE REQUIRED"
+    },
+    {
+      "id": "lease_renewal_request_and_receipt",
+      "value_field": "TaskLeaseRenewalRequest / TaskLeaseRenewal",
+      "digest": "NONE",
+      "idempotency": "renewal_id plus exact typed request equality; changed same-ID request conflicts; same-live exact replay returns original receipt",
+      "status": "CURRENT_STORE_INTERNAL_UNVERSIONED_DTO; LeaseRenewalV1 public DTO remains draft"
+    },
+    {
+      "id": "mcp_service_request_response_v1",
+      "value_field": "McpServiceRequestV1 / McpServiceResponseV1",
+      "digest": "NONE",
+      "binding": "response schema_version + exact request_id + expected service_id; serialized size <=1MiB",
+      "warning": "JSON-RPC id converted to request_id is not durable idempotency; local gateway sets idempotency_key=None"
+    },
+    {
+      "id": "provider_payload_and_w8_outer_payload",
+      "meaning": "Provider payload digest and W8 outer envelope payload_digest are separate semantic domains even when sample values happen to be equal",
+      "preimage_and_algorithm": "WS4/WS8 producer contracts own these exact profiles; historical V2.1 fixture is illustrative only",
+      "status": "NOT_RATIFIED"
+    }
+  ],
+  "idempotency_domains": [
+    {"domain": "lease renewal", "key": "renewal_id", "body_rule": "same ID requires exact typed request; changed body conflicts"},
+    {"domain": "execution fence reservation", "key": "idempotency_key plus natural side-effect identity", "body_rule": "same exact current-live subject replays; changed subject conflicts; stale/expired owner is fenced"},
+    {"domain": "execution fence observation", "key": "fence_id + event_id observation key", "body_rule": "exact historical observation replay validated against event chain; changed body conflicts"},
+    {"domain": "task result inbox", "key": "event_id", "body_rule": "exact envelope payload replay; changed body under same event ID conflicts"},
+    {"domain": "MCP Gateway mutating request", "key": "McpServiceRequestV1.idempotency_key", "body_rule": "required for Mutating; local gateway currently supplies None and fails closed; JSON-RPC id is not substituted"}
+  ],
+  "stable_error_mapping": {
+    "control_http_worker_control_error": {"Invalid": 400, "Unauthorized": 403, "Conflict": 409, "Unavailable": 503, "Internal": 500},
+    "control_http_authentication": 401,
+    "control_http_forbidden": 403,
+    "control_http_not_found": 404,
+    "mcp_json_rpc": {"invalid_request": -32600, "invalid_params": -32602, "method_not_found": -32601, "authorization_denied": -32001, "mutation_idempotency_unavailable": -32004, "mutation_outcome_unknown": -32003, "internal": -32603}
+  },
+  "unresolved_or_blocking": [
+    "No production Store-backed WorkerControlAuthority is configured; all /v1/worker/* routes return 503 by default.",
+    "No canonical TaskClaim signed-byte preimage, production issuer, signer/key custodian, audience registry, revocation/high-water or durable nonce authority exists.",
+    "No authenticated ExecutionFence reservation/completion receipt or restart-safe public receipt lookup exists; test projection is accepted by WS3 only with limits.",
+    "Current Store renewal/fence DTOs are internal unversioned structs and differ from the proposed LeaseRenewalV1 / ExecutionFenceV2 public shapes.",
+    "ACL digest, event digest and outcome digest preimages need producer-owned definitions and exact immutable negative/golden fixtures.",
+    "MCP local gateway deliberately exposes read-only tools only; no durable mutating idempotency adapter is configured, so mutating MCP calls are disabled.",
+    "No production activation, route alias, cross-part contract ratification, D-01 authority decision, D-02 writer-barrier decision or WS4 migration approval is implied by this registry."
+  ]
+}

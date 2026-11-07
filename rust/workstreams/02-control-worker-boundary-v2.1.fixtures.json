@@ -1,0 +1,610 @@
+{
+  "fixture_set": "WS2-Control-Worker-Boundary-v2",
+  "status": "DRAFT_NOT_RATIFIED_NOT_CRYPTO_GOLDEN",
+  "schema_version": 2,
+  "base_candidate_sha256": "86365876b2677ce9f99aeb23df0a1b49bcaaeb271f744731883740002f3ceec5",
+  "v10_addendum_sha256": "9fb54a38f1f97f41af6d969d6ec06fc8a779beddcf9128ce0049ffb74375b9e8",
+  "v10_1_addendum_sha256": "345179cbe3a1affca10f42b8fe5094df971afbed78179857ac6d41a99e01bf97",
+  "supersedes_fixture_sha256": "e8ae78f78dbd05f6bb72976a557283d5bd6d90961a11792f8f8b72d40722d07e",
+  "consumer_reference": {
+    "workstream": "WS3",
+    "proposal": "03-execution-fence-v2-consumer-proposal.md",
+    "proposal_sha256": "efa04fd1440565e221a8b41e39736d7e44f50370c038e4e9f98adfeaddf8fb3c",
+    "consumer_rule": "The same complete immutable subject, including attempt, idempotency_key and acl_sha256, appears in reservation request, reservation receipt, completion request and durable completion receipt.",
+    "consumer_authentication": "NOT_PERFORMED_BY_STRUCTURAL_FIXTURE"
+  },
+  "digest_domains": {
+    "plan_sha256": "Immutable compiled-plan digest.",
+    "command_sha256": "Exact command/request digest.",
+    "acl_sha256": "Control authorization-input digest; not an ACL decision or signature.",
+    "request_sha256": "Exact side-effect request-binding digest; provider V2 uses request_binding_sha256.",
+    "event_sha256": "Exact Control event payload digest.",
+    "outcome_sha256": "Exact outcome/evidence digest.",
+    "completion_sha256": "Exact completion record digest.",
+    "provider_payload_sha256": "Digest of provider payload JSON; not request_sha256.",
+    "outer_payload_digest": "W8 envelope payload digest; not Control request_sha256."
+  },
+  "claim": {
+    "schema_version": 4,
+    "claim_id": "claim-01",
+    "issuer": "control-service-fixture",
+    "audience": "worker-execution-01",
+    "issued_at": "2026-11-03T18:00:00Z",
+    "expires_at": "2026-11-03T18:05:00Z",
+    "idempotency_key": "claim-issue-01",
+    "workflow_id": "workflow-release-01",
+    "task_id": "task-provider-dispatch-02",
+    "attempt": 2,
+    "owner_epoch": 3,
+    "lease_id": "lease-01",
+    "worker_id": "worker-execution-01",
+    "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "command_sha256": "7cdb59b2331c7eed448b46c971fe1d6dccf915ddc82ad6d1b21bca4bae55a3a5",
+    "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "command": {
+      "executable": "/usr/bin/true",
+      "arguments": [],
+      "working_directory": ".",
+      "environment": {},
+      "stdin": []
+    },
+    "provider_dispatch": {
+      "provider_id": "github-actions",
+      "idempotency_key": "provider-idem-01",
+      "payload_sha256": "6cf23e1c93ff820b7f8c042cd1d29aadb963b90608d7e514f81f73a311541ee3"
+    },
+    "session_messages": [],
+    "authenticator": {
+      "fixture_only": true,
+      "signature": "NOT_A_SIGNATURE"
+    }
+  },
+  "fence": {
+    "reservation_request": {
+      "schema_version": 2,
+      "claim_id": "claim-01",
+      "workflow_id": "workflow-release-01",
+      "task_id": "task-provider-dispatch-02",
+      "attempt": 2,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "owner_epoch": 3,
+      "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "side_effect_id": "intent-01",
+      "kind": "provider_dispatch",
+      "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+      "idempotency_key": "worker-fence:example-v2",
+      "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "reservation_receipt": {
+      "schema_version": 2,
+      "receipt_id": "wfr-reservation-01",
+      "fence_id": "fence-01",
+      "claim_id": "claim-01",
+      "workflow_id": "workflow-release-01",
+      "task_id": "task-provider-dispatch-02",
+      "attempt": 2,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "owner_epoch": 3,
+      "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "side_effect_id": "intent-01",
+      "kind": "provider_dispatch",
+      "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+      "idempotency_key": "worker-fence:example-v2",
+      "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": "RESERVED",
+      "durable": true,
+      "persisted_at": "2026-11-03T18:04:01Z"
+    },
+    "completion_request": {
+      "schema_version": 2,
+      "fence_id": "fence-01",
+      "claim_id": "claim-01",
+      "workflow_id": "workflow-release-01",
+      "task_id": "task-provider-dispatch-02",
+      "attempt": 2,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "owner_epoch": 3,
+      "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "side_effect_id": "intent-01",
+      "kind": "provider_dispatch",
+      "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+      "idempotency_key": "worker-fence:example-v2",
+      "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "outcome": "UNKNOWN",
+      "event_id": "event-fence-observation-01",
+      "event_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "outcome_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+    },
+    "completion_receipt": {
+      "schema_version": 2,
+      "receipt_id": "wfr-observation-01",
+      "fence_id": "fence-01",
+      "claim_id": "claim-01",
+      "workflow_id": "workflow-release-01",
+      "task_id": "task-provider-dispatch-02",
+      "attempt": 2,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "owner_epoch": 3,
+      "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "side_effect_id": "intent-01",
+      "kind": "provider_dispatch",
+      "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+      "idempotency_key": "worker-fence:example-v2",
+      "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "outcome": "UNKNOWN",
+      "event_id": "event-fence-observation-01",
+      "event_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "outcome_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "completion_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "durable": true,
+      "terminal": false,
+      "persisted_at": "2026-11-03T18:04:02Z"
+    },
+    "completion_retry": {
+      "request": {
+        "schema_version": 2,
+        "fence_id": "fence-01",
+        "claim_id": "claim-01",
+        "workflow_id": "workflow-release-01",
+        "task_id": "task-provider-dispatch-02",
+        "attempt": 2,
+        "lease_id": "lease-01",
+        "worker_id": "worker-execution-01",
+        "owner_epoch": 3,
+        "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "side_effect_id": "intent-01",
+        "kind": "provider_dispatch",
+        "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+        "idempotency_key": "worker-fence:example-v2",
+        "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "outcome": "UNKNOWN",
+        "event_id": "event-fence-observation-01",
+        "event_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "outcome_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "receipt": {
+        "schema_version": 2,
+        "receipt_id": "wfr-observation-01",
+        "fence_id": "fence-01",
+        "claim_id": "claim-01",
+        "workflow_id": "workflow-release-01",
+        "task_id": "task-provider-dispatch-02",
+        "attempt": 2,
+        "lease_id": "lease-01",
+        "worker_id": "worker-execution-01",
+        "owner_epoch": 3,
+        "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "side_effect_id": "intent-01",
+        "kind": "provider_dispatch",
+        "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+        "idempotency_key": "worker-fence:example-v2",
+        "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "outcome": "UNKNOWN",
+        "event_id": "event-fence-observation-01",
+        "event_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "outcome_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "completion_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "durable": true,
+        "terminal": false,
+        "persisted_at": "2026-11-03T18:04:02Z"
+      }
+    },
+    "reservation_retry": {
+      "request": {
+        "schema_version": 2,
+        "claim_id": "claim-01",
+        "workflow_id": "workflow-release-01",
+        "task_id": "task-provider-dispatch-02",
+        "attempt": 2,
+        "lease_id": "lease-01",
+        "worker_id": "worker-execution-01",
+        "owner_epoch": 3,
+        "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "side_effect_id": "intent-01",
+        "kind": "provider_dispatch",
+        "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+        "idempotency_key": "worker-fence:example-v2",
+        "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "receipt": {
+        "schema_version": 2,
+        "receipt_id": "wfr-reservation-01",
+        "fence_id": "fence-01",
+        "claim_id": "claim-01",
+        "workflow_id": "workflow-release-01",
+        "task_id": "task-provider-dispatch-02",
+        "attempt": 2,
+        "lease_id": "lease-01",
+        "worker_id": "worker-execution-01",
+        "owner_epoch": 3,
+        "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "side_effect_id": "intent-01",
+        "kind": "provider_dispatch",
+        "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+        "idempotency_key": "worker-fence:example-v2",
+        "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "state": "RESERVED",
+        "durable": true,
+        "persisted_at": "2026-11-03T18:04:01Z"
+      }
+    }
+  },
+  "renewal": {
+    "request": {
+      "schema_version": 1,
+      "renewal_id": "renewal-01",
+      "claim_id": "claim-01",
+      "workflow_id": "workflow-release-01",
+      "task_id": "task-provider-dispatch-02",
+      "attempt": 2,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "owner_epoch": 3,
+      "lease_ttl_seconds": 120
+    },
+    "receipt": {
+      "schema_version": 1,
+      "receipt_id": "wlr-receipt-01",
+      "renewal_id": "renewal-01",
+      "claim_id": "claim-01",
+      "workflow_id": "workflow-release-01",
+      "task_id": "task-provider-dispatch-02",
+      "attempt": 2,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "owner_epoch": 3,
+      "lease_ttl_seconds": 120,
+      "previous_expires_at": "2026-11-03T18:05:00Z",
+      "expires_at": "2026-11-03T18:07:00Z",
+      "persisted_at": "2026-11-03T18:04:03Z",
+      "durable": true
+    },
+    "retry": {
+      "request": {
+        "schema_version": 1,
+        "renewal_id": "renewal-01",
+        "claim_id": "claim-01",
+        "workflow_id": "workflow-release-01",
+        "task_id": "task-provider-dispatch-02",
+        "attempt": 2,
+        "lease_id": "lease-01",
+        "worker_id": "worker-execution-01",
+        "owner_epoch": 3,
+        "lease_ttl_seconds": 120
+      },
+      "receipt": {
+        "schema_version": 1,
+        "receipt_id": "wlr-receipt-01",
+        "renewal_id": "renewal-01",
+        "claim_id": "claim-01",
+        "workflow_id": "workflow-release-01",
+        "task_id": "task-provider-dispatch-02",
+        "attempt": 2,
+        "lease_id": "lease-01",
+        "worker_id": "worker-execution-01",
+        "owner_epoch": 3,
+        "lease_ttl_seconds": 120,
+        "previous_expires_at": "2026-11-03T18:05:00Z",
+        "expires_at": "2026-11-03T18:07:00Z",
+        "persisted_at": "2026-11-03T18:04:03Z",
+        "durable": true
+      }
+    }
+  },
+  "provider_v2_crosswalk": {
+    "source_proposal_sha256": "f61746825ef15937e33916640a370edad662ebc39cbcae4350abb5cba8951d9b",
+    "source_example_sha256": "1924d147b9826075fbaf8070417a29c9a05730b52ab12f6cd41919b37a5bb623",
+    "request_binding_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+    "control_fence_request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+    "provider_payload_sha256": "6cf23e1c93ff820b7f8c042cd1d29aadb963b90608d7e514f81f73a311541ee3",
+    "outer_envelope_payload_digest": "6cf23e1c93ff820b7f8c042cd1d29aadb963b90608d7e514f81f73a311541ee3",
+    "config_binding": {
+      "provider_id": "github-actions",
+      "provider_account_id": "gha-installation:example-001",
+      "config_version": "github-actions-account-2026-11-03-r1",
+      "config_sha256": "fc2c9fc3530837e8b2d8d4049c52ddf042a514579878031b3be3e64721e1cad4"
+    },
+    "preimage_scope": {
+      "canonicalization": "runalith-serde-json-value-v1",
+      "include_control_fence": false,
+      "fields": [
+        "provider_id",
+        "account_binding",
+        "workflow_id",
+        "task_id",
+        "claim_id",
+        "attempt",
+        "owner_epoch",
+        "lease_id",
+        "worker_id",
+        "plan_sha256",
+        "idempotency_key",
+        "payload_sha256"
+      ]
+    },
+    "authentication_state": "UNRESOLVED",
+    "note": "The W4 example's request_binding_sha256 equals the nested Control fence request_sha256. W4's nested control_fence is excluded from its request-binding preimage to avoid recursive hashing. The raw provider payload digest and W8 outer envelope payload digest happen to match in this example because the envelope payload is the same provider payload object; neither equals the Control fence request digest. This fixture checks linkage only and does not independently recompute the W4 canonical preimage or authenticate the provider/receipt.",
+    "request_binding_material": {
+      "provider_id": "github-actions",
+      "account_binding": {
+        "provider_account_id": "gha-installation:example-001",
+        "config_version": "github-actions-account-2026-11-03-r1",
+        "config_sha256": "fc2c9fc3530837e8b2d8d4049c52ddf042a514579878031b3be3e64721e1cad4"
+      },
+      "workflow_id": "workflow-release-01",
+      "task_id": "task-provider-dispatch-02",
+      "claim_id": "claim-01",
+      "attempt": 2,
+      "owner_epoch": 3,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "idempotency_key": "provider-idem-01",
+      "payload_sha256": "6cf23e1c93ff820b7f8c042cd1d29aadb963b90608d7e514f81f73a311541ee3"
+    },
+    "provider_payload_object": {
+      "ref": "main",
+      "workflow": "release.yml"
+    },
+    "control_fence": {
+      "fence_id": "fence-01",
+      "claim_id": "claim-01",
+      "attempt": 2,
+      "lease_id": "lease-01",
+      "worker_id": "worker-execution-01",
+      "owner_epoch": 3,
+      "plan_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "side_effect_id": "intent-01",
+      "kind": "provider_dispatch",
+      "request_sha256": "4931c987f5d644cdbb499846cb69940429cd3358f052ccb2c9645fd677ae451c",
+      "idempotency_key": "worker-fence:example-v2",
+      "acl_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "state": "RESERVED",
+      "receipt_sha256": "24de6fa7dbbf6910aa53450ca187dd8403ae0b1370036281ca9646aa122dcff0",
+      "authentication_state": "UNRESOLVED"
+    },
+    "account_binding": {
+      "provider_account_id": "gha-installation:example-001",
+      "config_version": "github-actions-account-2026-11-03-r1",
+      "config_sha256": "fc2c9fc3530837e8b2d8d4049c52ddf042a514579878031b3be3e64721e1cad4"
+    }
+  },
+  "authority_and_settlement": {
+    "control_fence_receipt_authentication": "UNRESOLVED_UNTIL_PROJECT_OWNER_ASSIGNMENT_AND_WS6_VERIFIER_POLICY",
+    "process_stop": "LOCAL_UNSIGNED_OBSERVATION_ONLY",
+    "provider_terminal_proof": "WS4_OWNED_SEPARATE_EVIDENCE",
+    "cancellation_settlement": "UNKNOWN_UNRESOLVED_UNTIL_W3_STOP_AUTHORITY_AND_W4_PROVIDER_TERMINAL_PROOF_AND_CONTROL_CAS",
+    "unavailable_authority_outcome": "UNKNOWN_UNRESOLVED_NO_RELEASE_NO_AUTOMATIC_RETRY",
+    "v1_worker_store_row": "HISTORICAL_V1_ONLY; NEVER_SYNTHESIZE_ATTEMPT; NONTERMINAL_MISSING_SUBJECT_REMAINS_QUARANTINED"
+  },
+  "negative_cases": [
+    {
+      "id": "claim_missing_acl",
+      "scope": "STRUCTURAL",
+      "mutation": "remove claim.acl_sha256",
+      "expected": "REJECT"
+    },
+    {
+      "id": "claim_zero_attempt",
+      "scope": "STRUCTURAL",
+      "mutation": "claim.attempt=0",
+      "expected": "REJECT"
+    },
+    {
+      "id": "claim_zero_epoch",
+      "scope": "STRUCTURAL",
+      "mutation": "claim.owner_epoch=0",
+      "expected": "REJECT"
+    },
+    {
+      "id": "reservation_attempt_mismatch",
+      "scope": "STRUCTURAL",
+      "mutation": "reservation_request.attempt differs from claim",
+      "expected": "REJECT"
+    },
+    {
+      "id": "reservation_receipt_attempt_mismatch",
+      "scope": "STRUCTURAL",
+      "mutation": "reservation_receipt.attempt differs from request",
+      "expected": "REJECT"
+    },
+    {
+      "id": "reservation_acl_mismatch",
+      "scope": "STRUCTURAL",
+      "mutation": "reservation_receipt.acl_sha256 differs from request",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_missing_idempotency",
+      "scope": "STRUCTURAL",
+      "mutation": "remove completion_request.idempotency_key",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_missing_acl",
+      "scope": "STRUCTURAL",
+      "mutation": "remove completion_request.acl_sha256",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_receipt_missing_idempotency",
+      "scope": "STRUCTURAL",
+      "mutation": "remove completion_receipt.idempotency_key",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_receipt_missing_acl",
+      "scope": "STRUCTURAL",
+      "mutation": "remove completion_receipt.acl_sha256",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_attempt_rebind",
+      "scope": "STRUCTURAL",
+      "mutation": "completion_request.attempt differs from reservation",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_epoch_rebind",
+      "scope": "STRUCTURAL",
+      "mutation": "completion_receipt.owner_epoch differs from request",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_fence_rebind",
+      "scope": "STRUCTURAL",
+      "mutation": "completion_request.fence_id differs from reservation",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_digest_rebind",
+      "scope": "STRUCTURAL",
+      "mutation": "completion_request.request_sha256 differs from reservation",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_receipt_partial",
+      "scope": "STRUCTURAL",
+      "mutation": "remove completion_receipt.persisted_at",
+      "expected": "REJECT"
+    },
+    {
+      "id": "completion_receipt_id_missing",
+      "scope": "STRUCTURAL",
+      "mutation": "remove completion_receipt.receipt_id",
+      "expected": "REJECT"
+    },
+    {
+      "id": "unknown_marked_terminal",
+      "scope": "STRUCTURAL",
+      "mutation": "completion_receipt.terminal=true for UNKNOWN",
+      "expected": "REJECT"
+    },
+    {
+      "id": "changed_event_same_id",
+      "scope": "STRUCTURAL",
+      "mutation": "reuse event_id with changed event_sha256",
+      "expected": "CONFLICT"
+    },
+    {
+      "id": "renewal_same_id_changed_ttl",
+      "scope": "STRUCTURAL",
+      "mutation": "reuse renewal_id with changed lease_ttl_seconds",
+      "expected": "CONFLICT"
+    },
+    {
+      "id": "renewal_attempt_stale",
+      "scope": "STRUCTURAL",
+      "mutation": "receipt.attempt differs from request",
+      "expected": "REJECT"
+    },
+    {
+      "id": "renewal_expiry_not_advanced",
+      "scope": "STRUCTURAL",
+      "mutation": "expires_at <= previous_expires_at",
+      "expected": "REJECT"
+    },
+    {
+      "id": "renewal_retry_changed_bytes",
+      "scope": "STRUCTURAL",
+      "mutation": "same renewal_id but changed request body",
+      "expected": "CONFLICT"
+    },
+    {
+      "id": "authority_unavailable",
+      "scope": "AUTHORITY_NOT_EXERCISED",
+      "mutation": "ControlFence receipt verifier unavailable",
+      "expected": "UNKNOWN_UNRESOLVED_NO_RELEASE"
+    },
+    {
+      "id": "invalid_signature",
+      "scope": "CRYPTO_NOT_EXERCISED",
+      "mutation": "ControlFence receipt signature invalid",
+      "expected": "AUTHENTICATION_FAILED_WITH_CAUSE_CODE"
+    },
+    {
+      "id": "legacy_v1_nonterminal_missing_attempt",
+      "scope": "COMPATIBILITY_POLICY",
+      "mutation": "V1 journal has no first-class attempt",
+      "expected": "UNKNOWN_UNRESOLVED_QUARANTINE_NO_SYNTHESIS"
+    },
+    {
+      "id": "process_stop_without_provider_proof",
+      "scope": "SETTLEMENT_NOT_EXERCISED",
+      "mutation": "local cgroup populated=0 but provider may have been dispatched",
+      "expected": "NO_CANCELLATION_SETTLEMENT"
+    },
+    {
+      "id": "completion_same_event_id_changed_body",
+      "scope": "STRUCTURAL",
+      "mutation": "same event_id with changed event_sha256 on retry",
+      "expected": "CONFLICT"
+    },
+    {
+      "id": "reservation_same_key_changed_subject",
+      "scope": "STRUCTURAL",
+      "mutation": "same reservation idempotency_key with changed attempt",
+      "expected": "CONFLICT"
+    },
+    {
+      "id": "provider_request_binding_mismatch",
+      "scope": "STRUCTURAL",
+      "mutation": "provider request binding differs from Control fence request sha",
+      "expected": "REJECT"
+    },
+    {
+      "id": "provider_account_config_drift",
+      "scope": "STRUCTURAL",
+      "mutation": "request binding material config digest differs from frozen account binding",
+      "expected": "REJECT"
+    },
+    {
+      "id": "claim_command_missing_executable",
+      "scope": "STRUCTURAL",
+      "mutation": "remove claim.command.executable",
+      "expected": "REJECT_COMMAND_REQUEST_V1"
+    },
+    {
+      "id": "claim_command_unknown_field",
+      "scope": "STRUCTURAL",
+      "mutation": "add shell=true to claim.command",
+      "expected": "REJECT_COMMAND_REQUEST_V1"
+    },
+    {
+      "id": "claim_command_stdin_invalid_byte",
+      "scope": "STRUCTURAL",
+      "mutation": "claim.command.stdin contains -1 or 256",
+      "expected": "REJECT_COMMAND_REQUEST_V1"
+    },
+    {
+      "id": "claim_command_environment_non_string",
+      "scope": "STRUCTURAL",
+      "mutation": "claim.command.environment value is non-string",
+      "expected": "REJECT_COMMAND_REQUEST_V1"
+    },
+    {
+      "id": "claim_command_changed_bytes_same_digest",
+      "scope": "STRUCTURAL",
+      "mutation": "change arguments but retain command_sha256",
+      "expected": "REJECT_COMMAND_DIGEST"
+    },
+    {
+      "id": "claim_command_digest_changed",
+      "scope": "STRUCTURAL",
+      "mutation": "command_sha256 differs from exact CommandRequestV1 bytes",
+      "expected": "REJECT_COMMAND_DIGEST"
+    }
+  ],
+  "command_request_v1_profile": {
+    "source_vector_sha256": "55fc6229bc5cb7c3c16b18bc8e67371bf3849bb18a196d30d88ba281e20e17bd",
+    "source_vector_name": "minimal-true",
+    "serialized_json": "{\"executable\":\"/usr/bin/true\",\"arguments\":[],\"working_directory\":\".\",\"environment\":{},\"stdin\":[]}",
+    "command_sha256": "7cdb59b2331c7eed448b46c971fe1d6dccf915ddc82ad6d1b21bca4bae55a3a5",
+    "profile_status": "CURRENT_CONSUMER_SERDE_VECTOR; WS2 PRODUCER MAPPING DRAFT",
+    "not_a_claim_signature_preimage": true
+  }
+}

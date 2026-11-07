@@ -14,6 +14,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  rust:
+    name: Rust workspace (MSRV 1.85)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 1
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.85.0
+          rustc --version
+          cargo --version
+
+      - name: Resolve locked dependency closure
+        working-directory: rust
+        run: |
+          cargo fetch --locked
+          cargo metadata --locked --format-version 1 --no-deps > /tmp/runalith-rust-metadata.json
+          cargo tree --locked --workspace --edges all > /tmp/runalith-rust-dependency-tree.txt
+
+      - name: Formatting
+        working-directory: rust
+        run: cargo fmt --all -- --check
+
+      - name: Clean-clone offline workspace tests
+        working-directory: rust
+        run: cargo test --workspace --locked --offline
+
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets --locked --offline -- -D warnings
+
   test:
     name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest

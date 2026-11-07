@@ -1,0 +1,362 @@
+{
+  "schema_version": 1,
+  "oracle": "src/runtime/workflow/success-contract.js evaluateSuccessPredicate",
+  "generated_by": "Node runtime oracle",
+  "context": {
+    "plan": {
+      "workflow_id": "standard-engineering",
+      "workflow_version": 3,
+      "custom_workflow": false,
+      "required_operations": [
+        "workspace.write"
+      ],
+      "workspace_write_scopes": [],
+      "children": [
+        {
+          "id": "task-one",
+          "role": "engineer",
+          "execution": {
+            "deterministic": true,
+            "executor": "ExecutionManager"
+          }
+        },
+        {
+          "id": "task-two",
+          "role": "reviewer",
+          "execution": {
+            "deterministic": false,
+            "executor": "ChatOnSteroidsHost",
+            "execution_mode": "host-conversation"
+          }
+        }
+      ],
+      "synthesis": {
+        "role": "cto",
+        "execution": {
+          "deterministic": false,
+          "custom_workflow_synthesis": true
+        }
+      }
+    },
+    "tasks": [
+      {
+        "status": "failed",
+        "metadata_json": "{\"workflow_plan_task_id\":\"task-one\"}",
+        "created_at": "2026-01-01T00:00:00Z",
+        "durable_rowid": 1
+      },
+      {
+        "status": "completed",
+        "execution_status": "completed",
+        "execution_exit_code": 0,
+        "metadata_json": "{\"workflow_plan_task_id\":\"task-one\"}",
+        "created_at": "2026-01-02T00:00:00Z",
+        "durable_rowid": 2
+      },
+      {
+        "status": "completed",
+        "execution_status": "completed",
+        "execution_exit_code": 0,
+        "metadata_json": "{\"workflow_plan_task_id\":\"task-two\"}",
+        "created_at": "2026-01-02T00:00:00Z",
+        "durable_rowid": 3
+      }
+    ],
+    "artifacts": [
+      {
+        "artifact_id": "artifact-qa-1",
+        "type": "qa-report",
+        "producer_role": "engineer",
+        "content": {
+          "score": 100,
+          "findings": [
+            "none"
+          ],
+          "summary": "All checks passed"
+        }
+      },
+      {
+        "artifact_id": "artifact-qa-wrong-role",
+        "type": "qa-report",
+        "producer_role": "reviewer",
+        "content": {
+          "score": 0,
+          "findings": [
+            "issue"
+          ],
+          "summary": "Not authoritative for engineer"
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "case_id": "all-tasks-completed",
+      "predicate": {
+        "id": "all-tasks-completed",
+        "type": "all_tasks_completed"
+      },
+      "result": {
+        "id": "all-tasks-completed",
+        "type": "all_tasks_completed",
+        "passed": true,
+        "actual": {
+          "planned": 2,
+          "incomplete": []
+        },
+        "evidence_artifact_ids": [],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "workflow-kind-equals",
+      "predicate": {
+        "id": "workflow-kind-equals",
+        "type": "workflow_id_equals",
+        "expected": "standard-engineering"
+      },
+      "result": {
+        "id": "workflow-kind-equals",
+        "type": "workflow_id_equals",
+        "passed": true,
+        "actual": "standard-engineering",
+        "evidence_artifact_ids": [],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "task-status-completed",
+      "predicate": {
+        "id": "task-status-completed",
+        "type": "task_status_equals",
+        "task_id": "task-one",
+        "expected": "completed"
+      },
+      "result": {
+        "id": "task-status-completed",
+        "type": "task_status_equals",
+        "passed": true,
+        "actual": "completed",
+        "evidence_artifact_ids": [],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "task-status-missing",
+      "predicate": {
+        "id": "task-status-missing",
+        "type": "task_status_equals",
+        "task_id": "task-missing",
+        "expected": "completed"
+      },
+      "result": {
+        "id": "task-status-missing",
+        "type": "task_status_equals",
+        "passed": false,
+        "actual": "missing",
+        "evidence_artifact_ids": [],
+        "reason": "plan task task-missing must be completed"
+      }
+    },
+    {
+      "case_id": "execution-exit-zero",
+      "predicate": {
+        "id": "execution-exit-zero",
+        "type": "execution_exit_code_equals",
+        "task_id": "task-one",
+        "expected": 0
+      },
+      "result": {
+        "id": "execution-exit-zero",
+        "type": "execution_exit_code_equals",
+        "passed": true,
+        "actual": 0,
+        "evidence_artifact_ids": [],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "engineer-role-present",
+      "predicate": {
+        "id": "engineer-role-present",
+        "type": "task_role_present",
+        "role": "engineer"
+      },
+      "result": {
+        "id": "engineer-role-present",
+        "type": "task_role_present",
+        "passed": true,
+        "actual": 1,
+        "evidence_artifact_ids": [],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "forbidden-role-absent",
+      "predicate": {
+        "id": "forbidden-role-absent",
+        "type": "task_role_absent",
+        "role": "security-reviewer"
+      },
+      "result": {
+        "id": "forbidden-role-absent",
+        "type": "task_role_absent",
+        "passed": true,
+        "actual": 0,
+        "evidence_artifact_ids": [],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "reviewer-role-forbidden",
+      "predicate": {
+        "id": "reviewer-role-forbidden",
+        "type": "task_role_absent",
+        "role": "reviewer"
+      },
+      "result": {
+        "id": "reviewer-role-forbidden",
+        "type": "task_role_absent",
+        "passed": false,
+        "actual": 1,
+        "evidence_artifact_ids": [],
+        "reason": "planned task role reviewer is forbidden"
+      }
+    },
+    {
+      "case_id": "local-execution-only",
+      "predicate": {
+        "id": "local-execution-only",
+        "type": "local_execution_only"
+      },
+      "result": {
+        "id": "local-execution-only",
+        "type": "local_execution_only",
+        "passed": true,
+        "actual": {
+          "local_only": true,
+          "planned_task_count": 3
+        },
+        "evidence_artifact_ids": [],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "qa-artifact-exists",
+      "predicate": {
+        "id": "qa-artifact-exists",
+        "type": "artifact_exists",
+        "artifact_type": "qa-report",
+        "producer_role": "engineer"
+      },
+      "result": {
+        "id": "qa-artifact-exists",
+        "type": "artifact_exists",
+        "passed": true,
+        "actual": 1,
+        "evidence_artifact_ids": [
+          "artifact-qa-1"
+        ],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "qa-score-equals",
+      "predicate": {
+        "id": "qa-score-equals",
+        "type": "artifact_field_equals",
+        "artifact_type": "qa-report",
+        "producer_role": "engineer",
+        "field": "score",
+        "expected": 100
+      },
+      "result": {
+        "id": "qa-score-equals",
+        "type": "artifact_field_equals",
+        "passed": true,
+        "actual": 1,
+        "evidence_artifact_ids": [
+          "artifact-qa-1"
+        ],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "qa-findings-includes",
+      "predicate": {
+        "id": "qa-findings-includes",
+        "type": "artifact_field_includes",
+        "artifact_type": "qa-report",
+        "producer_role": "engineer",
+        "field": "findings",
+        "expected": "none"
+      },
+      "result": {
+        "id": "qa-findings-includes",
+        "type": "artifact_field_includes",
+        "passed": true,
+        "actual": 1,
+        "evidence_artifact_ids": [
+          "artifact-qa-1"
+        ],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "qa-summary-non-empty",
+      "predicate": {
+        "id": "qa-summary-non-empty",
+        "type": "artifact_field_non_empty",
+        "artifact_type": "qa-report",
+        "producer_role": "engineer",
+        "field": "summary"
+      },
+      "result": {
+        "id": "qa-summary-non-empty",
+        "type": "artifact_field_non_empty",
+        "passed": true,
+        "actual": 1,
+        "evidence_artifact_ids": [
+          "artifact-qa-1"
+        ],
+        "reason": null
+      }
+    },
+    {
+      "case_id": "qa-score-mismatch",
+      "predicate": {
+        "id": "qa-score-mismatch",
+        "type": "artifact_field_equals",
+        "artifact_type": "qa-report",
+        "producer_role": "engineer",
+        "field": "score",
+        "expected": 99
+      },
+      "result": {
+        "id": "qa-score-mismatch",
+        "type": "artifact_field_equals",
+        "passed": false,
+        "actual": 0,
+        "evidence_artifact_ids": [],
+        "reason": "no active validated qa-report artifact satisfies the declared predicate"
+      }
+    },
+    {
+      "case_id": "qa-artifact-wrong-role",
+      "predicate": {
+        "id": "qa-artifact-wrong-role",
+        "type": "artifact_exists",
+        "artifact_type": "qa-report",
+        "producer_role": "cto"
+      },
+      "result": {
+        "id": "qa-artifact-wrong-role",
+        "type": "artifact_exists",
+        "passed": false,
+        "actual": 0,
+        "evidence_artifact_ids": [],
+        "reason": "no active validated qa-report artifact satisfies the declared predicate"
+      }
+    }
+  ]
+}

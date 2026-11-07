@@ -31,7 +31,8 @@ function sign(unsigned, privateKey) {
   return { ...payload, signature: crypto.sign(null, Buffer.from(canonicalJson(payload), 'utf8'), privateKey).toString('base64') };
 }
 
-function trustConfig({ domain, providerId, scope, pairs, updatedAt = ts(now - 1000), version = 1, revokedAt = null }) {
+function trustConfig({ domain, providerId, scope, pairs, updatedAt = ts(now - 1000), version = 1, revokedAt = null,
+  notBefore = '2020-01-01T00:00:00.000Z' }) {
   return JSON.stringify({
     schema_version: 1, domain, provider_id: providerId, config_version: version,
     updated_at: updatedAt, updated_by: 'isolated-approval-subsystem-test',
@@ -40,14 +41,34 @@ function trustConfig({ domain, providerId, scope, pairs, updatedAt = ts(now - 10
       key_id: keyId,
       public_key_pem: pem(pair),
       scopes: [scope],
-      not_before: '2020-01-01T00:00:00.000Z',
+      not_before: notBefore,
       not_after: null,
       revoked_at: keyRevocation === null ? null : ts(keyRevocation)
     }))
   });
 }
 
-function createFixture({ revokeApproverB = false, omitPolicyConfig = false } = {}) {
+function rotateAndRevokeTrustRoot(environment, configEnv, replacementKey, observedAt = now) {
+  const config = JSON.parse(environment[configEnv]);
+  const revoked = config.keys[0];
+  config.config_version += 1;
+  config.updated_at = ts(observedAt + 1000);
+  config.updated_by = 'isolated-approval-subsystem-test-rotation';
+  config.change_reference = `test-${config.domain}-revocation-v${config.config_version}`;
+  revoked.revoked_at = ts(observedAt - 1000);
+  config.keys.push({
+    key_id: `${revoked.key_id}-replacement-v${config.config_version}`,
+    public_key_pem: pem(replacementKey),
+    scopes: [...revoked.scopes],
+    not_before: revoked.not_before,
+    not_after: null,
+    revoked_at: null
+  });
+  environment[configEnv] = JSON.stringify(config);
+}
+
+function createFixture({ revokeApproverB = false, omitPolicyConfig = false, logicalNow = now,
+  trustNotBefore = '2020-01-01T00:00:00.000Z' } = {}) {
   const source = keyPair();
   const reviewerIdentity = keyPair();
   const policyKey = keyPair();
@@ -55,20 +76,20 @@ function createFixture({ revokeApproverB = false, omitPolicyConfig = false } = {
   const checkerA = keyPair();
   const checkerB = keyPair();
   const env = {
-    AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: trustConfig({ domain: 'goal_idea_verifier', providerId: 'source-provider', scope: 'agg.goal_idea_graph.verify', pairs: [['source-v1', source]] }),
-    AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: trustConfig({ domain: 'action_intent_reviewer', providerId: 'reviewer-provider', scope: 'agg.action_intent.review', pairs: [['reviewer-v1', reviewerIdentity]] }),
-    AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON: trustConfig({ domain: 'execution_approval_policy', providerId: 'approval-policy-provider', scope: ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE, pairs: [['policy-v1', policyKey]] }),
-    AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON: trustConfig({ domain: 'action_intent_maker', providerId: 'action-maker-provider', scope: ADAPTIVE_GOAL_MAKER_AUTHORIZATION_SCOPE, pairs: [['maker-v1', makerKey]] }),
+    AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: trustConfig({ domain: 'goal_idea_verifier', providerId: 'source-provider', scope: 'agg.goal_idea_graph.verify', pairs: [['source-v1', source]], updatedAt: ts(logicalNow - 1000), notBefore: trustNotBefore }),
+    AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: trustConfig({ domain: 'action_intent_reviewer', providerId: 'reviewer-provider', scope: 'agg.action_intent.review', pairs: [['reviewer-v1', reviewerIdentity]], updatedAt: ts(logicalNow - 1000), notBefore: trustNotBefore }),
+    AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON: trustConfig({ domain: 'execution_approval_policy', providerId: 'approval-policy-provider', scope: ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE, pairs: [['policy-v1', policyKey]], updatedAt: ts(logicalNow - 1000), notBefore: trustNotBefore }),
+    AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON: trustConfig({ domain: 'action_intent_maker', providerId: 'action-maker-provider', scope: ADAPTIVE_GOAL_MAKER_AUTHORIZATION_SCOPE, pairs: [['maker-v1', makerKey]], updatedAt: ts(logicalNow - 1000), notBefore: trustNotBefore }),
     AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON: trustConfig({ domain: 'execution_approval', providerId: 'execution-approval-provider', scope: ADAPTIVE_GOAL_EXECUTION_APPROVAL_SCOPE,
-      pairs: [['checker-a-v1', checkerA], ['checker-b-v1', checkerB, revokeApproverB ? now - 500 : null]] })
+      pairs: [['checker-a-v1', checkerA], ['checker-b-v1', checkerB, revokeApproverB ? logicalNow - 500 : null]], updatedAt: ts(logicalNow - 1000), notBefore: trustNotBefore })
   };
   if (omitPolicyConfig) env.AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON = '';
   const trustDb = new DatabaseSync(':memory:');
   initializeAdaptiveGoalTrustConfigurationLedger(trustDb);
-  const sourceConfig = loadAdaptiveGoalTrustConfiguration({ configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID', publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'goal_idea_verifier', scope: 'agg.goal_idea_graph.verify', environment: env });
-  const reviewerConfig = loadAdaptiveGoalTrustConfiguration({ configJsonEnv: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', providerEnv: 'AGG_REVIEW_IDENTITY_PROVIDER_ID', publicKeyEnv: 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'action_intent_reviewer', scope: 'agg.action_intent.review', environment: env });
+  const sourceConfig = loadAdaptiveGoalTrustConfiguration({ configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID', publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'goal_idea_verifier', scope: 'agg.goal_idea_graph.verify', environment: env, now: logicalNow });
+  const reviewerConfig = loadAdaptiveGoalTrustConfiguration({ configJsonEnv: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', providerEnv: 'AGG_REVIEW_IDENTITY_PROVIDER_ID', publicKeyEnv: 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'action_intent_reviewer', scope: 'agg.action_intent.review', environment: env, now: logicalNow });
   const status = getAdaptiveGoalApprovalSubsystemConfigurationStatus({ trustConfigurationDb: trustDb,
-    verifierConfiguration: sourceConfig, reviewerConfiguration: reviewerConfig, now, environment: env });
+    verifierConfiguration: sourceConfig, reviewerConfiguration: reviewerConfig, now: logicalNow, environment: env });
 
   const candidate = {
     candidateId: 'agg-candidate-test-0001',
@@ -94,14 +115,14 @@ function createFixture({ revokeApproverB = false, omitPolicyConfig = false } = {
   const jobId = 'job_test_approval_subsystem';
   const proposalHash = sha('proposal-hash');
   const binding = buildAdaptiveGoalApprovalBinding({ jobId, proposalHash, candidate, sourceGraphVerification });
-  const policyExpires = ts(now + 10 * 60_000);
+  const policyExpires = ts(logicalNow + 10 * 60_000);
   const policy = sign({
     schema_version: 1,
     kind: 'adaptive_goal_execution_approval_policy',
     provider_id: 'approval-policy-provider',
     trust_root_sha256: rootHash(policyKey),
     nonce: crypto.randomUUID(),
-    issued_at: ts(now - 1000),
+    issued_at: ts(logicalNow - 1000),
     expires_at: policyExpires,
     scope: ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE,
     policy_id: 'approval-policy-test-001',
@@ -124,8 +145,8 @@ function createFixture({ revokeApproverB = false, omitPolicyConfig = false } = {
     provider_id: 'action-maker-provider',
     trust_root_sha256: rootHash(makerKey),
     nonce: crypto.randomUUID(),
-    issued_at: ts(now - 800),
-    expires_at: ts(now + 5 * 60_000),
+    issued_at: ts(logicalNow - 800),
+    expires_at: ts(logicalNow + 5 * 60_000),
     scope: ADAPTIVE_GOAL_MAKER_AUTHORIZATION_SCOPE,
     maker_subject: 'requester-alice',
     policy_id: policy.policy_id,
@@ -139,8 +160,8 @@ function createFixture({ revokeApproverB = false, omitPolicyConfig = false } = {
     provider_id: 'execution-approval-provider',
     trust_root_sha256: rootHash(pair),
     nonce: crypto.randomUUID(),
-    issued_at: ts(now - 500),
-    expires_at: ts(now + 4 * 60_000),
+    issued_at: ts(logicalNow - 500),
+    expires_at: ts(logicalNow + 4 * 60_000),
     scope: ADAPTIVE_GOAL_EXECUTION_APPROVAL_SCOPE,
     policy_id: policy.policy_id,
     policy_version: policy.policy_version,
@@ -165,7 +186,7 @@ function createFixture({ revokeApproverB = false, omitPolicyConfig = false } = {
   return { env, trustDb, workflowDb, candidate, sourceGraphVerification, jobId, proposalHash, binding, policy, maker, evidence,
     keys: { source, reviewerIdentity, policyKey, makerKey, checkerA, checkerB }, status,
     verify(overrides = {}) { return verifyAdaptiveGoalExecutionApprovalEvidence({ evidence, jobId, proposalHash, candidate, sourceGraphVerification,
-      trustConfigurationDb: trustDb, workflowDb, now, environment: env, ...overrides }); } };
+      trustConfigurationDb: trustDb, workflowDb, now: logicalNow, environment: env, ...overrides }); } };
 }
 
 test('approval subsystem requires administrator-observed, host-managed policy/maker/checker trust roots and disjoint domains', () => {
@@ -182,6 +203,18 @@ test('approval subsystem requires administrator-observed, host-managed policy/ma
     assert.equal(result.approvalBinding.maker_subject, 'requester-alice');
     assert.equal(result.approvalBinding.binding_record_hash, sha(canonicalJson({ ...result.approvalBinding, binding_record_hash: undefined })),
       'the durable binding record hash is reproducible independently of serialization order');
+  } finally { fixture.trustDb.close(); fixture.workflowDb.close(); }
+});
+
+test('approval trusted-root validity uses the injected verifier clock consistently', () => {
+  const logicalNow = now + 2 * 60 * 60_000;
+  const trustNotBefore = ts(now + 30 * 60_000);
+  const fixture = createFixture({ logicalNow, trustNotBefore });
+  try {
+    assert.equal(fixture.status.status, 'configured', JSON.stringify(fixture.status.blockers));
+    const result = fixture.verify();
+    assert.equal(result.verified, true,
+      'the trusted root is valid at the injected verifier time even though it is not yet valid at the process wall clock');
   } finally { fixture.trustDb.close(); fixture.workflowDb.close(); }
 });
 
@@ -350,6 +383,44 @@ test('approval policy high-water is transaction-only, idempotent for the same ve
       policyId, policyVersion: 2, policyHash: versionTwoHash, requireObserved: true
     }).status, 'current');
   } finally { fixture.trustDb.close(); fixture.workflowDb.close(); }
+});
+
+test('dispatch-time approval verification rejects policy, maker, and checker roots revoked after approval', () => {
+  const cases = [
+    { domain: 'policy', configEnv: 'AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON', replacement: () => keyPair(),
+      expected: /AGG_TRUST_ROOT_REVOKED|AGG_APPROVAL_TRUST_ROOT_REJECTED/ },
+    { domain: 'maker', configEnv: 'AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON', replacement: () => keyPair(),
+      expected: /AGG_TRUST_ROOT_REVOKED|AGG_APPROVAL_TRUST_ROOT_REJECTED/ },
+    { domain: 'checker', configEnv: 'AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON', replacement: () => keyPair(),
+      expected: /AGG_APPROVAL_POLICY_REVIEWER_ROOT_UNTRUSTED/ }
+  ];
+  for (const item of cases) {
+    const fixture = createFixture();
+    try {
+      const policyHash = sha(canonicalJson(fixture.evidence.policy));
+      fixture.workflowDb.exec('BEGIN IMMEDIATE');
+      recordAdaptiveGoalApprovalPolicyHighWater(fixture.workflowDb, {
+        jobId: fixture.jobId, policyId: fixture.evidence.policy.policy_id,
+        policyVersion: fixture.evidence.policy.policy_version, policyHash, now
+      });
+      fixture.workflowDb.exec('COMMIT');
+      const approved = fixture.verify({ requireCurrentPolicyObserved: true });
+      assert.equal(approved.verified, true, `${item.domain} pre-revocation approval verifies`);
+      const approvalEventId = `approval-${item.domain}-before-revocation`;
+      fixture.workflowDb.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)')
+        .run(approvalEventId, fixture.jobId, 'approval.approved', JSON.stringify({
+          proposalHash: fixture.proposalHash, approvalBinding: approved.approvalBinding
+        }), ts(now));
+
+      rotateAndRevokeTrustRoot(fixture.env, item.configEnv, item.replacement(), now);
+      const observed = getAdaptiveGoalApprovalSubsystemConfigurationStatus({
+        trustConfigurationDb: fixture.trustDb, now: now + 2000, environment: fixture.env
+      });
+      assert.equal(observed.status, 'configured', `${item.domain} replacement trust root is explicitly observed: ${JSON.stringify(observed.blockers)}`);
+      assert.throws(() => fixture.verify({ requireCurrentPolicyObserved: true, excludeApprovalEventId: approvalEventId }), item.expected,
+        `${item.domain} approval signed by the revoked root must not dispatch after host-observed rotation`);
+    } finally { fixture.trustDb.close(); fixture.workflowDb.close(); }
+  }
 });
 
 test('a reusable signed policy may authorize distinct candidate bindings without reusing maker/checker nonce decisions', () => {

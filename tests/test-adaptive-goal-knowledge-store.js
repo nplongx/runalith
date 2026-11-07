@@ -38,6 +38,16 @@ try {
   const capability = create('goal-a', 'recovery-target', 'capability', { name: 'fallback' });
   assert.throws(() => store.addEdge({ goalId: 'goal-a', fromId: evidence.id, toId: capability.id, type: 'recovers_to', provenance }), /requires condition and outcome/);
   const attempt = create('goal-a', 'primary-attempt', 'experiment', { label: 'Primary experiment' });
+  const task = create('goal-a', 'typed-task', 'task', { label: 'Persisted Plan Graph task' });
+  assert.equal(task.type, 'task', 'the persisted Goal/Idea schema must support the task node type accepted by Plan Graph');
+  const taskEdgeGoalId = 'goal-task-edge-contract';
+  const taskEdgeIdea = store.saveNode({ goalId: taskEdgeGoalId, stableKey: 'task-edge-idea', type: 'idea', content: { label: 'idea' }, provenance, expectedRevision: 0 });
+  const taskEdgeTask = store.saveNode({ goalId: taskEdgeGoalId, stableKey: 'task-edge-task', type: 'task', content: { label: 'task' }, provenance, expectedRevision: 0 });
+  const taskEdgeCapability = store.saveNode({ goalId: taskEdgeGoalId, stableKey: 'task-edge-capability', type: 'capability', content: { label: 'capability' }, provenance, expectedRevision: 0 });
+  assert.equal(store.addEdge({ goalId: taskEdgeGoalId, fromId: taskEdgeIdea.id, toId: taskEdgeTask.id, type: 'supports', provenance }).type, 'supports');
+  assert.equal(store.addEdge({ goalId: taskEdgeGoalId, fromId: taskEdgeTask.id, toId: taskEdgeCapability.id, type: 'supports', provenance }).type, 'supports');
+  assert.equal(store.addEdge({ goalId: taskEdgeGoalId, fromId: taskEdgeIdea.id, toId: taskEdgeTask.id, type: 'enables', provenance }).type, 'enables');
+  assert.equal(store.addEdge({ goalId: taskEdgeGoalId, fromId: taskEdgeTask.id, toId: taskEdgeCapability.id, type: 'enables', provenance }).type, 'enables');
   const recovery = store.addEdge({
     goalId: 'goal-a', fromId: attempt.id, toId: capability.id, type: 'recovers_to', provenance,
     condition: { when: 'verification_failed', predicate: 'verification_failed_with_evidence' },
@@ -62,7 +72,7 @@ try {
     evidenceRefs: ['placeholder://not-verified']
   }), /immutable edge identity already exists/);
   const defaultSearch = store.search({ goalId: 'goal-a' });
-  assert.equal(defaultSearch.nodes.length, 4);
+  assert.equal(defaultSearch.nodes.length, 5);
   assert.equal(defaultSearch.nodes.every(node => node.status === 'unverified' && node.verified === false && node.usableForPlanning === false), true);
   assert.deepEqual(defaultSearch.nodes.find(node => node.stableKey === 'evidence-1').evidenceRefs, ['placeholder://not-verified', 'placeholder://result']);
   assert.equal(defaultSearch.nodes.find(node => node.stableKey === 'evidence-1').provenanceHash, createHash('sha256').update('{"actor":"test-suite","source":"unit-test"}').digest('hex'));
@@ -94,3 +104,24 @@ try {
 } finally {
   db.close();
 }
+
+// The historical schema stores node type in an unconstrained TEXT column.
+// Reopening that schema must preserve legacy nodes while accepting the new
+// application-level `task` enum without table rebuild or data backfill.
+const legacyDb = new DatabaseSync(':memory:');
+try {
+  const legacyStore = createAdaptiveGoalKnowledgeStore(legacyDb);
+  const legacyNode = legacyStore.saveNode({ goalId: 'legacy-goal', stableKey: 'legacy-idea', type: 'idea',
+    content: { title: 'Existing legacy node' }, provenance: { source: 'legacy-fixture', actor: 'migration-test' }, expectedRevision: 0 });
+  const oldTableSql = legacyDb.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='adaptive_goal_knowledge_nodes'").get().sql;
+  assert.doesNotMatch(oldTableSql, /CHECK\s*\(\s*type/i, 'legacy node type column has no restrictive CHECK constraint');
+  const reopenedStore = createAdaptiveGoalKnowledgeStore(legacyDb);
+  assert.equal(reopenedStore.getNode(legacyNode.id).type, 'idea');
+  const taskNode = reopenedStore.saveNode({ goalId: 'legacy-goal', stableKey: 'new-task', type: 'task',
+    content: { title: 'New Plan Graph task on legacy schema' }, provenance: { source: 'local-regression', actor: 'migration-test' }, expectedRevision: 0 });
+  assert.equal(taskNode.type, 'task');
+  assert.equal(reopenedStore.getNode(legacyNode.id).content.title, 'Existing legacy node');
+} finally {
+  legacyDb.close();
+}
+console.log('adaptive goal knowledge legacy-schema compatibility passed');

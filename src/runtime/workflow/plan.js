@@ -1,7 +1,7 @@
 import { parseStrictJson } from '../strict-json.js';
 import path from 'node:path';
 import { getAgentContract, validateCompiledActionIntent } from './agent-contracts.js';
-import { validateSuccessContract } from './success-contract.js';
+import { validateSuccessContract } from '../workflow-contracts-public-api.js';
 import { composePolicySuccessContract, validateValidationProfileSnapshot, materializeValidationProfileTasks } from './policy-contract.js';
 import { validateRoleProfileOverlay } from './role-profiles.js';
 

@@ -12,7 +12,7 @@ process.env.WORKFLOW_DB = path.join(dataDir, 'workflow.db');
 process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
-const modulePath = path.resolve(process.env.PHASE2_TEST_JOB_STORE_MODULE || fileURLToPath(new URL('../src/runtime/job-store.js', import.meta.url)));
+const modulePath = path.resolve(process.env.PHASE2_TEST_JOB_STORE_MODULE || fileURLToPath(new URL('../job-store.js', import.meta.url)));
 const { WorkflowStore } = await import(pathToFileURL(modulePath).href);
 const store = new WorkflowStore();
 try {

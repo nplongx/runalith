@@ -60,13 +60,16 @@ process.env.WORKFLOW_WORKSPACE = path.resolve(process.env.RUNALITH_WORKSPACE || 
 
 const runtimePrefix = fs.existsSync(new URL('./runtime/job-store.js', import.meta.url)) ? './runtime' : '../src/runtime';
 const [{ workflowStore, WORKFLOW_DB_PATH }, { ExecutionManager, isVerifiedSuccessfulLocalExecution, isSuccessfulLocalExecutionSummary, assertExecutionBatchRetryLineage }] = await Promise.all([
-  import(`${runtimePrefix}/job-store.js`),
+  import(`${runtimePrefix}/runalith-runtime-composition.js`),
   import(`${runtimePrefix}/execution-manager.js`)
 ]);
-const [{ artifactSchemaForType, validateArtifact, validateArtifactContent }, { getAgentArtifactType, getAgentInputArtifactTypes, getAgentContract }] = await Promise.all([
+const { createWorkflowStatePort } = await import(`${runtimePrefix}/workflow-state-port.js`);
+const workflowState = createWorkflowStatePort(workflowStore);
+const [{ artifactSchemaForType, validateArtifact, validateArtifactContent }, workflowAgentContracts] = await Promise.all([
   import(`${runtimePrefix}/workflow/artifacts.js`),
   import(`${runtimePrefix}/workflow/agent-contracts.js`)
 ]);
+const { getAgentArtifactType, getAgentInputArtifactTypes, getAgentContract } = workflowAgentContracts;
 const { assessProductionQaExecution } = await import(`${runtimePrefix}/workflow/catalog/production.js`);
 const { replaceFileWithin, readFileWithin } = await import(`${runtimePrefix}/secure-filesystem.js`);
 const { createCase01WorkspaceSnapshot, removeCase01WorkspaceSnapshot, reconcileCase01WorkspaceSnapshots, validateCase01WorkspaceArtifact, readVerifiedCase01WorkspaceSnapshot, collectCase01SnapshotReferences, validateCase01DurableSnapshotReferences } = await import(`${runtimePrefix}/workflow/case01-artifact-acceptance.js`);
@@ -94,6 +97,17 @@ const adaptiveGoalExecutionGraphProposal = await import(`${runtimePrefix}/adapti
 const adaptiveGoalReviewedTaskInputs = await import(`${runtimePrefix}/adaptive-goal-reviewed-task-inputs.js`);
 const adaptiveGoalExecutionPlanCandidate = await import(`${runtimePrefix}/adaptive-goal-execution-plan-candidate.js`);
 const adaptiveGoalReviewerIdentity = await import(`${runtimePrefix}/adaptive-goal-reviewer-identity.js`);
+const adaptiveGoalActionIntentPolicy = await import(`${runtimePrefix}/adaptive-goal-action-intent-policy.js`);
+const adaptiveGoalActionIntentBindingResolverRuntime = await import(`${runtimePrefix}/adaptive-goal-action-intent-binding-resolver.js`);
+workflowAgentContracts.configureCompiledActionIntentSemanticVerifier(
+  adaptiveGoalActionIntentPolicy.validateCompiledAdaptiveGoalActionIntentSemanticVerification
+);
+workflowStore.setAdaptiveGoalActionIntentBindingsResolver(adaptiveGoalActionIntentBindingResolverRuntime.createAdaptiveGoalActionIntentBindingResolver({
+  workflowPort: workflowState,
+  verifyCandidateHash: adaptiveGoalExecutionPlanCandidate.verifyAdaptiveGoalExecutionPlanCandidateHash,
+  assertReviewerAttestation: (jobId, candidate, options) =>
+    adaptiveGoalReviewerIdentity.assertAdaptiveGoalReviewerAttestation(workflowStore, jobId, candidate, options)
+}));
 const adaptiveGoalKnowledgeRuntime = await import(`${runtimePrefix}/adaptive-goal-knowledge-store.js`);
 const adaptiveGoalPlannerTelemetryRuntime = await import(`${runtimePrefix}/adaptive-goal-planner-telemetry.js`);
 const adaptiveGoalKnowledgeCapture = await import(`${runtimePrefix}/adaptive-goal-knowledge-capture.js`);
@@ -1370,7 +1384,7 @@ function terminalizeFailedWorkflow(jobId, failedTasks) {
   const activeCto = tasks.find(task => task.task_id === job.active_task_id && task.role === 'cto');
   const runningChildren = tasks.filter(task => task.parent_task_id === activeCto?.task_id && task.status === 'running');
   if (runningChildren.length) return { terminalized: false, reason: 'other specialist tasks are still running' };
-  const activeSessions = workflowStore.db.prepare("SELECT session_id, task_id FROM agent_sessions WHERE job_id=? AND state IN ('CREATED','ACTIVE','PAUSED')").all(jobId);
+  const activeSessions = workflowStore.listActiveAgentSessionsForJob(jobId);
   const runningExecutions = tasks.filter(task => task.execution_status === 'running');
   const activeBatches = workflowStore.db.prepare("SELECT batch_id FROM execution_batches WHERE job_id=? AND status IN ('RUNNING','WAITING')").all(jobId);
   if (activeSessions.length || runningExecutions.length || activeBatches.length) {

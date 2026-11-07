@@ -11,7 +11,7 @@ process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_DB = dbPath;
 process.env.NODE_ENV = 'test';
 
-const modulePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/runtime/job-store.js');
+const modulePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../job-store.js');
 const { WorkflowStore } = await import(pathToFileURL(modulePath));
 const store = new WorkflowStore();
 

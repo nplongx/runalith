@@ -1,0 +1,25 @@
+{
+  "source_message_id": "93589092-401a-4854-a8a6-77d643f13a95",
+  "status": "DRAFT_NOT_RATIFIED",
+  "scope": "Additional WS2-supplied current typed CommandRequest vector; does not modify the producer-pinned two-vector set or define TaskClaim V4 signed bytes.",
+  "command": {
+    "executable": "/usr/bin/printf",
+    "arguments": [
+      "%s\\n",
+      "ws2-command-vector"
+    ],
+    "working_directory": ".",
+    "environment": {
+      "LANG": "C.UTF-8",
+      "RUNALITH_MODE": "fixture"
+    },
+    "stdin": [
+      65,
+      0,
+      66
+    ]
+  },
+  "serialized_json": "{\"executable\":\"/usr/bin/printf\",\"arguments\":[\"%s\\\\n\",\"ws2-command-vector\"],\"working_directory\":\".\",\"environment\":{\"LANG\":\"C.UTF-8\",\"RUNALITH_MODE\":\"fixture\"},\"stdin\":[65,0,66]}",
+  "byte_length": 176,
+  "command_sha256": "d663cd8fd7c063804596f5403532efe767ed302d01ec4f153d9c287df409c730"
+}

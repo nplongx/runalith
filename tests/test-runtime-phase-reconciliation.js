@@ -8,7 +8,7 @@ const dbPath = path.join(temp, 'workflow.db');
 process.env.WORKFLOW_DB = dbPath;
 process.env.WORKFLOW_DATA_DIR = temp;
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const store = new WorkflowStore();
 
 function makeTerminalizableJob(title, phase = null) {

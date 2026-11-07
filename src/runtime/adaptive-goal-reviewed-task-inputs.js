@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson } from './workflow/plan.js';
-import { artifactSchemaForType } from './workflow/artifacts.js';
-import { getAgentArtifactType, getAgentContract, normalizeAgentActionIntent } from './workflow/agent-contracts.js';
+import { canonicalJson } from './workflow-plan-public-api.js';
+import { artifactSchemaForType } from './workflow-contracts-public-api.js';
+import { getAgentArtifactType, getAgentContract, normalizeAgentActionIntent } from './agent-contracts-public-api.js';
 import { verifyAdaptiveGoalExecutionGraphProposalHash } from './adaptive-goal-execution-graph-proposal.js';
 import { buildAdaptiveGoalActionIntentSemanticVerification } from './adaptive-goal-action-intent-policy.js';
 

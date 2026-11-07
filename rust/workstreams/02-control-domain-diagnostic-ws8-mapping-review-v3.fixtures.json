@@ -1,0 +1,179 @@
+{
+  "fixture_set": "WS2-WS8-Mapping-Review-v3-R5.4.2-canonical-doc",
+  "status": "CURRENT_WS8_R5.4.2_EXPORT_EXACT_HASH_REVIEW; MAPPING_ONLY_NOT_RATIFICATION",
+  "ws8_candidate": {
+    "document_snapshot": "02-ws8-control-domain-diagnostic-v1.0.1-envelope-mapping-R5.4.2.snapshot.md",
+    "document_sha256": "e8c60aaf856d8280a2aeb4b240d3049d73f26a7ab466d57af3f5f808ae6a5653",
+    "example_snapshot": "02-ws8-control-domain-diagnostic-v1.0.1-envelope-mapping-R5.4.2.snapshot.example.json",
+    "example_sha256": "eaeeae93dd4ba4a195a4bacf5bfb2f682c9ae7c61f7ce00b76b9579e3edd0eb3",
+    "validator_snapshot": "02-ws8-control-domain-diagnostic-v1.0.1-envelope-mapping-R5.4.2.snapshot-test.py",
+    "validator_sha256": "dbd8f166f151d171a06e3ba5a9e91ec63519b0c207231d18805a807e0b324130",
+    "history_index_sha256": "aca539e0e605f874b16c521a3b51192d99c8f767cacf7a416c7c0a13a2120e8a",
+    "message_type": "runalith.control.domain-diagnostic.v1"
+  },
+  "producer_pins": {
+    "schema_sha256": "445a7fe8d8c88d7ffd22389ee3cfeeaa553878d55565990633e2feb14a192cfb",
+    "fixture_sha256": "d702db8a4ddf0a9b2b0d96115b182adca3d471f82d1531c47bf2258b8ea25af3",
+    "source_diagnostics_sha256": "24e5d115604dfc066d25b056d27e9ef5cc7f4653477aced469d1ab8188e91832"
+  },
+  "known_cause_domain_rows": [
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID",
+      "domain_code": "MALFORMED_REQUEST"
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_CLOCK_INVALID",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_BINDING_INVALID",
+      "domain_code": "SUBJECT_MISMATCH"
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_IDENTITY_UNAUTHORIZED",
+      "domain_code": "AUTHENTICATION_FAILED"
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_TIME_INVALID",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNER_KEY_MISMATCH",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_CANONICALIZATION_FAILED",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_ENVELOPE_INVALID",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_TRUST_SNAPSHOT_MISMATCH",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_PAYLOAD_MISMATCH",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_DIGEST_MISMATCH",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_BINDING_MISMATCH",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_DIGEST_MISMATCH",
+      "domain_code": null
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_LEDGER_UNAVAILABLE",
+      "domain_code": "AUTHORITY_UNAVAILABLE"
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_CONFLICT",
+      "domain_code": "IDEMPOTENCY_CONFLICT"
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_INVALID",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_INVALID",
+      "domain_code": "AUTHENTICATION_FAILED"
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_NOT_OBSERVED",
+      "domain_code": "AUTHORITY_UNAVAILABLE"
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_ROLLBACK",
+      "domain_code": "AUTHORITY_UNAVAILABLE"
+    },
+    {
+      "cause_code": "AGG_TRUST_ROOT_OUTSIDE_VALIDITY",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_TRUST_ROOT_REVOKED",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_APPROVAL_EVIDENCE_NONCE_INVALID",
+      "domain_code": "MALFORMED_REQUEST"
+    },
+    {
+      "cause_code": "AGG_APPROVAL_CLOCK_INVALID",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_EXPIRED",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_FUTURE_DATED",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_PUBLIC_KEY_INVALID",
+      "domain_code": null
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE",
+      "domain_code": null
+    }
+  ],
+  "mutations": [
+    {
+      "id": "wrong_valid_domain",
+      "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID",
+      "domain_code": "SUBJECT_MISMATCH",
+      "expected": "REJECT_PAIR_MISMATCH"
+    },
+    {
+      "id": "duplicate_cause",
+      "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID",
+      "expected": "REJECT_DUPLICATE_CAUSE"
+    },
+    {
+      "id": "missing_cause",
+      "cause_code": "AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE",
+      "expected": "REJECT_SOURCE_COVERAGE"
+    },
+    {
+      "id": "unknown_cause_non_null_domain",
+      "cause_code": "FUTURE_UNRECOGNIZED_CAUSE_V9",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "expected": "REJECT_UNKNOWN_CAUSE_ATTRIBUTION"
+    }
+  ],
+  "unknown_null": {
+    "cause_code": "FUTURE_UNRECOGNIZED_CAUSE_V9",
+    "domain_code": null,
+    "expected": "UNKNOWN_UNRESOLVED"
+  },
+  "required_source_hashes": {
+    "ws2_schema": "445a7fe8d8c88d7ffd22389ee3cfeeaa553878d55565990633e2feb14a192cfb",
+    "ws2_fixture": "d702db8a4ddf0a9b2b0d96115b182adca3d471f82d1531c47bf2258b8ea25af3",
+    "ws2_validator": "e54daa19579603a2a7c4410e25a860d6631667e564864144b368886de6a574d8",
+    "ws2_document": "7c5998d57678325c25abe9c400dde02d7d76ac50c0b421120307d7ae4ad7c5bf",
+    "ws2_diagnostics_v231": "24e5d115604dfc066d25b056d27e9ef5cc7f4653477aced469d1ab8188e91832",
+    "common_envelope_schema": "ba01c0c9f973ace4d4b438307338fef1f18e45f99dba2929ddd33696cbee18b2"
+  },
+  "version_label_erratum": {
+    "observed": "1.0.0-draft",
+    "expected": "1.0.1-draft",
+    "disposition": "CORRECTED_IN_R5.4.2_EXPORT; verify canonical export snapshot, live workspace identity remains WS8-owned"
+  }
+}

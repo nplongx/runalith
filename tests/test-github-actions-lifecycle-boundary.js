@@ -45,10 +45,12 @@ const providerConfig = { provider: 'github-actions', workflow: 'p3-worker.yml', 
 const acceptedIdentity = createProviderDispatchIdentity(input, providerConfig);
 const acceptedKey = providerDispatchKey(acceptedIdentity);
 const intentCreatedAt = new Date().toISOString();
+const dispatchClaimedAt = intentCreatedAt;
 const persistedIntent = {
   ...acceptedIdentity, request_json: canonicalProviderDispatchRequest(input),
   dispatch_key: acceptedKey, state: 'DISPATCHING',
-  provider_run_id: null, created_at: intentCreatedAt, updated_at: intentCreatedAt
+  provider_run_id: null, dispatch_claim_id: 'test-send-claim', dispatch_claimed_at: dispatchClaimedAt,
+  created_at: intentCreatedAt, updated_at: intentCreatedAt
 };
 let persistedRun = null;
 const persistedStore = {
@@ -144,8 +146,18 @@ for (const method of ['resolveAllocation', 'provision', 'inspect', 'destroy']) {
 
 // Guard the architectural boundary against accidentally routing M12 through the second scheduler.
 const schedulerSource = await readFile(new URL('../src/runtime/distributed-scheduler.js', import.meta.url), 'utf8');
-assert.match(schedulerSource, /acquireTaskLease/);
-assert.match(schedulerSource, /task_leases/);
+assert.match(schedulerSource, /createWorkflowStatePort/);
+assert.match(schedulerSource, /this\.state\.acquireTaskLease/);
+assert.doesNotMatch(schedulerSource, /task_leases/,
+  'scheduler must call workflow state API rather than own lease-table SQL');
+const providerSource = await readFile(new URL('../src/runtime/github-actions-provider.js', import.meta.url), 'utf8');
+assert.doesNotMatch(providerSource, /this\.store\??\.(?:getTaskLease|getTask|getJob)/,
+  'provider result fencing must use WorkflowStatePort, not the broad WorkflowStore compatibility surface');
+assert.match(providerSource, /this\.state\?\.isDurable && typeof this\.state\.getTaskLease/,
+  'provider result collection must check the named WorkflowStatePort capabilities');
+const statePortSource = await readFile(new URL('../src/runtime/workflow-state-port.js', import.meta.url), 'utf8');
+assert.match(statePortSource, /task_leases/,
+  'workflow-owned state port must retain ownership of durable task lease records');
 const matrix = await readFile(new URL('../docs/github-actions-openclaw-contract-matrix.md', import.meta.url), 'utf8');
 assert.match(matrix, /Incompatible if scheduler is inserted into M12/);
 assert.match(matrix, /cancellation is not fencing evidence/i);

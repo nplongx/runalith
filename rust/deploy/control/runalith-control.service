@@ -1,0 +1,47 @@
+[Unit]
+Description=Runalith Workflow Control compatibility host
+After=local-fs.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=runalith-control
+Group=runalith-control
+EnvironmentFile=/etc/runalith/control.env
+StateDirectory=runalith-control
+StateDirectoryMode=0700
+RuntimeDirectory=runalith-control
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+WorkingDirectory=/var/lib/runalith-control
+UMask=0077
+ExecStartPre=/usr/bin/test -x /usr/local/bin/runalith-control
+ExecStartPre=/usr/local/bin/runalith-control health
+ExecStart=/usr/local/bin/runalith-control serve
+ExecStop=/usr/local/bin/runalith-control stop
+TimeoutStartSec=30
+TimeoutStopSec=35
+KillSignal=SIGTERM
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/runalith-control /run/runalith-control
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

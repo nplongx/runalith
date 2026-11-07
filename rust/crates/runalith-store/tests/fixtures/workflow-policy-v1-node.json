@@ -1,0 +1,40 @@
+{
+  "snapshot": {
+    "schema_version": 1,
+    "policy_id": "require-engineer",
+    "version": 1,
+    "name": "Require engineer role",
+    "description": "The immutable plan must include engineer role",
+    "constraints": [
+      {
+        "id": "engineer-present",
+        "type": "task_role_present",
+        "role": "engineer"
+      }
+    ],
+    "success_criteria": [
+      {
+        "id": "all-complete",
+        "type": "all_tasks_completed"
+      }
+    ],
+    "content_hash": "33f3ec71f7ada48c9d7dba47839bbae1ef0f7e99816a3d5d1284c076d6522b9f"
+  },
+  "composed_success_contract": {
+    "schema_version": 1,
+    "goal": "Complete workflow",
+    "constraints": [
+      {
+        "id": "p-require-engineer-engineer-present",
+        "type": "task_role_present",
+        "role": "engineer"
+      }
+    ],
+    "success_criteria": [
+      {
+        "id": "p-require-engineer-all-complete",
+        "type": "all_tasks_completed"
+      }
+    ]
+  }
+}

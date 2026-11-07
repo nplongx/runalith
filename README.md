@@ -19,7 +19,7 @@
 </p>
 
 > [!WARNING]
-> **Testing pre-release — not production-certified.** The strict Phase 2 readiness gate remains `BLOCKED_NOT_READY` (`execution_permitted=false`). Read the [latest RC.11 release notes](https://github.com/nplongx/runalith/releases/tag/v1.0.9-rc.11), the [RC.11 acceptance record](docs/goal-plan-execution-acceptance-rc11-20261026.md), and the [release policy](docs/RELEASE_POLICY.md) before evaluating or installing a candidate.
+> **Integration candidate — acceptance blocked; not production-certified.** This checkout's `package.json` declares `1.0.9-rc.72`, while its configured runtime entry point remains the separately pinned RC.71 file. Local metadata does not prove publication, independent rebuild, installation, or release approval. On 2026-11-07, `npm test` failed in two V2 AGG regression checks; full Rust workspace tests and all-target Clippy failed at the artifact read-port integration-test import, although Rust workspace check and formatting passed. See the [current repository status](docs/STATUS_2026-11-07.md), [known issues](docs/KNOWN_ISSUES.md), and [release policy](docs/RELEASE_POLICY.md). The formal Phase 2 production/frozen-release gate remains `BLOCKED_NOT_READY` (`execution_permitted=false`). RC.11 and RC.72 dated acceptance packets remain candidate-specific historical evidence; do not treat them as current validation.
 
 Runalith turns multi-step agent work into an explicit, inspectable workflow: approved immutable plans, dependency-aware tasks, typed evidence, durable SQLite state, bounded local execution, and recovery records.
 
@@ -89,7 +89,7 @@ Every stage can stop with an explicit blocker. A graph hash establishes content 
 | Shadow learning/reuse (Phases 2–4) | Learned-discriminator search, MCTS search and workflow-outcome capture are opt-in/experimental paths. The shadow searches do not authorize or execute; capture records bounded, unverified lessons/metadata. These are not production acceptance evidence. |
 | Observability | Planner invocation telemetry is recorded separately from graph/trust/acceptance semantics; the optional Dashboard reads telemetry/workflow state and does not make approval or execution decisions. |
 
-**Current operational status (2026-10-26): testing pre-release only; production rollout remains BLOCKED.** The RC.11 package is not installed in the recorded target host, which remains on RC.8. Host-owned verifier/reviewer trust configuration and the independently protected external checkpoint are not verified. A read-only reconciliation observed 60 `EXECUTING` jobs and 61 running tasks without lease rows; those records require per-owner/provider reconciliation. A missing lease does not prove a worker is dead. See [RC.11 acceptance](docs/goal-plan-execution-acceptance-rc11-20261026.md), [Known issues](docs/KNOWN_ISSUES.md), and [trust provisioning](docs/agg-production-trust-provisioning-runbook.md). The published pre-release is not a production certification.
+**Current source/release boundary (2026-11-01):** this worktree's package version is `1.0.9-rc.72`; its `runtimeEntryPoint` is pinned separately to `server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js`. Do not infer the runtime filename from the package version. The RC.72 source-inventory addendum records local engineering validation, not an independently rebuilt, published, installed, or approved release. Production/frozen-release gates remain open, including host-owned trust configuration, independent external checkpoint authority, and owner/provider reconciliation. RC.11 acceptance and host observations apply only to their recorded candidate and observation date; they are not current host-state evidence. See the [RC.72 source-inventory successor](docs/goal-plan-execution-acceptance-rc72-v10-addendum-20261031.md), [release policy](docs/RELEASE_POLICY.md), and [trust provisioning](docs/agg-production-trust-provisioning-runbook.md).
 
 ## Workflow lifecycle
 
@@ -134,14 +134,14 @@ The packer creates a uniquely named candidate under `dist/`, validates the archi
 
 ### Connect an MCP client directly
 
-A client that supports stdio MCP can launch the versioned entrypoint named by this checkout's package metadata directly. For the RC.11 source in this repository, that is `server/index-v1.0.9-rc.11.js` (not the historical `server/index.js` compatibility input). Configure its MCP server entry with an absolute path, for example:
+A client that supports stdio MCP can launch the versioned entrypoint selected by `runtimeEntryPoint` in `package.json`. In this checkout, that field selects `server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js`; do not infer the filename from the package version. `server/index.js` is a historical compatibility input, not the selected entrypoint. Configure the selected path as an absolute path, for example:
 
 ```json
 {
   "mcpServers": {
     "runalith": {
       "command": "node",
-      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.11.js"],
+      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js"],
       "env": {
         "RUNALITH_DATA_DIR": "/absolute/path/to/private/runalith-data",
         "RUNALITH_WORKSPACE": "/absolute/path/to/workspace"
@@ -174,6 +174,7 @@ See the [documentation index](docs/README.md) for architecture, tool schemas, po
 | Understand AGG benchmark methodology and what has/has not been demonstrated | [AGG empirical evaluation](docs/research/agg-empirical-evaluation/README.md) and [Phase 1 benchmark methodology](docs/agg-phase1-benchmark-methodology.md) |
 | Understand approval, execution, recovery and synthesis | [Workflow lifecycle and recovery](docs/workflow-lifecycle.md) |
 | Understand runtime and trust boundaries | [Architecture](docs/architecture.md) |
+| Understand subsystem boundaries, public API rules and repository extraction sequence | [Subsystem architecture](docs/subsystems/README.md) |
 | Understand deterministic batch execution | [Durable batch execution](docs/batch-execution.md) |
 | Look up MCP tool inputs and schemas | [MCP tool reference](docs/MCP_REFERENCE.md) |
 | Understand names and compatibility identifiers | [Terminology guide](docs/TERMINOLOGY.md) |
@@ -193,10 +194,13 @@ See the [documentation index](docs/README.md) for architecture, tool schemas, po
 | `npm test` | Run the local acceptance and regression suite. |
 | `npm run test:protocol` | Test the structured execution protocol. |
 | `npm run test:workflow-m4` | Test workflow-plan, role-input, artifact and orchestrator contracts. |
+| `npm run test:workflow-state-port` | Test workflow-state/control ports, persistence participants, and subsystem boundary contracts. |
+| `npm run test:public-subsystem-alignment` | Verify host source mirrors against the pinned public subsystem repositories. |
 | `npm run dashboard` | Start the optional read-only dashboard, normally at `http://127.0.0.1:8318`. |
 | `npm run test:dashboard` | Run dashboard integration and security regression tests. |
 | `npm run pack:runalith-mcpb` | Build and verify a local MCPB candidate. |
 | `npm run docs:check` | Check local Markdown links and documentation constraints. |
+| `npm run test:package-reproducibility` | Verify deterministic local package construction and extracted package checks. |
 | `node scripts/build-static-site.mjs` | Render `site/index.html` from the versioned template, package entry point, current MCP tool inventory, and matching acceptance document. |
 | `npm run site:check` | Verify generated-site parity, navigation/local anchors, link schemes, version/tool-count alignment and required security/rollout warnings. |
 | `node scripts/check-static-site.mjs --check-external-links` | Additionally perform read-only HTTP checks of distinct external URLs; network rate limits and remote policy can make this gate inconclusive. |

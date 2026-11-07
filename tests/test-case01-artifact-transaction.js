@@ -13,7 +13,7 @@ process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_WORKSPACE = path.join(root, 'workspace');
 fs.mkdirSync(process.env.WORKFLOW_WORKSPACE, { recursive: true });
 
-const { WorkflowStore, conversationKeyFromMessages } = await import('../src/runtime/job-store.js');
+const { WorkflowStore, conversationKeyFromMessages } = await import('../job-store.js');
 const store = new WorkflowStore();
 const job = store.createJob({
   conversationKey: conversationKeyFromMessages([{ role: 'user', content: 'CASE-01 transaction rollback fixture' }]),

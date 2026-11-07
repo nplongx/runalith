@@ -67,7 +67,7 @@ function zipDirectory(source, destination, roots) {
 }
 
 function createBundle({ version = '1.0.9-rc.8', entryPoint = 'server/index-v1.0.9-rc.8.js',
-  startCommand = `node ${entryPoint}`, useRealHistorical = true } = {}) {
+  startCommand = `node ${entryPoint}`, useRealHistorical = true, historicalBytes = null } = {}) {
   const source = path.join(testRoot, `bundle-source-${crypto.randomUUID()}`);
   fs.mkdirSync(path.join(source, 'server'), { recursive: true, mode: 0o700 });
   const manifest = {
@@ -78,7 +78,8 @@ function createBundle({ version = '1.0.9-rc.8', entryPoint = 'server/index-v1.0.
   fs.writeFileSync(path.join(source, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
   fs.writeFileSync(path.join(source, 'package.json'), `${JSON.stringify({ name: 'runalith-agent-orchestrator', version, type: 'module', main: entryPoint,
     scripts: { start: startCommand } }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-  fs.copyFileSync(path.join(ROOT, 'server/index.js'), path.join(source, 'server/index.js'));
+  if (historicalBytes === null) fs.copyFileSync(path.join(ROOT, 'server/index.js'), path.join(source, 'server/index.js'));
+  else fs.writeFileSync(path.join(source, 'server/index.js'), historicalBytes, { flag: 'wx', mode: 0o600 });
   if (useRealHistorical) fs.writeFileSync(path.join(source, entryPoint), fakeRuntimeSource(version), { flag: 'wx', mode: 0o600 });
   else fs.writeFileSync(path.join(source, entryPoint), 'export {};\n', { flag: 'wx', mode: 0o600 });
   const out = path.join(testRoot, `candidate-${crypto.randomUUID()}.mcpb`);
@@ -130,10 +131,15 @@ function makeFakeHost({ appRoot, procRoot, workflowDb, version = '1.0.9-rc.5' })
   fs.writeFileSync(path.join(procRoot, '4242', 'status'), 'Name:\tnode\nPPid:\t100\n', { flag: 'wx', mode: 0o600 });
   fs.mkdirSync(path.join(procRoot, '100'), { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(procRoot, '100', 'cmdline'), '/opt/Chat On Steroids/chat-on-steroids\0', { flag: 'wx', mode: 0o600 });
-  const sourcePair = crypto.generateKeyPairSync('ed25519');
-  const reviewerPair = crypto.generateKeyPairSync('ed25519');
   const now = Date.now();
   const pem = pair => pair.publicKey.export({ type: 'spki', format: 'pem' });
+  const trustDomainSpecs = [
+    { env: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', domain: 'goal_idea_verifier', provider: 'rollout-test-source-provider', scope: 'agg.goal_idea_graph.verify', keyId: 'rollout-source-key' },
+    { env: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', domain: 'action_intent_reviewer', provider: 'rollout-test-reviewer-provider', scope: 'agg.action_intent.review', keyId: 'rollout-reviewer-key' },
+    { env: 'AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON', domain: 'execution_approval_policy', provider: 'rollout-test-policy-provider', scope: 'agg.approval.policy', keyId: 'rollout-policy-key' },
+    { env: 'AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON', domain: 'action_intent_maker', provider: 'rollout-test-maker-provider', scope: 'agg.action_intent.propose', keyId: 'rollout-maker-key' },
+    { env: 'AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON', domain: 'execution_approval', provider: 'rollout-test-decision-provider', scope: 'agg.execution.approve', keyId: 'rollout-decision-key' }
+  ];
   const trustConfig = (domain, providerId, publicKeyPem, scope, keyId) => JSON.stringify({
     schema_version: 1, domain, provider_id: providerId, config_version: 1,
     updated_at: new Date(now - 1000).toISOString(), updated_by: 'rollout-test-admin',
@@ -141,12 +147,10 @@ function makeFakeHost({ appRoot, procRoot, workflowDb, version = '1.0.9-rc.5' })
     keys: [{ key_id: keyId, public_key_pem: publicKeyPem, scopes: [scope],
       not_before: new Date(now - 60_000).toISOString(), not_after: null, revoked_at: null }]
   });
-  const trustEnvironment = {
-    AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: trustConfig('goal_idea_verifier', 'rollout-test-source-provider',
-      pem(sourcePair), 'agg.goal_idea_graph.verify', 'rollout-source-key'),
-    AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON: trustConfig('action_intent_reviewer', 'rollout-test-reviewer-provider',
-      pem(reviewerPair), 'agg.action_intent.review', 'rollout-reviewer-key')
-  };
+  const trustEnvironment = Object.fromEntries(trustDomainSpecs.map(spec => [
+    spec.env, trustConfig(spec.domain, spec.provider, pem(crypto.generateKeyPairSync('ed25519')),
+      spec.scope, spec.keyId)
+  ]));
   // The fake host models the ledger actually opened by the active runtime.
   // Its random roots and rows are test-local only and never represent host trust.
   const trustLedgerDirectory = path.join(appRoot, 'private-data');
@@ -154,18 +158,14 @@ function makeFakeHost({ appRoot, procRoot, workflowDb, version = '1.0.9-rc.5' })
   const trustLedgerPath = path.join(trustLedgerDirectory, 'agg-trust-configuration.db');
   const trustLedger = new DatabaseSync(trustLedgerPath);
   initializeAdaptiveGoalTrustConfigurationLedger(trustLedger);
-  const sourceConfiguration = loadAdaptiveGoalTrustConfiguration({
-    configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
-    publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'goal_idea_verifier',
-    scope: 'agg.goal_idea_graph.verify', environment: trustEnvironment, now
-  });
-  const reviewerConfiguration = loadAdaptiveGoalTrustConfiguration({
-    configJsonEnv: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', providerEnv: 'AGG_REVIEW_IDENTITY_PROVIDER_ID',
-    publicKeyEnv: 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'action_intent_reviewer',
-    scope: 'agg.action_intent.review', environment: trustEnvironment, now
-  });
-  assertAndRecordAdaptiveGoalTrustConfiguration(trustLedger, sourceConfiguration, { now });
-  assertAndRecordAdaptiveGoalTrustConfiguration(trustLedger, reviewerConfiguration, { now });
+  for (const spec of trustDomainSpecs) {
+    const configuration = loadAdaptiveGoalTrustConfiguration({
+      configJsonEnv: spec.env, providerEnv: `${spec.env.replace('_TRUST_CONFIG_JSON', '_PROVIDER_ID')}`,
+      publicKeyEnv: `${spec.env.replace('_TRUST_CONFIG_JSON', '_TRUST_ROOT_PUBLIC_KEY_PEM')}`,
+      domain: spec.domain, scope: spec.scope, environment: trustEnvironment, now
+    });
+    assertAndRecordAdaptiveGoalTrustConfiguration(trustLedger, configuration, { now });
+  }
   trustLedger.close();
   fs.mkdirSync(path.join(procRoot, '4242', 'fd'), { recursive: true, mode: 0o700 });
   fs.symlinkSync(trustLedgerPath, path.join(procRoot, '4242', 'fd', '10'));
@@ -237,6 +237,16 @@ test('candidate package verification and extracted runtime health are bound to e
   const smoke = smokeCandidate(candidatePath, 30_000);
   assert.equal(smoke.passed, true, smoke.output);
   assert.equal(inspectBundle(candidatePath, { requireCurrentSource: false }).sha256, before.sha256);
+});
+
+test('candidate accepts only the pinned historical or current host-compatibility server snapshot', () => {
+  const currentBytes = fs.readFileSync(path.join(ROOT, 'server/index.js'));
+  assert.equal(hash(currentBytes), 'ced650a83470a1c188e47ae2cdcf6eef19a165c4ca00aaeea80d4c51d049b3db',
+    'current host compatibility snapshot is pinned independently of the historical identity');
+  const altered = createBundle({ historicalBytes: Buffer.concat([currentBytes, Buffer.from('\n// unauthorized drift\n')]) });
+  try {
+    assert.throws(() => inspectBundle(altered), /drifted from every pinned server\/index\.js compatibility identity/);
+  } finally { fs.rmSync(altered, { force: true }); }
 });
 
 test('candidate package rejects npm start that points to a different versioned runtime than the manifest', () => {
@@ -758,9 +768,36 @@ test('active-runtime trust preflight rejects malformed, legacy-only, colliding, 
     assert.equal(current.trustLedger.source, 'active_runtime_open_file_descriptor');
     assert.equal(current.trustLedger.domains.goal_idea_verifier.verified, true);
     assert.equal(current.trustLedger.domains.action_intent_reviewer.verified, true);
+    assert.deepEqual(Object.keys(current.domains).sort(), [
+      'action_intent_maker', 'action_intent_reviewer', 'execution_approval',
+      'execution_approval_policy', 'goal_idea_verifier'
+    ].sort(), 'rollout must expose and verify all five configured trust domains');
+    assert.equal(Object.keys(current.trustLedger.domains).length, 5,
+      'the active trust-ledger inspection must compare all five effective domain fingerprints');
 
     const sourceConfig = JSON.parse(baseline.AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON);
     const reviewerConfig = JSON.parse(baseline.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON);
+    const makerConfig = JSON.parse(baseline.AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON);
+    for (const [environmentKey, domain] of [
+      ['AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON', 'execution_approval_policy'],
+      ['AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON', 'action_intent_maker'],
+      ['AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON', 'execution_approval']
+    ]) {
+      const missingDomain = inspect(Object.fromEntries(Object.entries(baseline).filter(([key]) => key !== environmentKey)));
+      assert.equal(missingDomain.available, false, `${domain} must be mandatory at rollout`);
+      assert.ok(missingDomain.blockers.some(blocker => blocker.code === 'AGG_TRUST_CONFIG_NOT_CONFIGURED' ||
+        blocker.code === 'PRODUCTION_AGG_TRUST_JSON_CONFIGURATION_REQUIRED'), JSON.stringify(missingDomain));
+    }
+    const makerProviderCollision = inspect({ ...baseline,
+      AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON: JSON.stringify({ ...makerConfig, provider_id: sourceConfig.provider_id }) });
+    assert.equal(makerProviderCollision.available, false);
+    assert.ok(makerProviderCollision.blockers.some(blocker => blocker.code === 'AGG_TRUST_DOMAINS_PROVIDER_COLLISION'));
+    const makerRootCollision = inspect({ ...baseline,
+      AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON: JSON.stringify({ ...makerConfig,
+        keys: [{ ...makerConfig.keys[0], public_key_pem: sourceConfig.keys[0].public_key_pem,
+          scopes: ['agg.action_intent.propose'] }] }) });
+    assert.equal(makerRootCollision.available, false);
+    assert.ok(makerRootCollision.blockers.some(blocker => blocker.code === 'AGG_TRUST_DOMAINS_ROOT_COLLISION'));
     const unrecordedNextVersion = inspect({ ...baseline,
       AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: JSON.stringify({ ...sourceConfig, config_version: 2,
         updated_at: new Date(Date.now() - 500).toISOString(), change_reference: 'TEST-UNRECORDED-ROTATION' }) });
@@ -812,6 +849,38 @@ test('active-runtime trust preflight rejects malformed, legacy-only, colliding, 
     assert.equal(noOpenLedger.available, false,
       'a well-formed file on disk is not effective anti-rollback evidence when the active process has not opened it');
     assert.ok(noOpenLedger.blockers.some(blocker => blocker.details?.some(item => item.code === 'AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE')));
+    fs.symlinkSync(installed.trustLedgerPath, installed.trustLedgerDescriptorPath);
+
+    const incompleteLedgerDirectory = path.join(path.dirname(installed.trustLedgerPath), 'incomplete-five-domain-fixture');
+    fs.mkdirSync(incompleteLedgerDirectory, { recursive: true, mode: 0o700 });
+    const incompleteLedgerPath = path.join(incompleteLedgerDirectory, 'agg-trust-configuration.db');
+    const incompleteLedger = new DatabaseSync(incompleteLedgerPath);
+    initializeAdaptiveGoalTrustConfigurationLedger(incompleteLedger);
+    const requiredSpecs = [
+      ['AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', 'goal_idea_verifier', 'agg.goal_idea_graph.verify'],
+      ['AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', 'action_intent_reviewer', 'agg.action_intent.review'],
+      ['AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON', 'execution_approval_policy', 'agg.approval.policy'],
+      ['AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON', 'action_intent_maker', 'agg.action_intent.propose'],
+      ['AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON', 'execution_approval', 'agg.execution.approve']
+    ];
+    for (const [environmentKey, domain, scope] of requiredSpecs.filter(([, domain]) => domain !== 'execution_approval')) {
+      const configuration = loadAdaptiveGoalTrustConfiguration({
+        configJsonEnv: environmentKey,
+        providerEnv: environmentKey.replace('_TRUST_CONFIG_JSON', '_PROVIDER_ID'),
+        publicKeyEnv: environmentKey.replace('_TRUST_CONFIG_JSON', '_TRUST_ROOT_PUBLIC_KEY_PEM'),
+        domain, scope, environment: baseline
+      });
+      assertAndRecordAdaptiveGoalTrustConfiguration(incompleteLedger, configuration);
+    }
+    incompleteLedger.close();
+    fs.unlinkSync(installed.trustLedgerDescriptorPath);
+    fs.symlinkSync(incompleteLedgerPath, installed.trustLedgerDescriptorPath);
+    const missingLedgerDomain = inspect(baseline);
+    assert.equal(missingLedgerDomain.available, false,
+      'a configured fifth domain with no exact anti-rollback ledger record must block rollout');
+    assert.equal(missingLedgerDomain.trustLedger.domains.execution_approval.status, 'not_yet_observed');
+    assert.ok(missingLedgerDomain.trustLedger.blockers.some(blocker => blocker.code === 'AGG_TRUST_CONFIG_LEDGER_CONFIG_NOT_RECORDED'));
+    fs.unlinkSync(installed.trustLedgerDescriptorPath);
     fs.symlinkSync(installed.trustLedgerPath, installed.trustLedgerDescriptorPath);
 
     const malformed = inspect({ ...baseline, AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON: '{' });

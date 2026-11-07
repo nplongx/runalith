@@ -232,6 +232,8 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v117.json',
       'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v118.json',
       'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v119.json',
+      ...Array.from({ length: 28 }, (_, index) =>
+        `benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v${120 + index}.json`),
       'tests/test-adaptive-goal-benchmark.mjs',
       'tests/test-mcp-eof-shutdown-framing-20261017.js',
       'tests/test-mcp-shutdown-backpressure-deadline-20261017.js',
@@ -249,7 +251,9 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       'tests/test-plugin-workflow-benchmark-phase1-protocol.mjs',
       'scripts/test-mcpb-candidate.mjs',
       'src/runtime/strict-json.js', 'src/runtime/adaptive-goal-trust-configuration.js',
+      'src/runtime/adaptive-goal-trust-domains.js', 'src/runtime/adaptive-goal-approval-subsystem.js', 'src/runtime/job-store.js',
       'tests/test-adaptive-goal-trust-configuration.mjs', 'tests/test-adaptive-goal-trust-entrypoint.mjs',
+      'tests/test-adaptive-goal-approval-subsystem.mjs', 'tests/test-adaptive-goal-store-dispatch-guard.mjs',
       'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v1.json',
       'benchmarks/plugin-workflow-benchmark/scenario-execution-spec-v2.json',
       'docs/plugin-workflow-benchmark-plan.md',
@@ -288,6 +292,11 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
       '.github/workflows/runalith-verification-attestation-signer.yml',
       'docs/runalith-provenance-release-trust-design.md', 'docs/runalith-hosted-builder-pipeline.md',
       'docs/runalith-release-evidence-verifier.md', 'docs/agg-production-trust-provisioning-runbook.md',
+      'docs/agg-external-checkpoint-v2-design-20261030.md',
+      'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v148.json',
+      'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v149.json',
+      ...Array.from({ length: 6 }, (_, index) =>
+        `benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v${150 + index}.json`),
       'scripts/build-agg-readiness-dossier.mjs', 'tests/test-agg-readiness-dossier.mjs', 'tests/test-package-no-overwrite.js',
       'scripts/build-agg-live-remediation-plan.mjs', 'tests/test-agg-live-remediation-plan.mjs',
       'scripts/verify-agg-acceptance-consistency.mjs', 'tests/test-agg-acceptance-consistency.mjs',
@@ -319,6 +328,20 @@ test('evidence-pack verifier binds every file, source snapshot, candidate bytes,
     ];
     for (const relative of sourceInputs) {
       writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
+    }
+    const sourceAlignmentScript = fs.readFileSync(path.join(repoRoot, 'scripts/verify-mcpb-source-alignment.mjs'), 'utf8');
+    const buildInputStart = sourceAlignmentScript.indexOf('const BUILD_INPUT_PATHS = Object.freeze([');
+    const buildInputEnd = sourceAlignmentScript.indexOf(']);', buildInputStart);
+    assert.ok(buildInputStart >= 0 && buildInputEnd > buildInputStart,
+      'source alignment verifier must expose frozen build-input paths');
+    const frozenBuildInputs = [...sourceAlignmentScript.slice(buildInputStart, buildInputEnd).matchAll(/'([^']+)'/g)]
+      .map(match => match[1]);
+    assert.equal(new Set(frozenBuildInputs).size, frozenBuildInputs.length,
+      'frozen source-alignment build inputs must not contain duplicates');
+    for (const relative of frozenBuildInputs) {
+      if (!fs.existsSync(path.join(sourceRoot, relative))) {
+        writeFile(sourceRoot, relative, Buffer.from(`synthetic build input fixture: ${relative}\n`, 'utf8'));
+      }
     }
     // These paths are deliberately owner-maintained, local-only source overlays.
     // The unit test uses synthetic content to exercise archive/hash binding; it

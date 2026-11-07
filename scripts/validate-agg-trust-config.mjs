@@ -5,14 +5,15 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { adaptiveGoalTrustConfigurationStatus, assertAdaptiveGoalTrustDomainsDisjoint,
   loadAdaptiveGoalTrustConfiguration } from '../src/runtime/adaptive-goal-trust-configuration.js';
+import { ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS, assertAdaptiveGoalTrustDomainConfigurationsDisjoint } from '../src/runtime/adaptive-goal-trust-domains.js';
 
 function parseArgs(argv) {
   const parsed = { domain: null, config: null, peerConfig: null, requirePeerConfig: false,
-    effectiveHostPid: null, effectiveHostEntrypoint: null };
+    trustConfigs: [], effectiveHostPid: null, effectiveHostEntrypoint: null };
   for (let index = 0; index < argv.length; index++) {
     const key = argv[index];
     if (key === '--require-peer-config') { parsed.requirePeerConfig = true; continue; }
-    if (!['--domain', '--config', '--peer-config', '--effective-host-pid', '--effective-host-entrypoint'].includes(key)) {
+    if (!['--domain', '--config', '--peer-config', '--effective-host-pid', '--effective-host-entrypoint', '--trust-config'].includes(key)) {
       throw new Error(`unsupported argument: ${key}`);
     }
     const value = argv[++index];
@@ -22,11 +23,28 @@ function parseArgs(argv) {
     else if (key === '--peer-config') parsed.peerConfig = value;
     else if (key === '--effective-host-pid') parsed.effectiveHostPid = value;
     else if (key === '--effective-host-entrypoint') parsed.effectiveHostEntrypoint = value;
+    else if (key === '--trust-config') {
+      const separator = value.indexOf('=');
+      if (separator < 1 || separator === value.length - 1) throw new Error('--trust-config must be DOMAIN=/absolute/or/relative/path and may be repeated');
+      parsed.trustConfigs.push({ domain: value.slice(0, separator), config: value.slice(separator + 1) });
+    }
   }
-  if (!['goal_idea_verifier', 'action_intent_reviewer'].includes(parsed.domain)) {
-    throw new Error('--domain must be goal_idea_verifier or action_intent_reviewer');
+  const fiveDomainMode = parsed.trustConfigs.length > 0;
+  if (fiveDomainMode) {
+    const expected = new Set(ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS.map(spec => spec.domain));
+    const observed = parsed.trustConfigs.map(item => item.domain);
+    if (observed.length !== expected.size || new Set(observed).size !== expected.size || observed.some(domain => !expected.has(domain))) {
+      throw new Error('--trust-config must provide each of the five trust domains exactly once');
+    }
+    if (parsed.config || parsed.peerConfig || parsed.domain) {
+      throw new Error('five-domain --trust-config mode cannot be combined with legacy --domain/--config/--peer-config options');
+    }
+  } else {
+    if (!['goal_idea_verifier', 'action_intent_reviewer'].includes(parsed.domain)) {
+      throw new Error('--domain must be goal_idea_verifier or action_intent_reviewer for legacy pair validation');
+    }
+    if (!parsed.config) throw new Error('--config must name an administrator-provisioned JSON trust configuration file');
   }
-  if (!parsed.config) throw new Error('--config must name an administrator-provisioned JSON trust configuration file');
   const effectiveRequested = parsed.effectiveHostPid !== null || parsed.effectiveHostEntrypoint !== null;
   if (effectiveRequested) {
     if (!/^\d+$/.test(parsed.effectiveHostPid || '') || Number(parsed.effectiveHostPid) < 1 || !Number.isSafeInteger(Number(parsed.effectiveHostPid))) {
@@ -35,34 +53,79 @@ function parseArgs(argv) {
     if (!parsed.effectiveHostEntrypoint || !path.isAbsolute(parsed.effectiveHostEntrypoint)) {
       throw new Error('--effective-host-entrypoint must be the absolute entrypoint reported for the active host process');
     }
-    if (!parsed.peerConfig || !parsed.requirePeerConfig) {
-      throw new Error('effective host inspection requires --peer-config and --require-peer-config to verify both trust domains');
+    if (fiveDomainMode !== true) {
+      throw new Error('effective host inspection requires all five repeated --trust-config DOMAIN=PATH arguments');
     }
   }
   return parsed;
 }
 
-const TRUST_DOMAINS = Object.freeze({
-  goal_idea_verifier: { configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
-    providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID', publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM',
-    domain: 'goal_idea_verifier', scope: 'agg.goal_idea_graph.verify' },
-  action_intent_reviewer: { configJsonEnv: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON',
-    providerEnv: 'AGG_REVIEW_IDENTITY_PROVIDER_ID', publicKeyEnv: 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM',
-    domain: 'action_intent_reviewer', scope: 'agg.action_intent.review' }
-});
+const TRUST_DOMAINS = Object.freeze(Object.fromEntries(ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS.map(spec => [spec.domain, spec])));
 
-function readEffectiveHost(pid, procRoot) {
+function readProcIdentity(pid, procRoot, readProcFile) {
+  const statPath = path.join(path.resolve(procRoot), String(pid), 'stat');
+  const statText = String(readProcFile(statPath, 'utf8'));
+  const openParen = statText.indexOf('(');
+  const closeParen = statText.lastIndexOf(')');
+  const observedPid = openParen > 0 ? Number(statText.slice(0, openParen).trim()) : NaN;
+  const fieldsAfterCommand = closeParen > openParen ? statText.slice(closeParen + 2).trim().split(/\s+/) : [];
+  const parentPid = Number(fieldsAfterCommand[1]); // /proc/<pid>/stat field 4 (ppid)
+  const startTimeTicks = fieldsAfterCommand[19] || null; // field 22 is stable for one process lifetime
+  if (observedPid !== pid || !Number.isSafeInteger(parentPid) || parentPid < 1 ||
+      !/^\d+$/.test(startTimeTicks || '')) {
+    throw Object.assign(new Error(`process ${pid} has an unreadable or malformed /proc stat identity`),
+      { code: 'AGG_TRUST_CONFIG_HOST_PROCESS_IDENTITY_UNVERIFIED' });
+  }
+  return { pid, parentPid, startTimeTicks };
+}
+
+function readProcCommandLine(pid, procRoot, readProcFile) {
+  return readProcFile(path.join(path.resolve(procRoot), String(pid), 'cmdline'))
+    .toString('utf8').split('\0').filter(Boolean);
+}
+
+function readProcExecutableIdentity(pid, procRoot) {
+  const executablePath = path.join(path.resolve(procRoot), String(pid), 'exe');
+  try {
+    const link = fs.readlinkSync(executablePath);
+    const stat = fs.statSync(executablePath, { bigint: true });
+    if (!stat.isFile()) throw new Error('process executable is not a regular file');
+    return { link, device: stat.dev.toString(), inode: stat.ino.toString() };
+  } catch (error) {
+    throw Object.assign(new Error(`process ${pid} executable identity is unavailable: ${String(error?.message || error)}`),
+      { code: 'AGG_TRUST_CONFIG_HOST_PROCESS_IDENTITY_UNVERIFIED' });
+  }
+}
+
+function readEffectiveHost(pid, procRoot, readProcFile = fs.readFileSync) {
   const processDirectory = path.join(path.resolve(procRoot), String(pid));
-  const cmdline = fs.readFileSync(path.join(processDirectory, 'cmdline')).toString('utf8').split('\0').filter(Boolean);
-  const statusText = fs.readFileSync(path.join(processDirectory, 'status'), 'utf8');
+  // A numeric PID can be recycled while the separate proc files are read. Pin
+  // both the target and its claimed host parent to Linux start-time ticks, then
+  // re-read both identities, executable objects, command lines and target
+  // environment after inspection.
+  const processIdentityBefore = readProcIdentity(pid, procRoot, readProcFile);
+  const processExecutableBefore = readProcExecutableIdentity(pid, procRoot);
+  const cmdline = readProcCommandLine(pid, procRoot, readProcFile);
+  const statusText = readProcFile(path.join(processDirectory, 'status'), 'utf8');
   const ppid = Number(statusText.match(/^PPid:\s*(\d+)$/m)?.[1]);
   if (!Number.isSafeInteger(ppid) || ppid < 1) throw Object.assign(new Error('active host process parent PID is unavailable'), { code: 'AGG_TRUST_CONFIG_HOST_OWNER_UNVERIFIED' });
-  const parentArgs = fs.readFileSync(path.join(path.resolve(procRoot), String(ppid), 'cmdline')).toString('utf8').split('\0').filter(Boolean);
+  if (ppid !== processIdentityBefore.parentPid) {
+    throw Object.assign(new Error('active host process parent changed during effective trust inspection'),
+      { code: 'AGG_TRUST_CONFIG_HOST_PROCESS_IDENTITY_CHANGED' });
+  }
+  const parentIdentityBefore = readProcIdentity(ppid, procRoot, readProcFile);
+  const parentExecutableBefore = readProcExecutableIdentity(ppid, procRoot);
+  const parentExecutableName = path.basename(parentExecutableBefore.link);
+  if (parentExecutableName !== 'chat-on-steroids') {
+    throw Object.assign(new Error('effective trust configuration inspection parent executable is not the Chat On Steroids host binary'),
+      { code: 'AGG_TRUST_CONFIG_HOST_OWNER_UNVERIFIED' });
+  }
+  const parentArgs = readProcCommandLine(ppid, procRoot, readProcFile);
   const parentExecutable = parentArgs[0] || '';
   const parentLooksLikeHost = /chat-on-steroids/i.test(path.basename(parentExecutable)) || /chat on steroids/i.test(parentExecutable);
   if (!parentLooksLikeHost) throw Object.assign(new Error('effective trust configuration inspection target is not owned by an identifiable Chat On Steroids host process'),
     { code: 'AGG_TRUST_CONFIG_HOST_OWNER_UNVERIFIED' });
-  const rawEnvironment = fs.readFileSync(path.join(processDirectory, 'environ'));
+  const rawEnvironment = readProcFile(path.join(processDirectory, 'environ'));
   const wanted = new Set(Object.values(TRUST_DOMAINS).flatMap(item => [item.configJsonEnv, item.providerEnv, item.publicKeyEnv]));
   const environment = {};
   for (const item of rawEnvironment.toString('utf8').split('\0')) {
@@ -87,10 +150,43 @@ function readEffectiveHost(pid, procRoot) {
     throw Object.assign(new Error(`active host entrypoint is unavailable or changed: ${String(error?.message || error)}`),
       { code: 'AGG_TRUST_CONFIG_HOST_ENTRYPOINT_MISMATCH' });
   }
-  return { environment, entrypoint: absoluteEntrypoint, ppid, parentExecutable, parentLooksLikeHost };
+  const parentIdentityAfter = readProcIdentity(ppid, procRoot, readProcFile);
+  const processIdentityAfter = readProcIdentity(pid, procRoot, readProcFile);
+  const processStatusAfter = readProcFile(path.join(processDirectory, 'status'), 'utf8');
+  const parentPidAfter = Number(processStatusAfter.match(/^PPid:\s*(\d+)$/m)?.[1]);
+  const processCommandLineAfter = readProcCommandLine(pid, procRoot, readProcFile);
+  const parentCommandLineAfter = readProcCommandLine(ppid, procRoot, readProcFile);
+  const rawEnvironmentAfter = readProcFile(path.join(processDirectory, 'environ'));
+  const processExecutableAfter = readProcExecutableIdentity(pid, procRoot);
+  const parentExecutableAfter = readProcExecutableIdentity(ppid, procRoot);
+  if (processIdentityBefore.startTimeTicks !== processIdentityAfter.startTimeTicks ||
+      processIdentityBefore.parentPid !== processIdentityAfter.parentPid ||
+      parentIdentityBefore.startTimeTicks !== parentIdentityAfter.startTimeTicks ||
+      parentPidAfter !== ppid || JSON.stringify(cmdline) !== JSON.stringify(processCommandLineAfter) ||
+      JSON.stringify(parentArgs) !== JSON.stringify(parentCommandLineAfter) ||
+      JSON.stringify(processExecutableBefore) !== JSON.stringify(processExecutableAfter) ||
+      JSON.stringify(parentExecutableBefore) !== JSON.stringify(parentExecutableAfter) ||
+      !Buffer.isBuffer(rawEnvironmentAfter) || !rawEnvironment.equals(rawEnvironmentAfter)) {
+    throw Object.assign(new Error('active host or parent process identity, executable, command line, or effective environment changed while being inspected'),
+      { code: 'AGG_TRUST_CONFIG_HOST_PROCESS_IDENTITY_CHANGED' });
+  }
+  return {
+    environment, entrypoint: absoluteEntrypoint, ppid, parentExecutable, parentLooksLikeHost,
+    // The basename/cmdline checks above are only a plausibility filter. They
+    // do not authenticate executable provenance: an unrelated binary can be
+    // copied or renamed to this basename. No host-admin trust manifest or
+    // signed launcher attestation is currently provisioned for this validator.
+    parentExecutableIdentity: {
+      basename: parentExecutableName,
+      device: parentExecutableBefore.device,
+      inode: parentExecutableBefore.inode,
+      authenticated: false,
+      status: 'UNVERIFIED_NO_EXTERNAL_HOST_IDENTITY_ANCHOR'
+    }
+  };
 }
 
-export function main(argv = process.argv.slice(2), { procRoot = '/proc' } = {}) {
+export function main(argv = process.argv.slice(2), { procRoot = '/proc', readProcFile = fs.readFileSync } = {}) {
   const args = parseArgs(argv);
   function readConfigFile(inputPath) {
     const configPath = path.resolve(inputPath);
@@ -127,6 +223,103 @@ export function main(argv = process.argv.slice(2), { procRoot = '/proc' } = {}) 
     } finally {
       fs.closeSync(descriptor);
     }
+  }
+  if (args.trustConfigs.length) {
+    const supplied = new Map(args.trustConfigs.map(item => [item.domain, item.config]));
+    const expectedConfigurations = [];
+    const domainFiles = {};
+    for (const spec of ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS) {
+      const { configPath: suppliedPath, contents } = readConfigFile(supplied.get(spec.domain));
+      const configuration = loadAdaptiveGoalTrustConfiguration({
+        configJsonEnv: spec.configJsonEnv, providerEnv: spec.providerEnv, publicKeyEnv: spec.publicKeyEnv,
+        domain: spec.domain, scope: spec.scope, environment: { [spec.configJsonEnv]: contents }
+      });
+      if (configuration.configurationSource !== 'admin_json_environment' || configuration.configVersion < 1 || configuration.available !== true) {
+        throw Object.assign(new Error(`trust domain ${spec.domain} must have a usable versioned administrator JSON configuration`),
+          { code: 'AGG_TRUST_DOMAIN_CONFIGURATION_INVALID' });
+      }
+      expectedConfigurations.push(configuration);
+      domainFiles[spec.domain] = {
+        configPath: suppliedPath,
+        fileSha256: createHash('sha256').update(contents).digest('hex'),
+        ...adaptiveGoalTrustConfigurationStatus(configuration)
+      };
+    }
+    const separation = assertAdaptiveGoalTrustDomainConfigurationsDisjoint(expectedConfigurations);
+    let effectiveHostVerification = null;
+    if (args.effectiveHostPid !== null) {
+      try {
+        const observed = readEffectiveHost(Number(args.effectiveHostPid), procRoot, readProcFile);
+        if (observed.entrypoint !== path.resolve(args.effectiveHostEntrypoint)) {
+          effectiveHostVerification = { result: 'BLOCKED', code: 'AGG_TRUST_CONFIG_HOST_ENTRYPOINT_MISMATCH',
+            message: 'the supplied process does not run the exact expected versioned Runalith entrypoint',
+            pid: Number(args.effectiveHostPid), observedEntryPoint: observed.entrypoint,
+            expectedEntryPoint: path.resolve(args.effectiveHostEntrypoint) };
+        } else {
+          const effectiveConfigurations = [];
+          const domainResults = {};
+          for (let index = 0; index < ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS.length; index++) {
+            const spec = ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS[index];
+            const expected = expectedConfigurations[index];
+            const envValue = observed.environment[spec.configJsonEnv];
+            const configJsonVariablePresent = Object.hasOwn(observed.environment, spec.configJsonEnv);
+            const configJsonNonEmpty = typeof envValue === 'string' && envValue.trim() !== '';
+            let actual = null;
+            let blocker = null;
+            try {
+              actual = loadAdaptiveGoalTrustConfiguration({ ...spec, environment: observed.environment });
+              if (actual.available === true) effectiveConfigurations.push(actual);
+              if (actual.available !== true) blocker = 'AGG_TRUST_CONFIG_NOT_EFFECTIVE_ON_HOST';
+              else if (actual.configurationSource !== 'admin_json_environment') blocker = 'AGG_TRUST_CONFIG_SOURCE_NOT_HOST_JSON';
+              else if (actual.configVersion !== expected.configVersion) blocker = 'AGG_TRUST_CONFIG_VERSION_MISMATCH_ON_HOST';
+              else if (actual.providerId !== expected.providerId) blocker = 'AGG_TRUST_CONFIG_PROVIDER_MISMATCH_ON_HOST';
+              else if (actual.configurationFingerprint !== expected.configurationFingerprint) blocker = 'AGG_TRUST_CONFIG_FINGERPRINT_MISMATCH_ON_HOST';
+            } catch (error) { blocker = error?.code || 'AGG_TRUST_CONFIG_NOT_EFFECTIVE_ON_HOST'; }
+            domainResults[spec.domain] = {
+              configJsonVariablePresent, configJsonNonEmpty,
+              providerIdVariablePresent: Object.hasOwn(observed.environment, spec.providerEnv),
+              legacyPublicRootVariablePresent: Object.hasOwn(observed.environment, spec.publicKeyEnv),
+              configured: configJsonNonEmpty, matchesSuppliedFile: blocker === null,
+              expectedConfigVersion: expected.configVersion, effectiveConfigVersion: actual?.configVersion ?? null,
+              expectedProviderId: expected.providerId, effectiveProviderId: actual?.providerId ?? null,
+              expectedConfigurationFingerprint: expected.configurationFingerprint,
+              effectiveConfigurationFingerprint: actual?.configurationFingerprint ?? null,
+              blocker
+            };
+          }
+          let effectiveSeparation = { verified: false, status: 'EFFECTIVE_FIVE_DOMAIN_SEPARATION_BLOCKED' };
+          if (effectiveConfigurations.length === ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS.length) {
+            try {
+              effectiveSeparation = { verified: true, status: 'EFFECTIVE_FIVE_DOMAIN_SEPARATION_VERIFIED',
+                ...assertAdaptiveGoalTrustDomainConfigurationsDisjoint(effectiveConfigurations) };
+            } catch (error) {
+              effectiveSeparation = { verified: false, status: 'EFFECTIVE_FIVE_DOMAIN_SEPARATION_BLOCKED',
+                code: error?.code || 'AGG_TRUST_DOMAIN_SEPARATION_FAILED' };
+            }
+          }
+          const domainsVerified = Object.values(domainResults).every(item => item.matchesSuppliedFile) && effectiveSeparation.verified;
+          const hostIdentityVerified = observed.parentExecutableIdentity.authenticated === true;
+          const verified = domainsVerified && hostIdentityVerified;
+          effectiveHostVerification = { result: verified ? 'PASS' : 'BLOCKED',
+            ...(verified ? {} : { code: !domainsVerified
+              ? effectiveSeparation.code || Object.values(domainResults).find(item => !item.matchesSuppliedFile)?.blocker || 'AGG_TRUST_CONFIG_NOT_EFFECTIVE_ON_HOST'
+              : 'AGG_TRUST_CONFIG_HOST_IDENTITY_AUTHORITY_REQUIRED' }),
+            pid: Number(args.effectiveHostPid), entryPoint: observed.entrypoint, parentLooksLikeHost: observed.parentLooksLikeHost,
+            parentExecutableIdentity: observed.parentExecutableIdentity,
+            checkedAt: new Date().toISOString(), domains: domainResults, effectiveSeparation,
+            note: 'Process environment and five-domain separation may match, but parent executable basename/cmdline are not an authenticated host identity. A host-admin signed executable identity manifest or signed launcher attestation binding PID, start time, executable digest and active entrypoint is required. This inspection also does not verify active trust-ledger high-water rows or the external monotonic checkpoint.' };
+        }
+      } catch (error) {
+        effectiveHostVerification = { result: 'BLOCKED', code: error?.code || 'AGG_TRUST_CONFIG_EFFECTIVE_HOST_INSPECTION_FAILED',
+          message: String(error?.message || error), pid: Number(args.effectiveHostPid) };
+      }
+    }
+    const result = { result: effectiveHostVerification?.result === 'BLOCKED' ? 'BLOCKED' : 'PASS',
+      validationScope: 'ALL_FIVE_AGG_TRUST_DOMAINS', domains: domainFiles, separation,
+      effectiveHostVerification, productionTrustEstablished: false, externalCheckpointVerified: false };
+    console.log(JSON.stringify(result, null, 2));
+    if (result.result !== 'PASS') process.exitCode = 3;
+    return;
   }
   if (args.requirePeerConfig && !args.peerConfig) {
     console.log(JSON.stringify({ result: 'BLOCKED', code: 'AGG_TRUST_CONFIG_PAIR_REQUIRED',
@@ -254,12 +447,17 @@ export function main(argv = process.argv.slice(2), { procRoot = '/proc' } = {}) 
               code: error?.code || 'AGG_TRUST_CONFIG_EFFECTIVE_PAIR_UNAVAILABLE' };
           }
         }
-        const verified = Object.values(domainResults).every(item => item.matchesSuppliedFile) && effectivePairVerification.verified;
+        const domainsVerified = Object.values(domainResults).every(item => item.matchesSuppliedFile) && effectivePairVerification.verified;
+        const hostIdentityVerified = observed.parentExecutableIdentity.authenticated === true;
+        const verified = domainsVerified && hostIdentityVerified;
         effectiveHostVerification = { result: verified ? 'PASS' : 'BLOCKED',
-          ...(verified ? {} : { code: effectivePairVerification.code || Object.values(domainResults).find(item => !item.matchesSuppliedFile)?.blocker || 'AGG_TRUST_CONFIG_NOT_EFFECTIVE_ON_HOST' }),
+          ...(verified ? {} : { code: !domainsVerified
+            ? effectivePairVerification.code || Object.values(domainResults).find(item => !item.matchesSuppliedFile)?.blocker || 'AGG_TRUST_CONFIG_NOT_EFFECTIVE_ON_HOST'
+            : 'AGG_TRUST_CONFIG_HOST_IDENTITY_AUTHORITY_REQUIRED' }),
           pid: Number(args.effectiveHostPid), entryPoint: observed.entrypoint, parentLooksLikeHost: observed.parentLooksLikeHost,
+          parentExecutableIdentity: observed.parentExecutableIdentity,
           checkedAt: new Date().toISOString(), domains: domainResults, effectivePairVerification,
-          note: 'This read-only process-environment comparison does not verify the active trust-ledger high-water rows or external monotonic checkpoint; rollout preflight must independently verify both.' };
+          note: 'Process environment and pair separation may match, but parent executable basename/cmdline are not an authenticated host identity. A host-admin signed executable identity manifest or signed launcher attestation binding PID, start time, executable digest and active entrypoint is required. This inspection also does not verify the active trust-ledger high-water rows or external monotonic checkpoint.' };
       }
     } catch (error) {
       effectiveHostVerification = { result: 'BLOCKED', code: error?.code || 'AGG_TRUST_CONFIG_EFFECTIVE_HOST_INSPECTION_FAILED',

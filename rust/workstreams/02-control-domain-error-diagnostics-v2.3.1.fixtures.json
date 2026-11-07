@@ -1,0 +1,1052 @@
+{
+  "fixture_set": "WS2-Control-Domain-Error-Diagnostics-v2.3.1",
+  "status": "DRAFT_NOT_RATIFIED",
+  "schema_version": 24,
+  "supersedes_fixture_sha256": "6a36601fdef914ed3d988b1bd86b8b2156349e2d38ac0ed9462f7d1299ce37a4",
+  "previous_validator_sha256": "43c59c097e2ff56f8503f3e58e5ed6875de2c66385e6defd4af5c7f7b798e7eb",
+  "ws6_source": {
+    "governance_receipt_rs_sha256": "d5f682af74da93dd4899a4cdd31d791382eb580a7f9eeaa3e392c9f0be8bbe09",
+    "signed_envelope_rs_sha256": "1e7b638efa2577d1769254abe444ca18c77ea944df65d2cd526307b86f7c572f",
+    "trust_error_code_source": "rust/crates/runalith-trust/src/lib.rs",
+    "inventory_scope": "Bounded source attribution across GovernanceReceipt, SignedEnvelope, ApprovalDecision, ApprovalPolicy and TrustError/TrustConfig/TrustLedger paths. origin_sources identify direct emission/mapping only; propagated_through lists callsites that may return a lower-level TrustError unchanged; test_assertion_sites are never counted as origins. Not a complete inventory of runalith-trust.",
+    "trust_error_code_source_sha256": "5fba5f3c618609c72e354e35488c92baf5b5c753754cda45f2c1e0484107be6f",
+    "approval_decision_rs_sha256": "c2a91acff103f58ac5746db520588c3308a0394437ebb75256dc1b4351969fc3",
+    "approval_policy_rs_sha256": "13235b7af591435904c5f2ea7c981932fc90e87c585a4023e0ee23b14a839775",
+    "trust_ledger_rs_sha256": "ffc6847c31c91cdfd65b5a8763762f6215a29f814cea05cefd572bfd9e008418",
+    "trust_config_rs_sha256": "a86b6d1b82882522149188a87373c25e5e36f81b704faea8f1057f761b367d02"
+  },
+  "field_contract": {
+    "domain_code": "Exact WS2 producer-domain category; does not carry verifier-specific spelling.",
+    "cause_code": "Exact case-sensitive source TrustError::code() value; preserve unchanged.",
+    "transport_rule": "W8 carries domain_code and cause_code as separate opaque fields; neither replaces, aliases, flattens or derives HTTP/retry semantics from the other.",
+    "automatic_retry_for_verifier_failure": false,
+    "valid_signed_rejected": "A verified Rejected receipt is a domain decision, not authentication/transport failure and never authorizes admission."
+  },
+  "cases": [
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID",
+      "domain_code": "MALFORMED_REQUEST",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_CLOCK_INVALID",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "host_clock_at_signing",
+        "host_clock_at_verification"
+      ],
+      "previous_draft_domain_code": "EVIDENCE_UNRESOLVED",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_BINDING_INVALID",
+      "domain_code": "SUBJECT_MISMATCH",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_IDENTITY_UNAUTHORIZED",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_TIME_INVALID",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "signed_receipt_timestamp_parse"
+      ],
+      "previous_draft_domain_code": "EVIDENCE_UNRESOLVED",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNER_KEY_MISMATCH",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "signer_selected_key_and_root_binding"
+      ],
+      "previous_draft_domain_code": "AUTHENTICATION_FAILED",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_CANONICALIZATION_FAILED",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "builder_preimage",
+        "verifier_payload",
+        "verifier_request",
+        "verifier_subject",
+        "verifier_envelope",
+        "receipt_digest"
+      ],
+      "previous_draft_domain_code": "EVIDENCE_UNRESOLVED",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_ENVELOPE_INVALID",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verify_input_closed_authenticator_dto_parse",
+        "verify_input_signature_metadata_binding"
+      ],
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "483-505",
+          "function": "verify_governance_approval_receipt",
+          "role": "closed-authenticator-dto-parse-and-metadata-binding"
+        }
+      ],
+      "propagated_sites": [],
+      "previous_draft_domain_code": "AUTHENTICATION_FAILED"
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_TRUST_SNAPSHOT_MISMATCH",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verifier_trust_snapshot_binding"
+      ],
+      "previous_draft_domain_code": "SUBJECT_MISMATCH",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_PAYLOAD_MISMATCH",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verifier_signed_payload_integrity"
+      ],
+      "previous_draft_domain_code": "SUBJECT_MISMATCH",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_DIGEST_MISMATCH",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verifier_request_subject_or_payload_integrity"
+      ],
+      "previous_draft_domain_code": "SUBJECT_MISMATCH",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_BINDING_MISMATCH",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verifier_key_root_nonce_binding"
+      ],
+      "previous_draft_domain_code": "SUBJECT_MISMATCH",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_DIGEST_MISMATCH",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verifier_signed_envelope_integrity"
+      ],
+      "previous_draft_domain_code": "SUBJECT_MISMATCH",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_LEDGER_UNAVAILABLE",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNKNOWN",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_CONFLICT",
+      "domain_code": "IDEMPOTENCY_CONFLICT",
+      "resolution": "CONFLICT",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_INVALID",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "governance_receipt.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [
+        "governance_receipt.rs:976"
+      ],
+      "operation_phases": [
+        "host_signer_output_signature_verification"
+      ],
+      "previous_draft_domain_code": "AUTHENTICATION_FAILED",
+      "origin_sites": [
+        {
+          "path": "governance_receipt.rs",
+          "lines": "228-243",
+          "function": "build_governance_receipt_authenticator_v1",
+          "role": "host-signer-output-signature-validation"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_INVALID",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "signed_envelope.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [
+        "governance_receipt.rs:1047",
+        "approval_decision.rs:1665"
+      ],
+      "operation_phases": [
+        "verify_input_signed_envelope_signature"
+      ],
+      "origin_sites": [
+        {
+          "path": "signed_envelope.rs",
+          "lines": "186-190",
+          "function": "verify_signed_envelope",
+          "role": "caller-supplied-signed-envelope-signature-verification"
+        }
+      ],
+      "propagated_sites": [],
+      "phase_domain_code": {
+        "verify_input_signed_envelope_signature": "AUTHENTICATION_FAILED"
+      }
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_NOT_OBSERVED",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNKNOWN",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "trust_ledger.rs"
+      ],
+      "propagated_through": [
+        "approval_decision.rs",
+        "approval_policy.rs",
+        "governance_receipt.rs",
+        "signed_envelope.rs"
+      ],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "trust_ledger.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": [
+        {
+          "path": "approval_decision.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "approval_policy.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        }
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_ROLLBACK",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "trust_ledger.rs"
+      ],
+      "propagated_through": [
+        "approval_decision.rs",
+        "approval_policy.rs",
+        "governance_receipt.rs",
+        "signed_envelope.rs"
+      ],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "trust_ledger.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": [
+        {
+          "path": "approval_decision.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "approval_policy.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        }
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_ROOT_OUTSIDE_VALIDITY",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "trust_config.rs"
+      ],
+      "propagated_through": [
+        "approval_decision.rs",
+        "approval_policy.rs",
+        "governance_receipt.rs",
+        "signed_envelope.rs"
+      ],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "trust_root_lifecycle"
+      ],
+      "previous_draft_domain_code": "AUTHORITY_UNAVAILABLE",
+      "origin_sites": [
+        {
+          "path": "trust_config.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": [
+        {
+          "path": "approval_decision.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "approval_policy.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        }
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_ROOT_REVOKED",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "trust_config.rs"
+      ],
+      "propagated_through": [
+        "approval_decision.rs",
+        "approval_policy.rs",
+        "governance_receipt.rs",
+        "signed_envelope.rs"
+      ],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "trust_root_lifecycle"
+      ],
+      "previous_draft_domain_code": "AUTHORITY_UNAVAILABLE",
+      "origin_sites": [
+        {
+          "path": "trust_config.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": [
+        {
+          "path": "approval_decision.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "approval_policy.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        }
+      ]
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "approval_policy.rs",
+        "approval_decision.rs",
+        "signed_envelope.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [
+        "signed_envelope.rs:324"
+      ],
+      "operation_phases": [
+        "signed_envelope_schema_kind_provider_scope_and_time_binding",
+        "signed_envelope_signature_encoding_and_canonicalization",
+        "approval_policy_closed_shape_validation",
+        "approval_decision_closed_shape_validation"
+      ],
+      "origin_sites": [
+        {
+          "path": "signed_envelope.rs",
+          "lines": "88-107",
+          "function": "verify_signed_envelope",
+          "role": "expected-scope-schema-kind-provider-binding"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "116-162",
+          "function": "verify_signed_envelope",
+          "role": "scope-time-root-signature-encoding-validation"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "171-197",
+          "function": "verify_signed_envelope",
+          "role": "signature-and-envelope-canonicalization"
+        },
+        {
+          "path": "approval_policy.rs",
+          "lines": "316-326",
+          "function": "exact_keys",
+          "role": "closed-policy-envelope-shape"
+        },
+        {
+          "path": "approval_decision.rs",
+          "lines": "918-930",
+          "function": "exact_keys",
+          "role": "closed-maker-or-decision-envelope-shape"
+        }
+      ],
+      "propagated_sites": [],
+      "previous_draft_domain_code": "AUTHENTICATION_FAILED"
+    },
+    {
+      "cause_code": "AGG_APPROVAL_EVIDENCE_NONCE_INVALID",
+      "domain_code": "MALFORMED_REQUEST",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "signed_envelope.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [],
+      "origin_sites": [
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "AGG_APPROVAL_CLOCK_INVALID",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "approval_decision.rs",
+        "signed_envelope.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "host_clock_at_verification"
+      ],
+      "previous_draft_domain_code": "EVIDENCE_UNRESOLVED",
+      "origin_sites": [
+        {
+          "path": "approval_decision.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_EXPIRED",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "signed_envelope.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verify_input_signed_envelope_time_window"
+      ],
+      "previous_draft_domain_code": "AUTHORITY_UNAVAILABLE",
+      "origin_sites": [
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_FUTURE_DATED",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "signed_envelope.rs"
+      ],
+      "propagated_through": [],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "verify_input_signed_envelope_time_window"
+      ],
+      "previous_draft_domain_code": "EVIDENCE_UNRESOLVED",
+      "origin_sites": [
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": []
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "lib.rs::TrustError::code()"
+      ],
+      "propagated_through": [
+        "trust_config.rs"
+      ],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "host_crypto_provider_unavailable"
+      ],
+      "previous_draft_domain_code": "AUTHORITY_UNAVAILABLE",
+      "origin_sites": [
+        {
+          "path": "lib.rs::TrustError::code()",
+          "lines": "93-101",
+          "function": "TrustError::code",
+          "role": "maps-OpenSSL-unavailable-crypto-errors"
+        }
+      ],
+      "propagated_sites": [
+        {
+          "path": "trust_config.rs",
+          "lines": "224-224",
+          "function": "TrustConfiguration::load_json",
+          "role": "public-key-parser-propagates-Crypto-error"
+        },
+        {
+          "path": "trust_config.rs",
+          "lines": "362-362",
+          "function": "TrustConfiguration::validate_integrity",
+          "role": "public-key-parser-propagates-Crypto-error"
+        }
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_PUBLIC_KEY_INVALID",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "lib.rs::TrustError::code()",
+        "trust_config.rs"
+      ],
+      "propagated_through": [
+        "trust_config.rs"
+      ],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "host_trust_configuration_key_parse"
+      ],
+      "previous_draft_domain_code": "AUTHENTICATION_FAILED",
+      "origin_sites": [
+        {
+          "path": "trust_config.rs",
+          "lines": "218-222",
+          "function": "TrustConfiguration::load_json",
+          "role": "direct-rejection-public-key-PEM-shape"
+        },
+        {
+          "path": "trust_config.rs",
+          "lines": "368-371",
+          "function": "TrustConfiguration::validate_integrity",
+          "role": "direct-rejection-key-fingerprint-binding"
+        },
+        {
+          "path": "lib.rs::TrustError::code()",
+          "lines": "93-101",
+          "function": "TrustError::code",
+          "role": "maps-TrustCryptoError-to-public-key-invalid"
+        }
+      ],
+      "propagated_sites": [
+        {
+          "path": "trust_config.rs",
+          "lines": "224-224",
+          "function": "TrustConfiguration::load_json",
+          "role": "Ed25519PublicKey-from-PEM-Crypto-error-propagates-to-TrustError-code"
+        },
+        {
+          "path": "trust_config.rs",
+          "lines": "362-362",
+          "function": "TrustConfiguration::validate_integrity",
+          "role": "Ed25519PublicKey-from-PEM-Crypto-error-propagates-to-TrustError-code"
+        }
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE",
+      "domain_code": null,
+      "resolution": "REVIEW_REQUIRED",
+      "mapping_status": "REVIEW_REQUIRED",
+      "automatic_retry": false,
+      "origin_sources": [
+        "lib.rs::TrustError::code()",
+        "trust_ledger.rs"
+      ],
+      "propagated_through": [
+        "approval_decision.rs",
+        "approval_policy.rs",
+        "governance_receipt.rs",
+        "signed_envelope.rs"
+      ],
+      "test_assertion_sites": [],
+      "operation_phases": [
+        "host_trust_ledger_storage"
+      ],
+      "previous_draft_domain_code": "AUTHORITY_UNAVAILABLE",
+      "origin_sites": [
+        {
+          "path": "lib.rs::TrustError::code()",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        },
+        {
+          "path": "trust_ledger.rs",
+          "lines": "source-hash-pinned",
+          "role": "direct-emitter-or-code-mapping"
+        }
+      ],
+      "propagated_sites": [
+        {
+          "path": "approval_decision.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "approval_policy.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "governance_receipt.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        },
+        {
+          "path": "signed_envelope.rs",
+          "lines": "source-hash-pinned",
+          "role": "unchanged-error-propagation"
+        }
+      ]
+    }
+  ],
+  "valid_rejected_receipt": {
+    "signature_and_subject_verified": true,
+    "decision": "Rejected",
+    "domain_code": null,
+    "cause_code": null,
+    "resolution": "REJECTED",
+    "admission_authorized": false,
+    "transport_error": false
+  },
+  "preservation_rules": [
+    "cause_code must equal exact case-sensitive source string; shortened aliases are invalid.",
+    "domain_code remains an independent WS2 category; it never replaces cause_code.",
+    "AUTHORITY_UNAVAILABLE retains exact cause_code and UNKNOWN/UNRESOLVED state.",
+    "Nonce conflict is IDEMPOTENCY_CONFLICT and never automatically retryable.",
+    "Invalid signature/issuer is not AUTHORITY_UNAVAILABLE.",
+    "A valid signed Rejected receipt is a domain decision, not an authentication or transport error."
+  ],
+  "approval_decision_source_inventory": {
+    "source": "rust/crates/runalith-trust/src/approval_decision.rs",
+    "source_sha256": "c2a91acff103f58ac5746db520588c3308a0394437ebb75256dc1b4351969fc3",
+    "emitted_codes_exclusive_to_mapped_inventory": [
+      "AGG_APPROVAL_BINDING_UNAVAILABLE",
+      "AGG_APPROVAL_DECISION_BINDING_MISMATCH",
+      "AGG_APPROVAL_DECISION_INVALID",
+      "AGG_APPROVAL_EVIDENCE_SCHEMA_UNSUPPORTED",
+      "AGG_APPROVAL_EVIDENCE_SHAPE_INVALID",
+      "AGG_APPROVAL_MAKER_BINDING_MISMATCH",
+      "AGG_APPROVAL_MAKER_CHECKER_VIOLATION",
+      "AGG_APPROVAL_NONCE_DUPLICATE",
+      "AGG_APPROVAL_NONCE_REPLAY",
+      "AGG_APPROVAL_POLICY_NOT_OBSERVED",
+      "AGG_APPROVAL_POLICY_REVIEWER_DUPLICATE",
+      "AGG_APPROVAL_POLICY_ROLLBACK",
+      "AGG_APPROVAL_POLICY_ROOT_UNTRUSTED",
+      "AGG_APPROVAL_POLICY_RULES_INVALID",
+      "AGG_APPROVAL_POLICY_VERSION_GAP",
+      "AGG_APPROVAL_POLICY_VERSION_REUSED",
+      "AGG_APPROVAL_QUORUM_NOT_MET",
+      "AGG_APPROVAL_REPLAY_LEDGER_UNVERIFIABLE",
+      "AGG_APPROVAL_REVIEWER_DUPLICATE",
+      "AGG_APPROVAL_VETO_REJECTED",
+      "AGG_TRUST_CONFIG_NOT_CONFIGURED"
+    ],
+    "emitted_codes_also_in_mapped_inventory": [
+      "AGG_APPROVAL_CLOCK_INVALID",
+      "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID"
+    ],
+    "test_assertion_only_overlap_with_mapped_inventory": [
+      "AGG_APPROVAL_SIGNATURE_INVALID"
+    ],
+    "note": "This partition distinguishes direct emitted codes in this source from literals found only in cfg(test) assertions. The three overlap entries are not all origins in approval_decision.rs: CLOCK and SIGNATURE_ENVELOPE_INVALID are emitted; SIGNATURE_INVALID is test assertion only."
+  },
+  "approval_policy_source_inventory": {
+    "source": "rust/crates/runalith-trust/src/approval_policy.rs",
+    "source_sha256": "13235b7af591435904c5f2ea7c981932fc90e87c585a4023e0ee23b14a839775",
+    "emitted_codes": [
+      "AGG_APPROVAL_POLICY_EXPIRED",
+      "AGG_APPROVAL_POLICY_QUORUM_UNREACHABLE",
+      "AGG_APPROVAL_POLICY_REVIEWER_DUPLICATE",
+      "AGG_APPROVAL_POLICY_REVIEWER_ROOT_UNTRUSTED",
+      "AGG_APPROVAL_POLICY_ROLE_QUORUM_UNREACHABLE",
+      "AGG_APPROVAL_POLICY_ROOT_DUPLICATE",
+      "AGG_APPROVAL_POLICY_RULES_INVALID",
+      "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID",
+      "AGG_TRUST_CONFIG_NOT_CONFIGURED"
+    ],
+    "mapped_inventory_overlap": [
+      "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID"
+    ],
+    "approval_decision_overlap": [
+      "AGG_TRUST_CONFIG_NOT_CONFIGURED",
+      "AGG_APPROVAL_POLICY_RULES_INVALID",
+      "AGG_APPROVAL_POLICY_REVIEWER_DUPLICATE",
+      "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID"
+    ],
+    "note": "ApprovalPolicy is a separate direct emitter. Its policy schema/config errors are inventoried but not automatically mapped into WS2 ControlFence domain codes.",
+    "approval_policy_decision_overlap": [
+      "AGG_TRUST_CONFIG_NOT_CONFIGURED",
+      "AGG_APPROVAL_POLICY_RULES_INVALID",
+      "AGG_APPROVAL_POLICY_REVIEWER_DUPLICATE",
+      "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID"
+    ]
+  },
+  "trust_source_origin_inventory": {
+    "trust_ledger": {
+      "source": "rust/crates/runalith-trust/src/trust_ledger.rs",
+      "sha256": "ffc6847c31c91cdfd65b5a8763762f6215a29f814cea05cefd572bfd9e008418",
+      "origin_codes": [
+        "AGG_TRUST_CONFIG_NOT_OBSERVED",
+        "AGG_TRUST_CONFIG_ROLLBACK"
+      ]
+    },
+    "trust_config": {
+      "source": "rust/crates/runalith-trust/src/trust_config.rs",
+      "sha256": "a86b6d1b82882522149188a87373c25e5e36f81b704faea8f1057f761b367d02",
+      "origin_codes": [
+        "AGG_TRUST_ROOT_OUTSIDE_VALIDITY",
+        "AGG_TRUST_ROOT_REVOKED"
+      ]
+    },
+    "trust_error_code": {
+      "source": "rust/crates/runalith-trust/src/lib.rs",
+      "sha256": "5fba5f3c618609c72e354e35488c92baf5b5c753754cda45f2c1e0484107be6f",
+      "mapping_codes": [
+        "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+        "AGG_TRUST_CONFIG_PUBLIC_KEY_INVALID",
+        "AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE"
+      ]
+    }
+  },
+  "source_attribution_rules": {
+    "origin_sources": "Source files/functions with direct rejection or exact TrustError::code mapping; use origin_sites for line/function precision.",
+    "propagated_through": "Call sites returning a lower-level TrustError unchanged; same file may be both origin and propagation only when distinct exact origin_sites and propagated_sites are given.",
+    "test_assertion_sites": "cfg(test) assertions containing a code literal; never counted as origins.",
+    "domain_mapping": "A proposed WS2 domain grouping, not inferred from source origin. REVIEW_REQUIRED means no domain_code is assigned.",
+    "operation_phases": "Caller-input verification, host signer output, host clock, signed timestamp parse, host key config, trust high-water and infrastructure are distinct phases. Domain mapping must not attribute host faults to caller."
+  }
+}

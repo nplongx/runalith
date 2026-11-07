@@ -18,7 +18,7 @@ assert.throws(() => validateArtifactContent('cto-decision', { ...decision, evide
 const tempRoot = tempDir('m7-cto-');
 process.env.WORKFLOW_DB = path.join(tempRoot, 'workflow.db');
 process.env.WORKFLOW_DATA_DIR = tempRoot;
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const store = new WorkflowStore();
 const job = store.createJob({ conversationKey: `m7-${process.pid}-${Date.now()}`, title: 'Software development M7 CTO synthesis' });
 store.transition(job.job_id, 'PROPOSED');

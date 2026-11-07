@@ -9,7 +9,7 @@ import { createAdaptiveGoalKnowledgeStore } from '../../src/runtime/adaptive-goa
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../..');
-let fixturePath = path.join(here, 'fixtures/recovery-verifier-v147.json');
+let fixturePath = path.join(here, 'fixtures/recovery-verifier-v174.json');
 const MAX_PINNED_SOURCE_BYTES = 2 * 1024 * 1024;
 // Frozen v6 scenario identity and oracle are duplicated as verifier constants
 // so editing the fixture cannot rewrite both the tested graph and its scoring
@@ -43,7 +43,7 @@ for (let i = 0; i < args.length; i++) {
     if (relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) throw new Error('BENCHMARK_FIXTURE_PATH_OUT_OF_SCOPE');
   }
   else if (args[i] === '--help') {
-    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--fixture fixtures/recovery-verifier-v147.json] [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
+    console.log('Usage: node benchmarks/adaptive-goal-graph/run-benchmark.mjs [--fixture fixtures/recovery-verifier-v174.json] [--output PATH]\nWrites JSON to stdout, or exclusively creates PATH.');
     process.exit(0);
   } else throw new Error(`Unknown or incomplete argument: ${args[i]}`);
 }
@@ -295,7 +295,13 @@ function validateFixtureContract() {
     fixture?.schemaVersion === 114 && fixture?.fixtureId === 'recovery-verifier-investigation-v114' ||
     fixture?.schemaVersion === 115 && fixture?.fixtureId === 'recovery-verifier-investigation-v115' ||
     fixture?.schemaVersion === 116 && fixture?.fixtureId === 'recovery-verifier-investigation-v116' ||
-    fixture?.schemaVersion === 117 && fixture?.fixtureId === 'recovery-verifier-investigation-v117';
+    fixture?.schemaVersion === 117 && fixture?.fixtureId === 'recovery-verifier-investigation-v117' ||
+    fixture?.schemaVersion === 118 && fixture?.fixtureId === 'recovery-verifier-investigation-v118' ||
+    fixture?.schemaVersion === 119 && fixture?.fixtureId === 'recovery-verifier-investigation-v119' ||
+    fixture?.schemaVersion === 120 && fixture?.fixtureId === 'recovery-verifier-investigation-v120' ||
+    fixture?.schemaVersion === 121 && fixture?.fixtureId === 'recovery-verifier-investigation-v121' ||
+    fixture?.schemaVersion === 122 && fixture?.fixtureId === 'recovery-verifier-investigation-v122' ||
+    fixture?.schemaVersion === 123 && fixture?.fixtureId === 'recovery-verifier-investigation-v123';
   if (!fixture || !supportedFixtureIdentity ||
       !fixture.groundTruth || !Array.isArray(fixture.groundTruth.requiredEvidence) ||
       fixture.groundTruth.requiredEvidence.length === 0 ||

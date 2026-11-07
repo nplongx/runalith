@@ -1,0 +1,41 @@
+{
+  "fixture_id": "runalith.artifact-manifest.v1.golden-001",
+  "fixture_status": "DRAFT_CROSS_LANGUAGE_GOLDEN_VECTOR",
+  "artifact_bytes_utf8": "{\"result\":\"completed\"}",
+  "artifact_sha256": "8768010843d5c54824d02db72b01935dafe7fbb81e09072d5bce9a64b0ac323c",
+  "manifest": {
+    "contract_version": "1.0",
+    "created_at": "2026-11-03T10:00:05Z",
+    "artifacts": [
+      {
+        "contract_version": "1.0",
+        "artifact_id": "sha256:8768010843d5c54824d02db72b01935dafe7fbb81e09072d5bce9a64b0ac323c",
+        "sha256": "8768010843d5c54824d02db72b01935dafe7fbb81e09072d5bce9a64b0ac323c",
+        "byte_len": 22,
+        "media_type": "application/json",
+        "content_schema_id": "runalith.execution-result",
+        "content_schema_version": "1.0",
+        "source": {
+          "producer_id": "execution.worker",
+          "workflow_id": "workflow-42",
+          "task_id": "task-7",
+          "attempt": 3,
+          "correlation_id": "corr-42",
+          "created_at": "2026-11-03T10:00:00Z"
+        }
+      }
+    ],
+    "lineage": {
+      "contract_version": "1.0",
+      "producer_id": "execution.worker",
+      "workflow_id": "workflow-42",
+      "task_id": "task-7",
+      "attempt": 3,
+      "correlation_id": "corr-42",
+      "created_at": "2026-11-03T10:00:00Z",
+      "parent_artifacts": []
+    }
+  },
+  "canonical_utf8": "{\"contract_version\":\"1.0\",\"created_at\":\"2026-11-03T10:00:05Z\",\"artifacts\":[{\"contract_version\":\"1.0\",\"artifact_id\":\"sha256:8768010843d5c54824d02db72b01935dafe7fbb81e09072d5bce9a64b0ac323c\",\"sha256\":\"8768010843d5c54824d02db72b01935dafe7fbb81e09072d5bce9a64b0ac323c\",\"byte_len\":22,\"media_type\":\"application/json\",\"content_schema_id\":\"runalith.execution-result\",\"content_schema_version\":\"1.0\",\"source\":{\"producer_id\":\"execution.worker\",\"workflow_id\":\"workflow-42\",\"task_id\":\"task-7\",\"attempt\":3,\"correlation_id\":\"corr-42\",\"created_at\":\"2026-11-03T10:00:00Z\"}}],\"lineage\":{\"contract_version\":\"1.0\",\"producer_id\":\"execution.worker\",\"workflow_id\":\"workflow-42\",\"task_id\":\"task-7\",\"attempt\":3,\"correlation_id\":\"corr-42\",\"created_at\":\"2026-11-03T10:00:00Z\",\"parent_artifacts\":[]}}",
+  "canonical_sha256": "08a16a9c4ec41378b5fc276bf056f5bb429e1e76e078d12bb010c6a692887e3a"
+}

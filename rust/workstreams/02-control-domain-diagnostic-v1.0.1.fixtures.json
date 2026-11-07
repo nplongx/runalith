@@ -1,0 +1,204 @@
+{
+  "fixture_set": "WS2-ControlDomainDiagnosticV1.0.1",
+  "status": "DRAFT_NOT_RATIFIED",
+  "schema_id": "urn:runalith:contracts:control-domain-diagnostic:v1.0.1",
+  "schema_sha256": "445a7fe8d8c88d7ffd22389ee3cfeeaa553878d55565990633e2feb14a192cfb",
+  "source_diagnostics_fixture": "02-control-domain-error-diagnostics-v2.3.1.fixtures.json",
+  "source_diagnostics_fixture_sha256": "24e5d115604dfc066d25b056d27e9ef5cc7f4653477aced469d1ab8188e91832",
+  "domain_code_enum": [
+    "AUTHENTICATION_FAILED",
+    "AUTHORITY_UNAVAILABLE",
+    "IDEMPOTENCY_CONFLICT",
+    "MALFORMED_REQUEST",
+    "SUBJECT_MISMATCH"
+  ],
+  "positive_payloads": [
+    {
+      "domain_code": "MALFORMED_REQUEST",
+      "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_CLOCK_INVALID"
+    },
+    {
+      "domain_code": "SUBJECT_MISMATCH",
+      "cause_code": "GOVERNANCE_RECEIPT_BINDING_INVALID"
+    },
+    {
+      "domain_code": "AUTHENTICATION_FAILED",
+      "cause_code": "GOVERNANCE_RECEIPT_IDENTITY_UNAUTHORIZED"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_TIME_INVALID"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNER_KEY_MISMATCH"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_CANONICALIZATION_FAILED"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_ENVELOPE_INVALID"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_TRUST_SNAPSHOT_MISMATCH"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_PAYLOAD_MISMATCH"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_DIGEST_MISMATCH"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_BINDING_MISMATCH"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_DIGEST_MISMATCH"
+    },
+    {
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_LEDGER_UNAVAILABLE"
+    },
+    {
+      "domain_code": "IDEMPOTENCY_CONFLICT",
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_CONFLICT"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_INVALID"
+    },
+    {
+      "domain_code": "AUTHENTICATION_FAILED",
+      "cause_code": "AGG_APPROVAL_SIGNATURE_INVALID"
+    },
+    {
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "cause_code": "AGG_TRUST_CONFIG_NOT_OBSERVED"
+    },
+    {
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "cause_code": "AGG_TRUST_CONFIG_ROLLBACK"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_TRUST_ROOT_OUTSIDE_VALIDITY"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_TRUST_ROOT_REVOKED"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID"
+    },
+    {
+      "domain_code": "MALFORMED_REQUEST",
+      "cause_code": "AGG_APPROVAL_EVIDENCE_NONCE_INVALID"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_APPROVAL_CLOCK_INVALID"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_EXPIRED"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_FUTURE_DATED"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_TRUST_CONFIG_PUBLIC_KEY_INVALID"
+    },
+    {
+      "domain_code": null,
+      "cause_code": "AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE"
+    }
+  ],
+  "negative_cases": [
+    {
+      "id": "missing_cause_code",
+      "payload": {
+        "domain_code": "MALFORMED_REQUEST"
+      },
+      "expected": "REJECT_REQUIRED"
+    },
+    {
+      "id": "missing_domain_code",
+      "payload": {
+        "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID"
+      },
+      "expected": "REJECT_REQUIRED"
+    },
+    {
+      "id": "unknown_domain_code",
+      "payload": {
+        "domain_code": "AUTHENTICATION_FAILURE",
+        "cause_code": "AGG_APPROVAL_SIGNATURE_INVALID"
+      },
+      "expected": "REJECT_ENUM"
+    },
+    {
+      "id": "lowercase_cause_code",
+      "payload": {
+        "domain_code": "AUTHENTICATION_FAILED",
+        "cause_code": "agg_approval_signature_invalid"
+      },
+      "expected": "REJECT_PATTERN"
+    },
+    {
+      "id": "unknown_field",
+      "payload": {
+        "domain_code": "MALFORMED_REQUEST",
+        "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID",
+        "retryable": true
+      },
+      "expected": "REJECT_UNKNOWN_FIELD"
+    },
+    {
+      "id": "numeric_domain_code",
+      "payload": {
+        "domain_code": 1,
+        "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID"
+      },
+      "expected": "REJECT_TYPE"
+    }
+  ],
+  "limits": [
+    "Payload DTO only; does not define outer Common Envelope fields or digest.",
+    "Does not define HTTP status, retryability, terminality, admission or authority.",
+    "domain_code null means no proposed domain attribution; it does not mean success or absence of error.",
+    "This is a draft schema/fixture contract, not a deployed route DTO or runtime serialization proof.",
+    "A syntactically valid but unrecognized future cause_code must be preserved verbatim and treated as UNKNOWN/UNRESOLVED by receivers; it must not infer AUTHENTICATION_FAILED, retry, terminality or success."
+  ],
+  "supersedes": {
+    "schema_sha256": "d7a8e65543c5e97dac02a0794624c1ea7c7dc1cf300467c0ac982ebc346138fd",
+    "fixture_sha256": "a1a1a7881472f6d8ba57e1a06c29d1c22e01babfd3180b9e9d8779d537afcf36",
+    "validator_sha256": "c50c4cbbb9d0b0c2ef462f5a6329e3469278833725be1f475cd1c43396d6ebcb",
+    "doc_sha256": "314af74d13fd6973d5fd61634c56becca41577c5ee8befdb841c6ee71e559ff2"
+  },
+  "unknown_cause_code_cases": [
+    {
+      "payload": {
+        "domain_code": null,
+        "cause_code": "FUTURE_UNRECOGNIZED_CAUSE_V9"
+      },
+      "expected": "PRESERVE_CAUSE_UNKNOWN_UNRESOLVED"
+    }
+  ]
+}

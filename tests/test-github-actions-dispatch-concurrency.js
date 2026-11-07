@@ -15,7 +15,7 @@ process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { GitHubActionsProvider } = await import('../src/runtime/github-actions-provider.js');
 const { canonicalProviderDispatchRequest, createProviderDispatchIdentity, providerDispatchKey } = await import('../src/runtime/provider-dispatch-identity.js');
 
@@ -189,7 +189,7 @@ const durable = store.db.prepare('SELECT state,provider_run_id FROM provider_dis
     .run(crashKey, crashInput.job_id, crashInput.task_id, crashInput.lease_id, crashInput.attempt, crashInput.owner_epoch, config.provider, crashInput.input_commit,
       crashIdentity.request_sha256, canonicalProviderDispatchRequest(crashInput), config.api_base, config.workflow, config.repository, config.event, config.ref, crashCreatedAt, crashCreatedAt);
   const crashMarker = path.join(root, 'claim-crash-fetch-marker');
-  const storeModuleUrl = new URL('../src/runtime/job-store.js', import.meta.url).href;
+  const storeModuleUrl = new URL('../job-store.js', import.meta.url).href;
   const providerModuleUrl = new URL('../src/runtime/github-actions-provider.js', import.meta.url).href;
   const crashSource = `
     const { WorkflowStore } = await import(${JSON.stringify(storeModuleUrl)});

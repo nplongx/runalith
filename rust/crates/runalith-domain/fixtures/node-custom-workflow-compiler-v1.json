@@ -1,0 +1,459 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/custom-workflows.js::createCustomWorkflow + previewCustomWorkflow",
+  "roles": [
+    {
+      "role_id": "custom-owner",
+      "version": 1,
+      "name": "Custom Owner",
+      "description": "Own requirements",
+      "system_prompt": "Write exact requirements",
+      "input_contract": [
+        "job.request",
+        "research"
+      ],
+      "output_artifact_type": "requirements",
+      "allowed_capabilities": [
+        "product.requirements"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ],
+      "allowed_tools": [
+        "workflow_catalog"
+      ],
+      "skills": []
+    },
+    {
+      "role_id": "custom-researcher",
+      "version": 1,
+      "name": "Custom Researcher",
+      "description": "Collect research",
+      "system_prompt": "Use requirements as source",
+      "input_contract": [
+        "requirements"
+      ],
+      "output_artifact_type": "research",
+      "allowed_capabilities": [
+        "research.collect"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ],
+      "allowed_tools": [
+        "workflow_catalog"
+      ],
+      "skills": []
+    },
+    {
+      "role_id": "custom-market-researcher",
+      "version": 1,
+      "name": "Market Researcher",
+      "description": "Collect market research",
+      "system_prompt": "Use requirements as source",
+      "input_contract": [
+        "requirements"
+      ],
+      "output_artifact_type": "research",
+      "allowed_capabilities": [
+        "research.collect"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ],
+      "allowed_tools": [
+        "workflow_catalog"
+      ],
+      "skills": []
+    },
+    {
+      "role_id": "custom-architect",
+      "version": 1,
+      "name": "Custom Architect",
+      "description": "Design architecture",
+      "system_prompt": "Use requirements and research",
+      "input_contract": [
+        "requirements",
+        "research"
+      ],
+      "output_artifact_type": "architecture",
+      "allowed_capabilities": [
+        "architecture.design"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ],
+      "allowed_tools": [
+        "workflow_catalog"
+      ],
+      "skills": []
+    },
+    {
+      "role_id": "custom-implementer",
+      "version": 1,
+      "name": "Custom Implementer",
+      "description": "Implement design",
+      "system_prompt": "Use requirements and architecture",
+      "input_contract": [
+        "requirements",
+        "architecture"
+      ],
+      "output_artifact_type": "implementation",
+      "allowed_capabilities": [
+        "code.modify"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ],
+      "allowed_tools": [
+        "workflow_catalog"
+      ],
+      "skills": []
+    },
+    {
+      "role_id": "custom-writer",
+      "version": 1,
+      "name": "Custom Writer",
+      "description": "Write docs",
+      "system_prompt": "Use requirements and implementation",
+      "input_contract": [
+        "requirements",
+        "implementation"
+      ],
+      "output_artifact_type": "documentation",
+      "allowed_capabilities": [
+        "documentation.write"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ],
+      "allowed_tools": [
+        "workflow_catalog"
+      ],
+      "skills": []
+    }
+  ],
+  "valid_cases": [
+    {
+      "name": "out-of-order-linear-plan",
+      "definition": {
+        "workflow_id": "node-linear-delivery",
+        "version": 1,
+        "name": "Linear Delivery",
+        "description": "Out of order typed chain",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "document",
+            "role_id": "custom-writer",
+            "role_version": 1,
+            "depends_on": [
+              "implement"
+            ]
+          },
+          {
+            "id": "implement",
+            "role_id": "custom-implementer",
+            "role_version": 1,
+            "depends_on": [
+              "architecture"
+            ]
+          },
+          {
+            "id": "architecture",
+            "role_id": "custom-architect",
+            "role_version": 1,
+            "depends_on": [
+              "research"
+            ]
+          },
+          {
+            "id": "research",
+            "role_id": "custom-researcher",
+            "role_version": 1,
+            "depends_on": [
+              "requirements"
+            ]
+          },
+          {
+            "id": "requirements",
+            "role_id": "custom-owner",
+            "role_version": 1,
+            "depends_on": []
+          }
+        ]
+      },
+      "canonical_content": "{\"schema_version\":1,\"workflow_id\":\"node-linear-delivery\",\"workflow_version\":1,\"name\":\"Linear Delivery\",\"input_contract\":[\"job.request\"],\"tasks\":[{\"task_id\":\"document\",\"role_id\":\"custom-writer\",\"role_version\":1,\"role_name\":\"Custom Writer\",\"input_contract\":[\"requirements\",\"implementation\"],\"output_artifact_type\":\"documentation\",\"depends_on\":[\"implement\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"implement\",\"role_id\":\"custom-implementer\",\"role_version\":1,\"role_name\":\"Custom Implementer\",\"input_contract\":[\"requirements\",\"architecture\"],\"output_artifact_type\":\"implementation\",\"depends_on\":[\"architecture\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"architecture\",\"role_id\":\"custom-architect\",\"role_version\":1,\"role_name\":\"Custom Architect\",\"input_contract\":[\"requirements\",\"research\"],\"output_artifact_type\":\"architecture\",\"depends_on\":[\"research\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"research\",\"role_id\":\"custom-researcher\",\"role_version\":1,\"role_name\":\"Custom Researcher\",\"input_contract\":[\"requirements\"],\"output_artifact_type\":\"research\",\"depends_on\":[\"requirements\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"requirements\",\"role_id\":\"custom-owner\",\"role_version\":1,\"role_name\":\"Custom Owner\",\"input_contract\":[\"job.request\",\"research\"],\"output_artifact_type\":\"requirements\",\"depends_on\":[],\"execution_mode\":\"host-conversation\",\"deterministic\":false}]}",
+      "plan_hash": "dd363abf7b66b546551aaa05e06bbacc20418e894b3ed9923c77c8e1b08059b2",
+      "task_order": [
+        "document",
+        "implement",
+        "architecture",
+        "research",
+        "requirements"
+      ]
+    },
+    {
+      "name": "branch-and-merge-plan",
+      "definition": {
+        "workflow_id": "node-branch-merge",
+        "version": 1,
+        "name": "Branch and Merge",
+        "description": "Two parallel research branches merge into architecture",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "architecture",
+            "role_id": "custom-architect",
+            "role_version": 1,
+            "depends_on": [
+              "market",
+              "research"
+            ]
+          },
+          {
+            "id": "market",
+            "role_id": "custom-market-researcher",
+            "role_version": 1,
+            "depends_on": [
+              "requirements"
+            ]
+          },
+          {
+            "id": "research",
+            "role_id": "custom-researcher",
+            "role_version": 1,
+            "depends_on": [
+              "requirements"
+            ]
+          },
+          {
+            "id": "requirements",
+            "role_id": "custom-owner",
+            "role_version": 1,
+            "depends_on": []
+          }
+        ]
+      },
+      "canonical_content": "{\"schema_version\":1,\"workflow_id\":\"node-branch-merge\",\"workflow_version\":1,\"name\":\"Branch and Merge\",\"input_contract\":[\"job.request\"],\"tasks\":[{\"task_id\":\"architecture\",\"role_id\":\"custom-architect\",\"role_version\":1,\"role_name\":\"Custom Architect\",\"input_contract\":[\"requirements\",\"research\"],\"output_artifact_type\":\"architecture\",\"depends_on\":[\"market\",\"research\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"market\",\"role_id\":\"custom-market-researcher\",\"role_version\":1,\"role_name\":\"Market Researcher\",\"input_contract\":[\"requirements\"],\"output_artifact_type\":\"research\",\"depends_on\":[\"requirements\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"research\",\"role_id\":\"custom-researcher\",\"role_version\":1,\"role_name\":\"Custom Researcher\",\"input_contract\":[\"requirements\"],\"output_artifact_type\":\"research\",\"depends_on\":[\"requirements\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"requirements\",\"role_id\":\"custom-owner\",\"role_version\":1,\"role_name\":\"Custom Owner\",\"input_contract\":[\"job.request\",\"research\"],\"output_artifact_type\":\"requirements\",\"depends_on\":[],\"execution_mode\":\"host-conversation\",\"deterministic\":false}]}",
+      "plan_hash": "bde09bda96e36cd3d14c1f1b666df757cd711658cf9f490c7fb778e501df077c",
+      "task_order": [
+        "architecture",
+        "market",
+        "research",
+        "requirements"
+      ]
+    },
+    {
+      "name": "multiple-roots-stable-order-plan",
+      "definition": {
+        "workflow_id": "node-multiple-roots",
+        "version": 1,
+        "name": "Multiple Roots",
+        "description": "Multiple ready roots retain plan order where unconstrained",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "research",
+            "role_id": "custom-researcher",
+            "role_version": 1,
+            "depends_on": []
+          },
+          {
+            "id": "requirements",
+            "role_id": "custom-owner",
+            "role_version": 1,
+            "depends_on": []
+          },
+          {
+            "id": "market",
+            "role_id": "custom-market-researcher",
+            "role_version": 1,
+            "depends_on": []
+          },
+          {
+            "id": "architecture",
+            "role_id": "custom-architect",
+            "role_version": 1,
+            "depends_on": [
+              "research",
+              "market",
+              "requirements"
+            ]
+          }
+        ]
+      },
+      "canonical_content": "{\"schema_version\":1,\"workflow_id\":\"node-multiple-roots\",\"workflow_version\":1,\"name\":\"Multiple Roots\",\"input_contract\":[\"job.request\"],\"tasks\":[{\"task_id\":\"research\",\"role_id\":\"custom-researcher\",\"role_version\":1,\"role_name\":\"Custom Researcher\",\"input_contract\":[\"requirements\"],\"output_artifact_type\":\"research\",\"depends_on\":[],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"requirements\",\"role_id\":\"custom-owner\",\"role_version\":1,\"role_name\":\"Custom Owner\",\"input_contract\":[\"job.request\",\"research\"],\"output_artifact_type\":\"requirements\",\"depends_on\":[],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"market\",\"role_id\":\"custom-market-researcher\",\"role_version\":1,\"role_name\":\"Market Researcher\",\"input_contract\":[\"requirements\"],\"output_artifact_type\":\"research\",\"depends_on\":[],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"architecture\",\"role_id\":\"custom-architect\",\"role_version\":1,\"role_name\":\"Custom Architect\",\"input_contract\":[\"requirements\",\"research\"],\"output_artifact_type\":\"architecture\",\"depends_on\":[\"research\",\"market\",\"requirements\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false}]}",
+      "plan_hash": "226dedf0b19b808922d2dcaaf7852091c5ae7fb531bf151b86cbc207a4439690",
+      "task_order": [
+        "research",
+        "requirements",
+        "market",
+        "architecture"
+      ]
+    }
+  ],
+  "rejected_cases": [
+    {
+      "name": "unknown-dependency",
+      "definition": {
+        "workflow_id": "node-reject-unknown-dependency",
+        "version": 1,
+        "name": "Unknown Dependency",
+        "description": "Unknown predecessor",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "collect",
+            "role_id": "custom-researcher",
+            "role_version": 1,
+            "depends_on": [
+              "missing"
+            ]
+          }
+        ]
+      },
+      "expected_error_class": "UNKNOWN_DEPENDENCY"
+    },
+    {
+      "name": "duplicate-task-id",
+      "definition": {
+        "workflow_id": "node-reject-duplicate-task",
+        "version": 1,
+        "name": "Duplicate Task",
+        "description": "Duplicate task identity",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "same",
+            "role_id": "custom-owner",
+            "role_version": 1,
+            "depends_on": []
+          },
+          {
+            "id": "same",
+            "role_id": "custom-researcher",
+            "role_version": 1,
+            "depends_on": []
+          }
+        ]
+      },
+      "expected_error_class": "DUPLICATE_TASK"
+    },
+    {
+      "name": "dependency-cycle",
+      "definition": {
+        "workflow_id": "node-reject-cycle",
+        "version": 1,
+        "name": "Dependency Cycle",
+        "description": "Cycle with artifact-compatible edges",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "requirements",
+            "role_id": "custom-owner",
+            "role_version": 1,
+            "depends_on": [
+              "research"
+            ]
+          },
+          {
+            "id": "research",
+            "role_id": "custom-researcher",
+            "role_version": 1,
+            "depends_on": [
+              "requirements"
+            ]
+          }
+        ]
+      },
+      "expected_error_class": "DEPENDENCY_CYCLE"
+    },
+    {
+      "name": "unsupported-role-input",
+      "definition": {
+        "workflow_id": "node-reject-input",
+        "version": 1,
+        "name": "Unsupported Input",
+        "description": "Input exceeds role contract",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "collect",
+            "role_id": "custom-researcher",
+            "role_version": 1,
+            "depends_on": [],
+            "input_contract": [
+              "architecture"
+            ]
+          }
+        ]
+      },
+      "expected_error_class": "UNSUPPORTED_ROLE_INPUT"
+    },
+    {
+      "name": "role-output-mismatch",
+      "definition": {
+        "workflow_id": "node-reject-output",
+        "version": 1,
+        "name": "Output Mismatch",
+        "description": "Task output differs from role",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "requirements",
+            "role_id": "custom-owner",
+            "role_version": 1,
+            "depends_on": [],
+            "output_artifact_type": "research"
+          }
+        ]
+      },
+      "expected_error_class": "ROLE_OUTPUT_MISMATCH"
+    },
+    {
+      "name": "unknown-custom-role-version",
+      "definition": {
+        "workflow_id": "node-reject-role-version",
+        "version": 1,
+        "name": "Unknown Role Version",
+        "description": "Unregistered immutable role version",
+        "input_contract": [
+          "job.request"
+        ],
+        "tasks": [
+          {
+            "id": "collect",
+            "role_id": "custom-researcher",
+            "role_version": 2,
+            "depends_on": []
+          }
+        ]
+      },
+      "expected_error_class": "UNKNOWN_CUSTOM_ROLE_VERSION"
+    }
+  ]
+}

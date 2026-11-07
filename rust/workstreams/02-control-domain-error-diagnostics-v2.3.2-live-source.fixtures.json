@@ -1,0 +1,65 @@
+{
+  "fixture_set": "WS2-ControlDomainErrorDiagnostics-V2.3.2-LiveSourceCheck",
+  "status": "DRAFT_NOT_RATIFIED",
+  "supersedes_scope_only": "V2.3.1 static source-pin fixture does not read live Rust files",
+  "prior_fixture_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.1.fixtures.json",
+  "prior_fixture_sha256": "24e5d115604dfc066d25b056d27e9ef5cc7f4653477aced469d1ab8188e91832",
+  "prior_validator_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.1-test.py",
+  "prior_validator_sha256": "4abb6a47db775ed66f5e93022f37373adbf7715158acc789dd373c7fc294ee69",
+  "source_snapshot_vs_live": [
+    {
+      "id": "governance_receipt_rs_sha256",
+      "path": "rust/crates/runalith-trust/src/governance_receipt.rs",
+      "snapshot_sha256": "d5f682af74da93dd4899a4cdd31d791382eb580a7f9eeaa3e392c9f0be8bbe09",
+      "live_sha256": "d5f682af74da93dd4899a4cdd31d791382eb580a7f9eeaa3e392c9f0be8bbe09",
+      "disposition": "MATCH"
+    },
+    {
+      "id": "signed_envelope_rs_sha256",
+      "path": "rust/crates/runalith-trust/src/signed_envelope.rs",
+      "snapshot_sha256": "1e7b638efa2577d1769254abe444ca18c77ea944df65d2cd526307b86f7c572f",
+      "live_sha256": "1e7b638efa2577d1769254abe444ca18c77ea944df65d2cd526307b86f7c572f",
+      "disposition": "MATCH"
+    },
+    {
+      "id": "approval_decision_rs_sha256",
+      "path": "rust/crates/runalith-trust/src/approval_decision.rs",
+      "snapshot_sha256": "c2a91acff103f58ac5746db520588c3308a0394437ebb75256dc1b4351969fc3",
+      "live_sha256": "1ef7e3095f431a81e20d10e3a9974e38d860ef3d1c0e03692645113011e8181a",
+      "disposition": "DRIFT"
+    },
+    {
+      "id": "approval_policy_rs_sha256",
+      "path": "rust/crates/runalith-trust/src/approval_policy.rs",
+      "snapshot_sha256": "13235b7af591435904c5f2ea7c981932fc90e87c585a4023e0ee23b14a839775",
+      "live_sha256": "13235b7af591435904c5f2ea7c981932fc90e87c585a4023e0ee23b14a839775",
+      "disposition": "MATCH"
+    },
+    {
+      "id": "trust_ledger_rs_sha256",
+      "path": "rust/crates/runalith-trust/src/trust_ledger.rs",
+      "snapshot_sha256": "ffc6847c31c91cdfd65b5a8763762f6215a29f814cea05cefd572bfd9e008418",
+      "live_sha256": "ffc6847c31c91cdfd65b5a8763762f6215a29f814cea05cefd572bfd9e008418",
+      "disposition": "MATCH"
+    },
+    {
+      "id": "trust_config_rs_sha256",
+      "path": "rust/crates/runalith-trust/src/trust_config.rs",
+      "snapshot_sha256": "a86b6d1b82882522149188a87373c25e5e36f81b704faea8f1057f761b367d02",
+      "live_sha256": "a86b6d1b82882522149188a87373c25e5e36f81b704faea8f1057f761b367d02",
+      "disposition": "MATCH"
+    },
+    {
+      "id": "trust_error_code_source_sha256",
+      "path": "rust/crates/runalith-trust/src/lib.rs",
+      "snapshot_sha256": "5fba5f3c618609c72e354e35488c92baf5b5c753754cda45f2c1e0484107be6f",
+      "live_sha256": "b980bd06ce815f2dfd9135841358dc336221da0374342f7d9785745d426c6b5a",
+      "disposition": "DRIFT"
+    }
+  ],
+  "expected_drift_paths": [
+    "rust/crates/runalith-trust/src/approval_decision.rs",
+    "rust/crates/runalith-trust/src/lib.rs"
+  ],
+  "scope_limit": "computes live whole-file SHA-256 for seven bounded source paths; does not parse line/function origins or prove runtime behavior/cryptographic authority"
+}

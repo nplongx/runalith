@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/policy-contract.js::normalizePolicyDefinition + createPolicySnapshot + node:crypto SHA-256",
+  "vectors": [
+    {
+      "definition": {
+        "schema_version": 1,
+        "policy_id": "numeric-fractional",
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "fractional_score",
+            "expected": 1.5
+          }
+        ],
+        "success_criteria": []
+      },
+      "snapshot": {
+        "schema_version": 1,
+        "policy_id": "numeric-fractional",
+        "version": 1,
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "fractional_score",
+            "expected": 1.5
+          }
+        ],
+        "success_criteria": [],
+        "content_hash": "edbfc1653e345e4445e0f583f4d88d06f4b53ec5304e4efbc0f7bce6ffda8b27"
+      }
+    },
+    {
+      "definition": {
+        "schema_version": 1,
+        "policy_id": "numeric-small-exp",
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "small_score",
+            "expected": 1e-7
+          }
+        ],
+        "success_criteria": []
+      },
+      "snapshot": {
+        "schema_version": 1,
+        "policy_id": "numeric-small-exp",
+        "version": 1,
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "small_score",
+            "expected": 1e-7
+          }
+        ],
+        "success_criteria": [],
+        "content_hash": "bcee5e2a482f9b403cd0fbbfaa5a86dba5db7872a5d80de6dc1a2244a7ffa4f0"
+      }
+    },
+    {
+      "definition": {
+        "schema_version": 1,
+        "policy_id": "numeric-large-fixed",
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "large_score",
+            "expected": 100000000000000000000
+          }
+        ],
+        "success_criteria": []
+      },
+      "snapshot": {
+        "schema_version": 1,
+        "policy_id": "numeric-large-fixed",
+        "version": 1,
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "large_score",
+            "expected": 100000000000000000000
+          }
+        ],
+        "success_criteria": [],
+        "content_hash": "f3a84b838f58aef19d45b3577ee2fa2969830e68573b871752e0bf5dd2a0064e"
+      }
+    },
+    {
+      "definition": {
+        "schema_version": 1,
+        "policy_id": "numeric-unsafe-integer",
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "unsafe_score",
+            "expected": 9007199254740992
+          }
+        ],
+        "success_criteria": []
+      },
+      "snapshot": {
+        "schema_version": 1,
+        "policy_id": "numeric-unsafe-integer",
+        "version": 1,
+        "name": "Numeric policy vector",
+        "description": "Node-generated numeric canonicalization fixture",
+        "constraints": [
+          {
+            "id": "score-equals",
+            "type": "artifact_field_equals",
+            "artifact_type": "requirements",
+            "field": "unsafe_score",
+            "expected": 9007199254740992
+          }
+        ],
+        "success_criteria": [],
+        "content_hash": "c4b49f83e24e6ebaacd42c084fff7bc0272e48b4aca37f863ecde2f35c6788c2"
+      }
+    }
+  ]
+}

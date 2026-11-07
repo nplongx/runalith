@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { DistributedScheduler } from '../src/runtime/distributed-scheduler.js';
+import { createWorkflowStatePort } from '../src/runtime/workflow-state-port.js';
 
 const calls = [];
 const provider = { dispatch: async request => {
@@ -21,6 +22,8 @@ const store = {
     { task_id: 'task-a', job_id: 'job', role: 'executor', payload_ref: '.worker/a.json' },
     { task_id: 'task-b', job_id: 'job', role: 'executor', payload_ref: '.worker/b.json' }
   ]; },
+  ensureProviderExecutionSchema() {},
+  countActiveTaskLeases() { return 0; },
   recordEvent() {},
   expireTaskLease() {}
 };
@@ -37,6 +40,12 @@ assert.throws(() => new DistributedScheduler({ store, provider: {}, maxParallel:
   /provider must expose dispatch\(request\) or reconcileDispatchIntent\(intent\)/,
   'scheduler must validate at least one supported provider entry point');
 const scheduler = new DistributedScheduler({ store, provider, maxParallel: 2, workerId: 'scheduler-test' });
+const injectedStatePort = createWorkflowStatePort(store);
+const statePortOnlyScheduler = new DistributedScheduler({
+  statePort: injectedStatePort, provider, maxParallel: 1, workerId: 'scheduler-state-port-only'
+});
+assert.equal(statePortOnlyScheduler.state, injectedStatePort,
+  'host must be able to compose DistributedScheduler with WorkflowStatePort and no WorkflowStore argument');
 const results = await scheduler.dispatchPending({ inputCommit: 'a'.repeat(40) });
 assert.equal(results.length, 2);
 assert.equal(results.every(r => r.status === 'fulfilled'), true, JSON.stringify(results, (_, v) => v instanceof Error ? v.message : v));

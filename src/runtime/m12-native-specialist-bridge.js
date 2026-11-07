@@ -1,3 +1,5 @@
+import { createWorkflowStatePort } from './workflow-state-port.js';
+
 const TERMINAL_NATIVE_STATES = new Set(['SUCCEEDED', 'SUCCESS', 'COMPLETED', 'OK', 'FAILED', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'TIMEOUT']);
 const SUCCESS_NATIVE_STATES = new Set(['SUCCEEDED', 'SUCCESS', 'COMPLETED', 'OK']);
 
@@ -52,22 +54,24 @@ export class M12NativeSpecialistBridge {
       throw new TypeError('M12NativeSpecialistBridge requires an authenticated node-role Gateway client without operator scopes');
     }
     this.store = store;
+    this.state = createWorkflowStatePort(store);
+    this.state.ensureM12NativeSpecialistStartIntentSchema();
     this.gateway = gateway;
     this.now = now;
   }
 
   async startOrResume({ taskId, attempt, leaseId, environmentId, nodeId, ownerEpoch, inputCommit, prompt, role, admissionIdempotencyKey, timeoutMs = 900_000 }) {
-    const task = this.store.getTask(requiredString(taskId, 'taskId'));
+    const task = this.state.getTask(requiredString(taskId, 'taskId'));
     if (!task) throw new Error(`task not found: ${taskId}`);
     const normalizedAttempt = positiveInteger(attempt, 'attempt');
     const normalizedTimeoutMs = positiveInteger(timeoutMs, 'timeoutMs');
     if (normalizedTimeoutMs > 900_000) throw new Error('timeoutMs must not exceed 900000 ms');
     if (task.status !== 'running') throw new Error(`native specialist requires a running task, got ${task.status}`);
-    const job = this.store.getJob(task.job_id);
+    const job = this.state.getJob(task.job_id);
     if (!job || job.status !== 'active' || ['COMPLETED', 'FAILED', 'CANCELLED'].includes(String(job.state || '').toUpperCase())) {
       throw new Error('native specialist requires a live non-terminal parent job');
     }
-    const lease = this.store.getTaskLease(requiredString(leaseId, 'leaseId'));
+    const lease = this.state.getTaskLease(requiredString(leaseId, 'leaseId'));
     if (!lease || lease.task_id !== taskId || lease.job_id !== task.job_id || lease.attempt !== normalizedAttempt || lease.state !== 'ACTIVE') {
       throw new Error('native specialist requires an active task lease bound to this task attempt');
     }
@@ -91,10 +95,8 @@ export class M12NativeSpecialistBridge {
     // task/attempt lookup alone is insufficient if corrupted durable history
     // maps this lease to another native turn; starting in that state can create
     // a second remote side effect that local attachment then rejects.
-    const leaseRuntimeRows = this.store.db.prepare(
-      'SELECT task_id,attempt,lease_id,owner_epoch,run_id FROM m12_native_specialist_runtime WHERE lease_id=? ORDER BY attempt ASC, rowid ASC'
-    ).all(leaseId);
-    const existing = this.store.getM12NativeSpecialistRuntime(taskId, normalizedAttempt);
+    const leaseRuntimeRows = this.state.listM12NativeSpecialistRuntimesForLease(leaseId);
+    const existing = this.state.getM12NativeSpecialistRuntime(taskId, normalizedAttempt);
     if (leaseRuntimeRows.length > 1 || (leaseRuntimeRows.length === 1 &&
         (leaseRuntimeRows[0].task_id !== taskId || leaseRuntimeRows[0].attempt !== normalizedAttempt ||
           leaseRuntimeRows[0].lease_id !== leaseId || leaseRuntimeRows[0].owner_epoch !== binding.ownerEpoch ||
@@ -123,9 +125,10 @@ export class M12NativeSpecialistBridge {
         timeoutMs: normalizedTimeoutMs,
       });
     } else {
-      const start = await this.gateway.request('m12.specialist.start', {
+      const admissionKey = requiredString(admissionIdempotencyKey, 'admissionIdempotencyKey');
+      const startRequest = {
         environmentId: binding.environmentId,
-        admissionIdempotencyKey: requiredString(admissionIdempotencyKey, 'admissionIdempotencyKey'),
+        admissionIdempotencyKey: admissionKey,
         leaseId: binding.leaseId,
         ownerEpoch: binding.ownerEpoch,
         taskId,
@@ -134,9 +137,29 @@ export class M12NativeSpecialistBridge {
         inputCommit: requiredString(inputCommit, 'inputCommit'),
         prompt: requiredString(prompt, 'prompt'),
         waitTimeoutMs: 0,
+      };
+      // Persist the exact external-effect identity before Gateway can accept a
+      // start. If the RPC outcome becomes unknown, a retry with the same or a
+      // different key is blocked until an operator/provider reconciliation
+      // resolves the orphaned STARTING intent; never create a duplicate turn.
+      const startReservation = this.state.reserveM12NativeSpecialistStart({
+        jobId: task.job_id, taskId, attempt: normalizedAttempt, leaseId: binding.leaseId,
+        ownerEpoch: binding.ownerEpoch, environmentId: binding.environmentId, nodeId: binding.nodeId,
+        admissionIdempotencyKey: admissionKey, inputCommit: startRequest.inputCommit,
+        role: startRequest.role, prompt: startRequest.prompt, waitTimeoutMs: startRequest.waitTimeoutMs
       });
+      // Reservation alone does not authorize the RPC: the lease may expire
+      // while the process is descheduled. Acquire a one-way send claim under a
+      // fresh writer reservation immediately before crossing the Gateway edge.
+      const sendClaim = this.state.claimM12NativeSpecialistStartForSend({
+        taskId, attempt: normalizedAttempt, leaseId: binding.leaseId,
+        ownerEpoch: binding.ownerEpoch, requestSha256: startReservation.requestSha256
+      });
+      const start = await this.gateway.request('m12.specialist.start', startRequest);
       if (!start || typeof start !== 'object') throw new Error('Gateway did not return native specialist identity');
       const identity = {
+        taskId: requiredString(start.taskId, 'native taskId'),
+        attempt: positiveInteger(start.attempt, 'native attempt'),
         sessionKey: requiredString(start.sessionKey, 'native sessionKey'),
         nativeSessionId: requiredString(start.sessionId, 'native sessionId'),
         runId: requiredString(start.runId, 'native runId'),
@@ -145,12 +168,12 @@ export class M12NativeSpecialistBridge {
         leaseId: requiredString(start.leaseId, 'native leaseId'),
         ownerEpoch: positiveInteger(start.ownerEpoch, 'native ownerEpoch'),
       };
-      for (const field of ['environmentId', 'nodeId', 'leaseId', 'ownerEpoch']) {
+      for (const field of ['taskId', 'attempt', 'environmentId', 'nodeId', 'leaseId', 'ownerEpoch']) {
         if (identity[field] !== binding[field]) throw new Error(`Gateway native identity binding mismatch: ${field}`);
       }
       // Persist actual Gateway IDs before waiting for completion. A crash after
       // this point can only resume by runId, never by starting a second turn.
-      this.store.attachM12NativeSpecialistRuntime(taskId, {
+      this.state.attachM12NativeSpecialistRuntime(taskId, {
         attempt: normalizedAttempt,
         sessionKey: identity.sessionKey,
         nativeSessionId: identity.nativeSessionId,
@@ -159,6 +182,9 @@ export class M12NativeSpecialistBridge {
         nodeId: identity.nodeId,
         leaseId: identity.leaseId,
         ownerEpoch: identity.ownerEpoch,
+        admissionIdempotencyKey: admissionKey,
+        startRequestSha256: startReservation.requestSha256,
+        startClaimId: sendClaim.claimId,
       });
       native = await this.gateway.request('m12.specialist.wait', {
         environmentId: binding.environmentId,
@@ -172,8 +198,8 @@ export class M12NativeSpecialistBridge {
     }
 
     const parsed = nativeResultPayload(native);
-    if (!parsed.terminal) return { status: 'RUNNING', runtime: this.store.getM12NativeSpecialistRuntime(taskId, normalizedAttempt), native_status: parsed.status || 'UNKNOWN', resumed: Boolean(existing) };
-    const runtime = this.store.getM12NativeSpecialistRuntime(taskId, normalizedAttempt);
+    if (!parsed.terminal) return { status: 'RUNNING', runtime: this.state.getM12NativeSpecialistRuntime(taskId, normalizedAttempt), native_status: parsed.status || 'UNKNOWN', resumed: Boolean(existing) };
+    const runtime = this.state.getM12NativeSpecialistRuntime(taskId, normalizedAttempt);
     const returned = parsed.result && typeof parsed.result === 'object' ? parsed.result : {};
     for (const [field, expected] of [
       ['runId', runtime.run_id],
@@ -187,7 +213,7 @@ export class M12NativeSpecialistBridge {
         throw new Error(`Gateway native result binding mismatch: ${field}`);
       }
     }
-    const reconciled = this.store.reconcileM12NativeSpecialistResult({
+    const reconciled = this.state.reconcileM12NativeSpecialistResult({
       taskId,
       attempt: normalizedAttempt,
       leaseId: binding.leaseId,

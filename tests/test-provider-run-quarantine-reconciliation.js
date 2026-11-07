@@ -34,6 +34,18 @@ function fixtureStore(initialRun, { applyResult = { status: 'VERIFIED' } } = {})
       return lease;
     },
     getTaskLease() { return { ...lease }; },
+    // LangGraphControlLoop requires the complete named WorkflowControlPort at
+    // construction even though reconcile() uses only provider/state methods.
+    getJob() { return { job_id: initialRun.job_id, status: 'active', state: 'EXECUTING' }; },
+    getExecutionPlan() { return null; },
+    getWorkflowRuntimeState() { return {}; },
+    getLatestArtifact() { return null; },
+    prepareStandardEngineeringRework() { return {}; },
+    hasEvent() { return false; },
+    getJobTrace() { return []; },
+    setWorkflowRuntimeState() { return {}; },
+    setProviderWaiting() { return {}; },
+    transitionWorkflowPhase() { return {}; },
     applyVerifiedExecutionResult() { applied++; return applyResult; },
     snapshot() { return { events: [...events.values()], applied, heartbeat, expiry, lease: { ...lease } }; }
   };

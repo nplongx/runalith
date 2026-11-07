@@ -1,0 +1,188 @@
+{
+  "model": {
+    "schemaVersion": 2,
+    "featureSchemaVersion": 1,
+    "modelType": "standardized-logistic-regression",
+    "featureNames": [
+      "successConfidence",
+      "riskSafety",
+      "costEfficiency",
+      "reusePotential",
+      "informationValue",
+      "testedHypothesisRatio",
+      "supportEdgeRatio"
+    ],
+    "datasetId": "unspecified-dataset",
+    "trainingConfig": {
+      "learningRate": 0.15,
+      "epochs": 1500,
+      "l2": 0.01,
+      "seed": 0
+    },
+    "trainingDataSha256": "e37df3aff848bfa6aa11df4730899555323434904c68bc45a26b0d2a7f3e2f89",
+    "validationDataSha256": "7e3691f32afab1e956d3119ccbe96a05bc7e44c6574fc17c89eba25f8f9205f0",
+    "means": {
+      "successConfidence": 0.5,
+      "riskSafety": 0.5,
+      "costEfficiency": 0.5,
+      "reusePotential": 0.5,
+      "informationValue": 0.5,
+      "testedHypothesisRatio": 0.5,
+      "supportEdgeRatio": 0.5
+    },
+    "scales": {
+      "successConfidence": 0.000001,
+      "riskSafety": 0.000001,
+      "costEfficiency": 0.000001,
+      "reusePotential": 0.000001,
+      "informationValue": 0.38639358172723315,
+      "testedHypothesisRatio": 0.000001,
+      "supportEdgeRatio": 0.000001
+    },
+    "weights": {
+      "successConfidence": 0,
+      "riskSafety": 0,
+      "costEfficiency": 0,
+      "reusePotential": 0,
+      "informationValue": 3.364175353242723,
+      "testedHypothesisRatio": 0,
+      "supportEdgeRatio": 0
+    },
+    "intercept": -2.055782396431498e-16,
+    "trainingExampleCount": 12,
+    "trainingClassCounts": {
+      "negative": 6,
+      "positive": 6
+    },
+    "trainingMetrics": {
+      "accuracy": 1,
+      "balancedAccuracy": 1,
+      "logLoss": 0.03809503372283342,
+      "precision": 1,
+      "recall": 1,
+      "f1": 1,
+      "brierScore": 0.0016460796546898086,
+      "confusionMatrix": {
+        "truePositive": 6,
+        "trueNegative": 6,
+        "falsePositive": 0,
+        "falseNegative": 0
+      },
+      "classBalance": {
+        "negative": 6,
+        "positive": 6
+      },
+      "accuracyConfidenceInterval95": {
+        "lower": 0.7575059933447592,
+        "upper": 1,
+        "method": "wilson_score"
+      },
+      "calibration": [
+        {
+          "bin": 0,
+          "count": 6,
+          "meanPredictedProbability": 0.03724258411927432,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 1,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 2,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 3,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 4,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 5,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 6,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 7,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 8,
+          "count": 0,
+          "meanPredictedProbability": 0,
+          "observedPositiveRate": 0
+        },
+        {
+          "bin": 9,
+          "count": 6,
+          "meanPredictedProbability": 0.9627574158807258,
+          "observedPositiveRate": 1
+        }
+      ]
+    },
+    "modelSha256": "96f107604ebc75a39f6044c361114a4a1151f536b84e9aa632a0514dcfa0ea0c"
+  },
+  "state": {
+    "metrics": {
+      "estimatedSuccessConfidence": 0.8,
+      "estimatedRisk": 0.25,
+      "estimatedCost": 3,
+      "reusePotential": 0.6,
+      "informationValue": 0.9
+    },
+    "semantics": {
+      "hypothesisCount": 4,
+      "testedHypothesisCount": 2,
+      "supportEdgeCount": 3
+    },
+    "pathNodeIds": [
+      "start",
+      "idea",
+      "experiment",
+      "goal"
+    ]
+  },
+  "features": {
+    "successConfidence": 0.8,
+    "riskSafety": 0.75,
+    "costEfficiency": 0.25,
+    "reusePotential": 0.6,
+    "informationValue": 0.9,
+    "testedHypothesisRatio": 0.5,
+    "supportEdgeRatio": 1
+  },
+  "score": {
+    "probability": 0.9701897978009539,
+    "features": {
+      "successConfidence": 0.8,
+      "riskSafety": 0.75,
+      "costEfficiency": 0.25,
+      "reusePotential": 0.6,
+      "informationValue": 0.9,
+      "testedHypothesisRatio": 0.5,
+      "supportEdgeRatio": 1
+    },
+    "modelSha256": "96f107604ebc75a39f6044c361114a4a1151f536b84e9aa632a0514dcfa0ea0c",
+    "classification": "model_estimate_unverified"
+  }
+}

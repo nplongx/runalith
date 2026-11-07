@@ -7,7 +7,7 @@ process.env.WORKFLOW_DB = path.join(root, 'workflow.db');
 process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_WORKSPACE = root;
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { DistributedScheduler } = await import('../src/runtime/distributed-scheduler.js');
 const { GitHubActionsProvider } = await import('../src/runtime/github-actions-provider.js');
 const { verifyWorkflowCompletion } = await import('../src/runtime/workflow/verifier.js');

@@ -1,0 +1,533 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "rust-workflow-control-engineering-slice",
+  "generated_at_local": "2026-11-02T14:26:14+07:00",
+  "artifact_path": "rust/evidence/engineering-slice-20261102.json",
+  "repository": {
+    "head": "6b7bc90a8b16e50be9c7331c2b0f6361cc40b8f3",
+    "branch": "main",
+    "dirty_entries": 317,
+    "staged_entries": 0,
+    "working_tree_preserved": true,
+    "git_index_mutated": false,
+    "git_history_mutated": false,
+    "rust_core_paths_tracked": false,
+    "rust_core_paths_ignored": false
+  },
+  "implementation": {
+    "rust_workspace_crates": 15,
+    "rust_store_schema": 18,
+    "node_mcp_reference_tools": 75,
+    "rust_mcp_registered_tools": 61,
+    "part_1_status": "PARTIAL",
+    "policy_and_success_contracts": [
+      "Immutable versioned policy definitions persisted with SHA-256 integrity and append-only policy events.",
+      "Exact policy version/content digest attached to workflow; deterministic composition and semantic-conflict rejection.",
+      "Composed success-contract snapshot bound to exact immutable plan digest; approval, claim and completion revalidate exact pins transactionally.",
+      "Node-generated policy snapshot/composed-contract fixture is checked by Rust; success-contract golden fixture covers four persisted PASS predicates. Separate Node oracle fixture records 15 evaluation cases across all 11 predicate types, but does not establish Rust differential parity.",
+      "Success-contract predicate IDs follow Node's 80-character slug limit; policy rule IDs retain their separate 39-character namespace limit. Rust tests cover 40/80 acceptance and 81 rejection.",
+      "Success-contract normalization follows Node text trimming, null defaults and criteria-alias precedence; direct Node oracle and Rust regression test pass.",
+      "Concurrent policy updates across two independent SQLite Store connections serialize into distinct immutable versions and audit events.",
+      "Rust permits Node-defined predicate families to be persisted; workflow_id_equals, local_execution_only, execution_exit_code_equals and artifact predicates remain UNRESOLVED without their exact catalog identity or authoritative execution/artifact evidence. A regression verifies these dispositions and prevents false PASS.",
+      "Rust test consumes the 15-case Node predicate oracle fixture and guards its 11-type/seven-unresolved-family inventory; this is fixture-integrity coverage, not evaluator differential parity.",
+      "Store::admit_workflow and WorkflowService::admit_workflow persist an idempotent workflow.admitted checkpoint under BEGIN IMMEDIATE after exact approval, immutable policy attachment and plan-bound success-contract revalidation. Missing approval authority fails before event mutation; claim independently revalidates and admission is not dispatch authorization.",
+      "Persisted Store evaluator now consumes the 15-case Node oracle as 12 applicable persisted workflows through policy attachment, approval, admission, task claims and durable results; compares supported predicate dispositions/values. Three Node-negative references are rejected earlier by Rust policy attachment; seven execution/catalog/artifact predicate families remain UNRESOLVED. Partial differential slice only, not full parity.",
+      "Persisted Store evaluator now consumes the Node predicate oracle in 12 applicable persisted workflows through policy attachment, approval, admission, task claims and durable results; compares supported predicate dispositions/values. Three Node-negative references are rejected earlier by Rust policy attachment; seven execution/catalog/artifact predicate families remain UNRESOLVED. Partial fixture-driven differential only, not full parity."
+    ],
+    "identity_and_trusted_skills": [
+      "CatalogAuthorVerifier derives author from host-authenticated context; absent, invalid and mcp:unattributed fail closed before mutation.",
+      "TrustedSkillResolver resolves exact role references to canonical skill identity/version/content digest; immutable pins persist per role version.",
+      "Role/workflow create/update and plan compilation revalidate skill pins; missing, revoked, stale or substituted references fail closed.",
+      "Production host wiring for CatalogAuthorVerifier and TrustedSkillResolver is absent."
+    ],
+    "result_ingestion_and_synthesis": [
+      "TaskResultProducerVerifier authenticates producer and provenance; immutable event ID and payload digest bind workflow/task/request.",
+      "Inbox insert, attempt/lease/plan checks, result/lifecycle persistence and workflow event append share one IMMEDIATE transaction.",
+      "Duplicate event replay reauthenticates producer, re-hashes stored inbox payload bytes, verifies task result projection against immutable attempt-result digest and task-result journal event, and rechecks provenance digest, current plan digest, exact historical lease/worker binding, matching inbox journal event payload and complete event-chain integrity before acknowledgement; changed, missing/tampered evidence or unavailable authority rejects replay.",
+      "Conflicting/stale replay is fenced. The append-only workflow event sequence records durable ingestion order; producer envelopes do not carry a separate monotonic sequence.",
+      "Synthesis reconstructs task, attempt, inbox, approval, policy/contract and event-chain evidence; immutable report event is idempotent.",
+      "PASSED requires workflow COMPLETED and persisted predicates PASS; unsupported/missing evidence remains UNRESOLVED."
+    ],
+    "coordinator_and_recovery": [
+      "Coordinator atomically claims at most one task per tick with approval/worker revalidation, dependency readiness, concurrency ceilings, fairness, lease epoch and attempt journal.",
+      "Continuous bounded `CoordinatorLoop` now repeats atomic claims, checks cooperative shutdown between claims, and hands each durable lease to an explicit injected `ExecutionWorker` port; failed/ambiguous handoff stops without retry/replay.",
+      "Recovery inspection joins task, attempt, provider, session and event evidence; lease observations bind to exact immutable attempt-ledger lease ID and owner epoch.",
+      "Missing/inconsistent historical lease identity, stale/incomplete runtime snapshot or ambiguous provider outcome remains UNKNOWN/UNRESOLVED.",
+      "Authoritative cross-part recovery disposition and lifecycle settlement remain absent; no replay or terminalization is performed.",
+      "Admission is an explicit persisted checkpoint bound to exact plan SHA-256, approval ID and exact policy pins; repeated admission for the same binding is idempotent.",
+      "Deterministic local-step orchestration, restart-time authoritative lease settlement and cross-part recovery disposition remain absent; UNKNOWN stays unresolved."
+    ],
+    "control_api_and_parity": [
+      "MCP exposes 59 Rust tools; 75 is the Node reference/documentation count, not Rust semantic parity.",
+      "Part 1 `runalith-control-api` HTTP/JSON crate now exposes host-authenticated/capability-gated catalog, exact plan compilation/read, policy CRUD/attachment, workflow proposal/approval/admission/lifecycle, coordinator claim, result ingestion, synthesis and read-only recovery routes. It opens only an existing exact-schema Rust Store; no migration/create.",
+      "Schema v18 adds Governance signed-receipt persistence and a transaction-aware Store backend behind injected verifier/signer contracts; no production authority is wired. This Part 3 work does not complete Part 1.",
+      "Three-part deployment boundaries remain architecture target; shared Store and in-process composition remain.",
+      "Control API has bounded loopback-only HTTP serving, cooperative shutdown and a bounded continuous coordinator loop; no standalone host binary/process, physical Control-owned schema/database extraction, production verifier composition or cross-process crash/restart proof.",
+      "No global persisted HTTP Idempotency-Key ledger; mutations preserve operation-specific Store idempotency/conflict semantics only.",
+      "Control API accepts case-insensitive HTTP Bearer schemes and rejects empty/whitespace/control-containing credentials. Duplicate, malformed and out-of-range limit query parameters now fail with HTTP 400 instead of silently defaulting.",
+      "Control API accepts case-insensitive HTTP Bearer schemes and rejects empty/whitespace/control-containing credentials. Duplicate, malformed and out-of-range limit query parameters fail with HTTP 400 instead of silently defaulting."
+    ]
+  },
+  "validation": {
+    "passed": [
+      {
+        "command": "cargo test -p runalith-store --offline",
+        "exit_code": 0,
+        "tests_passed": 65,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-runtime --offline",
+        "exit_code": 0,
+        "tests_passed": 24,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-mcp --offline",
+        "exit_code": 0,
+        "tests_passed": 38,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-sandbox --offline",
+        "exit_code": 0,
+        "tests_passed": 41,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo clippy -p runalith-store -p runalith-runtime -p runalith-mcp --all-targets --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo clippy --workspace --lib --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo test -p runalith-store --offline workflow_policy_versions_attach_exactly_and_pin_composed_contract_at_approval",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0,
+        "fixture": "rust/crates/runalith-store/tests/fixtures/workflow-policy-v1-node.json"
+      },
+      {
+        "command": "cargo test -p runalith-store --offline concurrent_policy_updates_serialize_to_distinct_immutable_versions",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0
+      },
+      {
+        "command": "npm run docs:check",
+        "exit_code": 0,
+        "markdown_files": 248,
+        "local_links": 608,
+        "node_mcp_reference_tools_matched": 75
+      },
+      {
+        "command": "git diff --check && git diff --cached --check",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo test -p runalith-recovery --offline",
+        "exit_code": 0,
+        "tests_passed": 15,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test --workspace --offline",
+        "exit_code": 0,
+        "tests_passed": 388,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo clippy -p runalith-store -p runalith-runtime -p runalith-mcp -p runalith-recovery --all-targets --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo test -p runalith-store --offline authenticated_result_envelope_is_durable_idempotent_and_conflict_fenced",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-store --offline result_envelope_payload_mismatch_and_verifier_failure_do_not_mutate_task",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-runtime --offline runtime_recovery_classification_requires_fresh_complete_runtime_evidence",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-runtime --offline provider_dispatch_intent_is_persisted_before_call_and_ambiguous_call_never_replays",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-store --offline persisted_success_contract_evaluates_durable_task_evidence_before_completion",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0,
+        "fixture": "rust/crates/runalith-store/tests/fixtures/success-contract-v1-node.json"
+      },
+      {
+        "command": "cargo clippy -p runalith-recovery --all-targets --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo check --workspace --offline",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo test -p runalith-store --offline success_contract_rule_ids_match_node_eighty_character_limit_without_weakening_policy_namespace",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test -p runalith-store --offline success_contract_normalization_matches_node_trim_null_and_criteria_alias_behavior",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0
+      },
+      {
+        "command": "node --input-type=module success-contract normalization oracle",
+        "exit_code": 0,
+        "result": "NODE SUCCESS-CONTRACT NORMALIZATION ORACLE PASS"
+      },
+      {
+        "command": "cargo test -p runalith-store --offline unsupported_artifact_success_predicate_keeps_workflow_unresolved_not_completed",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0,
+        "result": "All seven unsupported/semantically unresolved Node predicate families are persisted as UNRESOLVED; no false PASS."
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-store/src/lib.rs crates/runalith-mcp/tests/cli_health.rs",
+        "exit_code": 0
+      },
+      {
+        "command": "node --input-type=module success-contract predicate oracle",
+        "exit_code": 0,
+        "result": "NODE SUCCESS-CONTRACT PREDICATE ORACLE PASS cases=15 types=11",
+        "fixture": "rust/crates/runalith-store/tests/fixtures/success-contract-predicate-v1-node.json"
+      },
+      {
+        "command": "cargo test -p runalith-store --offline node_success_predicate_oracle_fixture_is_consumed_and_covers_all_families",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0,
+        "fixture": "rust/crates/runalith-store/tests/fixtures/success-contract-predicate-v1-node.json",
+        "limitation": "Fixture inventory guard only; no Rust semantic differential parity claim."
+      },
+      {
+        "command": "cargo test --workspace --offline -q",
+        "exit_code": 0,
+        "tests_passed": 388,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo check --workspace --offline",
+        "exit_code": 0
+      },
+      {
+        "command": "npm run docs:check",
+        "exit_code": 0,
+        "markdown_files": 248,
+        "local_links": 610,
+        "node_mcp_reference_tools_matched": 75
+      },
+      {
+        "command": "git diff --check && git diff --cached --check",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo test -p runalith-store --offline workflow_policy_versions_attach_exactly_and_pin_composed_contract_at_approval",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0,
+        "coverage": [
+          "admission exact approval/policy/contract revalidation",
+          "missing approval authority fails before mutation",
+          "idempotent admission event"
+        ]
+      },
+      {
+        "command": "cargo test --workspace --offline -q",
+        "exit_code": 0,
+        "tests_passed": 388,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo check --workspace --offline",
+        "exit_code": 0
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-worker/src/*.rs",
+        "exit_code": 0,
+        "scope": "Current worker Rust sources; no accumulated worker files reformatted or overwritten."
+      },
+      {
+        "command": "npm run docs:check",
+        "exit_code": 0,
+        "markdown_files": 248,
+        "local_links": 610,
+        "node_mcp_reference_tools_matched": 75
+      },
+      {
+        "command": "git diff --check && git diff --cached --check",
+        "exit_code": 0
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-store/src/lib.rs crates/runalith-runtime/src/lib.rs",
+        "exit_code": 0
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-worker/src/*.rs",
+        "exit_code": 0,
+        "scope": "Current worker Rust sources checked without rewriting accumulated files."
+      },
+      {
+        "command": "cargo test -p runalith-control-api --offline",
+        "exit_code": 0,
+        "tests_passed": 11,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo test --workspace --offline",
+        "exit_code": 0,
+        "tests_passed": 388,
+        "tests_failed": 0
+      },
+      {
+        "command": "cargo check --workspace --offline",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets --offline -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo fmt --all -- --check",
+        "exit_code": 0
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-control-api/src/lib.rs crates/runalith-runtime/src/lib.rs",
+        "exit_code": 0
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-protocol/src/mcp_service_v1.rs",
+        "exit_code": 0,
+        "scope": "Previously discrepant untracked file; inspected only, not modified by Part 1 batch."
+      },
+      {
+        "command": "npm run docs:check",
+        "exit_code": 0,
+        "markdown_files": 248,
+        "local_links": 610,
+        "node_mcp_reference_tools_matched": 75
+      },
+      {
+        "command": "git diff --check && git diff --cached --check",
+        "exit_code": 0
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-store/src/lib.rs crates/runalith-runtime/src/lib.rs crates/runalith-control-api/src/lib.rs",
+        "exit_code": 0,
+        "scope": "Part 1 owned Store, Runtime and Control API source files only."
+      },
+      {
+        "command": "cargo test -p runalith-store --offline populated_schema_v8_migrates_catalog_ddl_without_losing_session_or_workflow_history -- --nocapture",
+        "exit_code": 0,
+        "tests_passed": 1,
+        "tests_failed": 0,
+        "qualification": "Reconstructed populated v8 schema boundary migrated to v18; not an external historical Node database or production migration."
+      },
+      {
+        "command": "cargo test -p runalith-store --offline",
+        "exit_code": 0,
+        "tests_passed": 71,
+        "tests_failed": 0,
+        "scope": "Includes persisted Node predicate fixture differential slice and reconstructed populated v8 migration test."
+      },
+      {
+        "command": "cargo test -p runalith-control-api --offline",
+        "exit_code": 0,
+        "tests_passed": 13,
+        "tests_failed": 0,
+        "coverage": "Case-insensitive Bearer scheme, invalid credential whitespace, strict limit query parsing, existing auth/API/coordinator tests."
+      },
+      {
+        "command": "cargo clippy -p runalith-store -p runalith-runtime -p runalith-control-api --all-targets --offline -- -D warnings",
+        "exit_code": 0,
+        "scope": "Part 1 Store/Runtime/Control API packages."
+      },
+      {
+        "command": "rustfmt --edition 2024 --check --config skip_children=true crates/runalith-store/src/lib.rs crates/runalith-runtime/src/lib.rs crates/runalith-control-api/src/lib.rs",
+        "exit_code": 0,
+        "scope": "Part 1 Store/Runtime/Control API source files."
+      },
+      {
+        "command": "git diff --check && git diff --cached --check",
+        "exit_code": 0
+      },
+      {
+        "command": "cargo test --workspace --offline",
+        "exit_code": 0,
+        "tests_passed": 403,
+        "tests_failed": 0
+      },
+      {
+        "command": "node --input-type=module Node evaluateSuccessPredicate fixture oracle",
+        "exit_code": 0,
+        "result": "NODE_PREDICATE_ORACLE_PASS cases=15 types=11"
+      }
+    ],
+    "failed": [
+      {
+        "command": "node --test --test-name-pattern='workflow_coordinator_step|workflow_policy|workflow_synthesize|custom_role_workflow_catalog' tests/test-runalith-plugin.js",
+        "exit_code": 1,
+        "top_level_tests_failed": 1,
+        "failure": "tests/test-runalith-plugin.js:4639 same-request retry expected 'already_present', actual 'reconciled_after_restart'.",
+        "scope": "Reproduced. Root cause: Part 2 `WorkspaceWriteCapabilityService.applyWrite` invokes pending-intent recovery before same-request receipt lookup; failed receipt path clears intent owner identity, so immediate retry is classified as restart recovery. Part 2/Node ownership; no source or oracle changed."
+      },
+      {
+        "command": "cargo test --workspace --offline -q",
+        "exit_code": 1,
+        "failure": "Workspace doctest failed in runalith-agg: extern location for runalith_domain rlib did not exist during the concurrent workspace build; package-level Control API and Store tests subsequently passed."
+      },
+      {
+        "command": "cargo check --workspace --offline",
+        "exit_code": 101,
+        "failure": "Part 3-owned rust/crates/runalith-domain/src/artifact_contract.rs fails compilation: Option<&Value> passed where &Value required; const fn matches str, unsupported by current toolchain."
+      },
+      {
+        "command": "cargo clippy --workspace --all-targets --offline -- -D warnings",
+        "exit_code": 101,
+        "failure": "Blocked by the same Part 3-owned runalith-domain compilation errors; no Part 3 files modified."
+      },
+      {
+        "command": "cargo fmt --all -- --check",
+        "exit_code": 1,
+        "failure": "Formatting differences in Part 3-owned rust/crates/runalith-domain/src/artifact_contract.rs and src/lib.rs; left untouched."
+      }
+    ],
+    "not_established": [
+      "No independent GitHub Actions CI execution or clean-clone build evidence.",
+      "No production host wiring for catalog identity, trusted skills, result producer, approval or coordinator worker verifiers.",
+      "No production host startup, Rust cutover, external provider dispatch, trust provisioning or checkpoint authority receipt.",
+      "No complete Node-to-Rust differential lifecycle suite or full Node success predicate parity.",
+      "No historical populated Node DB import, production migration, rollback proof or active workflow drain.",
+      "Node local MCP E2E currently fails at the Part 2 scoped-write receipt outcome assertion; no Node/Part 2 source was changed.",
+      "Control API HTTP library exists, but no standalone Control host binary/process, physical Control-owned schema/database extraction or cross-process crash/restart acceptance exists.",
+      "No deterministic local-step orchestration or authoritative cross-part recovery disposition; recovery API remains read-only and unresolved.",
+      "No populated historical schema-v8 fixture proving the exact v8→v9 custom-catalog migration; no production or legacy Node database migration was attempted.",
+      "No global persisted HTTP Idempotency-Key ledger; API preserves Store operation-specific idempotency/conflict behavior only.",
+      "Latest workspace validation batch is not green: workspace doctest failed during concurrent build; cargo check and all-target Clippy are blocked by Part 3-owned runalith-domain compile errors; workspace fmt reports Part 3-owned formatting differences.",
+      "CodeGraph agent-message preflight remains blocked: shell executable /home/long/.local/bin/codegraph v1.6.0 works and index reports current, but agent runner reports spawnSync codegraph ENOENT; attempted message was not queued and no agent coordination occurred.",
+      "The populated v8 migration fixture is reconstructed from current repository migration DDL; it is not an externally sourced historical Node database, isolated v8→v9 proof, production migration or rollback proof.",
+      "No full Node-to-Rust success predicate parity: 12 persisted fixture cases compare applicable outcomes; three negative references are rejected at attachment and seven authority-dependent families remain UNRESOLVED.",
+      "No full Node lifecycle differential/E2E or independent Control process/database acceptance; the new tests are scoped Store/API tests.",
+      "No full Node-to-Rust predicate or lifecycle parity: 12 applicable persisted fixture cases compare outcomes; three negative references are rejected at attachment and seven authority-dependent families remain UNRESOLVED.",
+      "No standalone Control process/isolated Control database, production host authority composition or authoritative cross-part recovery disposition."
+    ],
+    "non_reproduced_previous_failures": [
+      "Earlier handoff workspace worker heartbeat assertion (left 1, right 2) did not reproduce in the current cargo test --workspace --offline run.",
+      "Earlier workspace rustfmt discrepancy in Part 2 sandbox did not reproduce in cargo fmt --all -- --check.",
+      "Earlier workspace all-target Clippy sandbox warnings did not reproduce in cargo clippy --workspace --all-targets --offline -- -D warnings.",
+      "Previously reported rustfmt-only discrepancy in untracked rust/crates/runalith-protocol/src/mcp_service_v1.rs:107 no longer reproduces; direct file rustfmt and cargo fmt --all checks pass. Part 1 batch did not edit that file.",
+      "An initial workspace test attempt in this turn observed stale MCP CLI expected count 60 vs runtime 61; shared Part 3 CLI health test subsequently reflected 61 and the complete workspace test passed 403/403. No Part 3 source/test was edited by this Part 1 change."
+    ]
+  },
+  "historical_compatibility": {
+    "current_rust_schema": 18,
+    "migration_v13_to_v14": "Additive immutable trusted-skill pins per custom role version.",
+    "migration_v14_to_v15": "Additive local checkpoint operation/event/fencing/quarantine ledgers.",
+    "migration_v15_to_v16": "Additive same-file dual-connection verification probe table.",
+    "migration_v16_to_v17": "Additive Governance decision/event DDL.",
+    "migration_v13_to_v17_populated_fixture": "PASS; historical fixture covers v13→v17 only, not the v17→v18 receipt column.",
+    "production_database_migrated": false,
+    "historical_v172_v173_v174_and_archive_bytes_modified": false,
+    "migration_v17_to_v18": "Additive nullable receipt_json column on governance_decisions for signed receipt persistence.",
+    "populated_schema_v8_fixture": "PASS; reconstructed populated v8 boundary migrated explicitly through v18 with workflow/session/ACL/message preservation and event-chain integrity; not an external historical database or isolated v8→v9 proof."
+  },
+  "authority_gates": {
+    "status": "OPEN",
+    "count": 6,
+    "codes": [
+      "PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED",
+      "INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED",
+      "PRODUCTION_AGG_TRUST_CONFIGURATION_NOT_VERIFIED",
+      "PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED",
+      "ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN",
+      "RUNNING_TASKS_MUST_DRAIN"
+    ]
+  },
+  "rollout_decision": {
+    "status": "BLOCKED",
+    "can_activate_now": false,
+    "node_host_retained": true,
+    "part_1_complete": false,
+    "behavioral_parity_proven": false,
+    "independent_ci_proven": false,
+    "acceptance_proof_complete": false,
+    "rollback_proof_complete": false
+  },
+  "source_sha256": {
+    "rust/crates/runalith-mcp/tests/cli_health.rs": "d8c4fa13830ba8eee1a7306d703b14ba6f6afa28c2c8e9838564e94a973068c9",
+    "rust/crates/runalith-recovery/src/manager.rs": "ddcae41f71ad8935aae7bcb4024a9515751b9af251cb30a4206acab879f4d82d",
+    "rust/crates/runalith-runtime/src/lib.rs": "111a6857e6e6f1227d96fcdbd0b6321a2c3a78c91ae2f41efeebc46c4b7af84c",
+    "rust/crates/runalith-store/src/governance_decisions.rs": "81eaeb12b28c1ff27a8eed043afac9c7a23612383681307d847d269c1582adae",
+    "rust/crates/runalith-store/src/lib.rs": "a3b3e3fe6c7306a70cf840b22a793ea749522550e75873bbf55c5948560287c4",
+    "rust/crates/runalith-store/tests/fixtures/success-contract-v1-node.json": "9e2cb3619cc7ed7b3b46f9fd3abedd12d8136bf10ed614b08fc3c7ff2813e821",
+    "rust/crates/runalith-store/tests/fixtures/workflow-policy-v1-node.json": "ed5f8e609b0f2c0c618ebc3ad05c37b7318596210a002a8e69288036e6d3abfc",
+    "rust/README.md": "bbdfee9ba390dd20086666a2ad48b63a18abad50d5cb9b5bd9c2660285b889bf",
+    "rust/PARITY_MATRIX.md": "f45b916262b22fac0eb252228302ef3f0719a3867f7caabd3c9054e391d100f4",
+    "rust/THREE_PART_IMPLEMENTATION_PLAN.md": "c516c5042c89488cd3839946f9129ff0e69cde0fcc2d8207d3bd8c4c6d2d1ae3",
+    "docs/adr/0002-rust-runtime-rewrite.md": "1a1912b1e111fe27da092257c7275f8ca34078e2d374c79ace69e1795b323bfe",
+    "rust/crates/runalith-store/tests/fixtures/success-contract-predicate-v1-node.json": "9febea68929b32b8680ce04e4bb9f24cf03d89ee31de4ed46844091d09ea4bea",
+    "rust/evidence/engineering-slice-20261101.json": "3a959f51031c86f324ec2eb91ed579d0e071cdc45ae4836edbb7f002ed05c386",
+    "rust/Cargo.toml": "23fbd005a1cf3cabb4f2bdb592837e4df4e8614ae0778c95786b66d61d3e3342",
+    "rust/Cargo.lock": "17f9dd9b4632aaeaf0bd0d21e1721371d0295c95bb2be7999ff1a80702eae61b",
+    "rust/crates/runalith-control-api/Cargo.toml": "931d96423f81b95ecf3328f5d704f54b035c67bdd9436f403dbe50c1ebd36413",
+    "rust/crates/runalith-control-api/src/lib.rs": "4a619507bf60a477f165172e94b758d0ea84ef687bec069c8681f5a019eea199",
+    "rust/crates/runalith-mcp/src/lib.rs": "ee4cb6d0aee354118f768da2f31ec039ee4b5c08c04aa106b6de2d741baf85c9"
+  },
+  "artifact_paths": [
+    "docs/adr/0002-rust-runtime-rewrite.md",
+    "rust/Cargo.lock",
+    "rust/Cargo.toml",
+    "rust/PARITY_MATRIX.md",
+    "rust/README.md",
+    "rust/ROLLOUT_DOSSIER_20261101.md",
+    "rust/THREE_PART_IMPLEMENTATION_PLAN.md",
+    "rust/crates/runalith-control-api/Cargo.toml",
+    "rust/crates/runalith-control-api/src/lib.rs",
+    "rust/crates/runalith-mcp/tests/cli_health.rs",
+    "rust/crates/runalith-recovery/src/manager.rs",
+    "rust/crates/runalith-runtime/src/lib.rs",
+    "rust/crates/runalith-store/src/governance_decisions.rs",
+    "rust/crates/runalith-store/src/lib.rs",
+    "rust/crates/runalith-store/tests/fixtures/success-contract-predicate-v1-node.json",
+    "rust/crates/runalith-store/tests/fixtures/success-contract-v1-node.json",
+    "rust/crates/runalith-store/tests/fixtures/workflow-policy-v1-node.json",
+    "rust/evidence/engineering-slice-20261101.json",
+    "rust/evidence/engineering-slice-20261102.json",
+    "rust/crates/runalith-mcp/src/lib.rs"
+  ]
+}

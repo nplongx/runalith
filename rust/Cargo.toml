@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/runalith-domain",
+  "crates/runalith-artifacts",
+  "crates/runalith-agg",
+  "crates/runalith-execution",
+  "crates/runalith-worker",
+  "crates/runalith-providers",
+  "crates/runalith-sandbox",
+  "crates/runalith-linux-quota",
+  "crates/runalith-protocol",
+  "crates/runalith-store",
+  "crates/runalith-execution-persistence",
+  "crates/runalith-runtime",
+  "crates/runalith-recovery",
+  "crates/runalith-trust",
+  "crates/runalith-mcp",
+  "crates/runalith-control-api",
+]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+chrono = { version = "=0.4.45", features = ["serde", "clock"] }
+libc = "=0.2.189"
+rustix = { version = "=1.1.5", features = ["fs", "process"] }
+hex = "=0.4.3"
+rusqlite = { version = "=0.31.0", features = ["bundled"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["float_roundtrip", "unbounded_depth"] }
+sha2 = "=0.10.9"
+thiserror = "=2.0.20"
+uuid = { version = "=1.26.1", features = ["v4", "serde"] }
+tempfile = "=3.27.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = "warn"

@@ -33,7 +33,7 @@ test('local MCP capture tool records a terminal workflow and exposes it to knowl
     TMPDIR: temp, TEMP: temp, TMP: temp
   };
   const seedScript = `
-    import { WorkflowStore } from './src/runtime/job-store.js';
+    import { WorkflowStore } from './job-store.js';
     const store = new WorkflowStore();
     const job = store.createJob({ conversationKey: 'phase4-capture', title: 'Phase 4 MCP capture smoke' });
     store.transition(job.job_id, 'PROPOSED');
@@ -171,7 +171,7 @@ test('local MCP capture tool records a terminal workflow and exposes it to knowl
   assert.equal(active.result.structuredContent.error.next_actions.length, 1);
 
   const advanceScript = `
-    import { WorkflowStore } from './src/runtime/job-store.js';
+    import { WorkflowStore } from './job-store.js';
     const store = new WorkflowStore();
     const jobId = process.env.PHASE4_TRANSITION_JOB_ID;
     store.transition(jobId, 'PROPOSED');

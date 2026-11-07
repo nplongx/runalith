@@ -11,7 +11,7 @@ process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { ExecutionManager, isVerifiedSuccessfulLocalExecution, isSuccessfulLocalExecutionSummary } = await import('../src/runtime/execution-manager.js');
 const { resolveTaskBatchRoute } = await import('../src/runtime/workflow/plan.js');
 const store = new WorkflowStore();

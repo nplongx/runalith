@@ -31,10 +31,16 @@ function assertRegularSource(relative) {
 const queue = [
   // The manifest-selected versioned entry point is the actual released runtime.
   runtimeEntryPoint,
+  // Stable top-level compatibility facade used by source and extracted tests.
+  'job-store.js',
   // Preserve the historical entry point as a byte-pinned provenance input;
   // it is not selected by the new release manifest.
   'server/index.js',
   'src/runtime/job-store.js',
+  // Workflow/Agent Session construction belongs to the host composition root.
+  // The active entrypoint selects this module through a computed runtimePrefix.
+  'src/runtime/runalith-runtime-composition.js',
+  'src/runtime/execution-evidence.js',
   // The read-only liveness tool is imported through runtimePrefix rather than
   // a static relative path, so package it explicitly with the runtime closure.
   'src/runtime/job-liveness.js',
@@ -71,6 +77,11 @@ const queue = [
   'src/runtime/adaptive-goal-execution-graph-proposal.js',
   // Adapt verified Execution Graph proposals to the existing compiler/validator plan as a sidecar candidate only.
   'src/runtime/adaptive-goal-execution-plan-candidate.js',
+  // AGG owns interpretation of candidate events and evidence-lineage binding;
+  // the Workflow host supplies only WorkflowStatePort read APIs.
+  'src/runtime/adaptive-goal-action-intent-binding-resolver.js',
+  // AGG owns interpretation of reviewed candidate events and evidence lineage;
+  // Workflow supplies only a narrow WorkflowStatePort read API.
   // Versioned review-only action-intent to typed artifact-binding contract; never an alternate executor.
   'src/runtime/adaptive-goal-reviewed-task-inputs.js',
   // Deterministic semantic policy for typed AGG action intents and provider-signed reviewer identity gates.
@@ -80,6 +91,24 @@ const queue = [
   // the server's runtimePrefix dynamic import; include it explicitly so the
   // archive does not rely on the source-tree path at approval/dispatch time.
   'src/runtime/adaptive-goal-approval-subsystem.js',
+  // These state/application boundaries are selected by runtimePrefix imports.
+  // Keep them and their statically imported dependencies in the bundle; the
+  // package collector cannot resolve the entry point's computed runtime path.
+  'src/runtime/adaptive-goal-transaction-boundary.js',
+  'src/runtime/manual-intervention-store.js',
+  'src/runtime/workflow/case01-snapshot-store.js',
+  // CASE-01 snapshot lifecycle, compensation, acknowledgement and recovery
+  // orchestration is loaded through runtimePrefix from the active MCP host.
+  'src/runtime/workflow/case01-snapshot-service.js',
+  'src/runtime/workflow-state-port.js',
+  'src/runtime/execution-persistence-participant.js',
+  // Agent-owned registry, ACL and durable inter-agent queue; composed through
+  // WorkflowStatePort because both owners still share the same SQLite file.
+  'src/runtime/agent-session-store.js',
+  'src/runtime/agent-session-api.js',
+  'src/runtime/agent-session-policy.js',
+  'src/runtime/workspace-write-capability-service.js',
+  'src/runtime/workspace-write-receipt-store.js',
   'src/runtime/execution-manager.js',
   // The packaged Phase-5 recovery regression loads this module via a fixture
   // forwarder; include it in the staged test runtime closure explicitly.

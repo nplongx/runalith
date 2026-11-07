@@ -1,0 +1,32 @@
+[package]
+name = "runalith-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+rusqlite.workspace = true
+uuid.workspace = true
+hex.workspace = true
+runalith-domain = { path = "../runalith-domain" }
+runalith-artifacts = { path = "../runalith-artifacts" }
+runalith-sandbox = { path = "../runalith-sandbox" }
+runalith-providers = { path = "../runalith-providers" }
+runalith-execution-persistence = { path = "../runalith-execution-persistence" }
+runalith-linux-quota = { path = "../runalith-linux-quota" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bin]]
+name = "runalith-worker"
+path = "src/main.rs"
+
+[lints]
+workspace = true

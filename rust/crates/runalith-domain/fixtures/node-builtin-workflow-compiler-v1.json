@@ -1,0 +1,668 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/compiler.js::compileWorkflowPlan + agent-contracts-public-api.js::listAgentContracts",
+  "scope": "Host-conversation built-in task DAG projection only; excludes policy/success contract, phases, batch policy, validation profiles, workspace-write scopes, action intents, synthesis and deterministic task plans.",
+  "role_contracts": [
+    {
+      "role_id": "product-owner",
+      "version": 1,
+      "capability": "product.requirements",
+      "inputs": [
+        "job.request"
+      ],
+      "outputs": [
+        "requirements"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "researcher",
+      "version": 1,
+      "capability": "research.collect",
+      "inputs": [
+        "requirements"
+      ],
+      "outputs": [
+        "research"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "architect",
+      "version": 1,
+      "capability": "architecture.design",
+      "inputs": [
+        "requirements",
+        "research"
+      ],
+      "outputs": [
+        "architecture"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "engineer",
+      "version": 1,
+      "capability": "code.modify",
+      "inputs": [
+        "requirements",
+        "architecture"
+      ],
+      "outputs": [
+        "implementation"
+      ],
+      "permissions": [
+        "workspace.read",
+        "workspace.write",
+        "execution.request",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "security",
+      "version": 1,
+      "capability": "security.audit",
+      "inputs": [
+        "requirements",
+        "architecture",
+        "implementation"
+      ],
+      "outputs": [
+        "security-review"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "qa",
+      "version": 1,
+      "capability": "code.verify",
+      "inputs": [
+        "requirements",
+        "architecture",
+        "implementation"
+      ],
+      "outputs": [
+        "qa-report"
+      ],
+      "permissions": [
+        "workspace.read",
+        "execution.request",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "platform",
+      "version": 1,
+      "capability": "infrastructure.verify",
+      "inputs": [
+        "architecture",
+        "implementation"
+      ],
+      "outputs": [
+        "platform-review"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "writer",
+      "version": 1,
+      "capability": "documentation.write",
+      "inputs": [
+        "requirements",
+        "implementation"
+      ],
+      "outputs": [
+        "documentation"
+      ],
+      "permissions": [
+        "workspace.read",
+        "workspace.write",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "reviewer",
+      "version": 1,
+      "capability": "change.review",
+      "inputs": [
+        "requirements",
+        "architecture",
+        "implementation",
+        "security-review",
+        "qa-report",
+        "platform-review",
+        "documentation"
+      ],
+      "outputs": [
+        "review"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ]
+    },
+    {
+      "role_id": "cto",
+      "version": 1,
+      "capability": "synthesis.approve",
+      "inputs": [
+        "requirements",
+        "architecture",
+        "implementation",
+        "security-review",
+        "qa-report",
+        "platform-review",
+        "documentation",
+        "review"
+      ],
+      "outputs": [
+        "cto-decision"
+      ],
+      "permissions": [
+        "workspace.read",
+        "artifact.create"
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "engineering-m4-v2",
+      "workflow_id": "engineering",
+      "workflow_version": 2,
+      "input_contract": [
+        "job.request"
+      ],
+      "tasks": [
+        {
+          "task_id": "engineering-product-owner",
+          "role_id": "product-owner",
+          "role_version": 1,
+          "capability": "product.requirements",
+          "input_contract": [
+            "job.request"
+          ],
+          "output_artifact_type": "requirements",
+          "depends_on": [],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-researcher",
+          "role_id": "researcher",
+          "role_version": 1,
+          "capability": "research.collect",
+          "input_contract": [
+            "requirements"
+          ],
+          "output_artifact_type": "research",
+          "depends_on": [
+            "engineering-product-owner"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-architect",
+          "role_id": "architect",
+          "role_version": 1,
+          "capability": "architecture.design",
+          "input_contract": [
+            "requirements",
+            "research"
+          ],
+          "output_artifact_type": "architecture",
+          "depends_on": [
+            "engineering-product-owner",
+            "engineering-researcher"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-engineer",
+          "role_id": "engineer",
+          "role_version": 1,
+          "capability": "code.modify",
+          "input_contract": [
+            "requirements",
+            "architecture"
+          ],
+          "output_artifact_type": "implementation",
+          "depends_on": [
+            "engineering-architect"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-security",
+          "role_id": "security",
+          "role_version": 1,
+          "capability": "security.audit",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "security-review",
+          "depends_on": [
+            "engineering-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-qa",
+          "role_id": "qa",
+          "role_version": 1,
+          "capability": "code.verify",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "qa-report",
+          "depends_on": [
+            "engineering-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-platform",
+          "role_id": "platform",
+          "role_version": 1,
+          "capability": "infrastructure.verify",
+          "input_contract": [
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "platform-review",
+          "depends_on": [
+            "engineering-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-writer",
+          "role_id": "writer",
+          "role_version": 1,
+          "capability": "documentation.write",
+          "input_contract": [
+            "requirements",
+            "implementation"
+          ],
+          "output_artifact_type": "documentation",
+          "depends_on": [
+            "engineering-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "engineering-reviewer",
+          "role_id": "reviewer",
+          "role_version": 1,
+          "capability": "change.review",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation",
+            "security-review",
+            "qa-report",
+            "platform-review",
+            "documentation"
+          ],
+          "output_artifact_type": "review",
+          "depends_on": [
+            "engineering-security",
+            "engineering-qa",
+            "engineering-platform",
+            "engineering-writer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        }
+      ]
+    },
+    {
+      "name": "standard-engineering-v3",
+      "workflow_id": "standard-engineering",
+      "workflow_version": 3,
+      "input_contract": [
+        "job.request"
+      ],
+      "tasks": [
+        {
+          "task_id": "standard-product-owner",
+          "role_id": "product-owner",
+          "role_version": 1,
+          "capability": "product.requirements",
+          "input_contract": [
+            "job.request"
+          ],
+          "output_artifact_type": "requirements",
+          "depends_on": [],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-researcher",
+          "role_id": "researcher",
+          "role_version": 1,
+          "capability": "research.collect",
+          "input_contract": [
+            "requirements"
+          ],
+          "output_artifact_type": "research",
+          "depends_on": [
+            "standard-product-owner"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-architect",
+          "role_id": "architect",
+          "role_version": 1,
+          "capability": "architecture.design",
+          "input_contract": [
+            "requirements",
+            "research"
+          ],
+          "output_artifact_type": "architecture",
+          "depends_on": [
+            "standard-product-owner",
+            "standard-researcher"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-engineer",
+          "role_id": "engineer",
+          "role_version": 1,
+          "capability": "code.modify",
+          "input_contract": [
+            "requirements",
+            "architecture"
+          ],
+          "output_artifact_type": "implementation",
+          "depends_on": [
+            "standard-architect"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-security",
+          "role_id": "security",
+          "role_version": 1,
+          "capability": "security.audit",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "security-review",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-qa",
+          "role_id": "qa",
+          "role_version": 1,
+          "capability": "code.verify",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "qa-report",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-platform",
+          "role_id": "platform",
+          "role_version": 1,
+          "capability": "infrastructure.verify",
+          "input_contract": [
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "platform-review",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-writer",
+          "role_id": "writer",
+          "role_version": 1,
+          "capability": "documentation.write",
+          "input_contract": [
+            "requirements",
+            "implementation"
+          ],
+          "output_artifact_type": "documentation",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-reviewer",
+          "role_id": "reviewer",
+          "role_version": 1,
+          "capability": "change.review",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation",
+            "security-review",
+            "qa-report",
+            "platform-review",
+            "documentation"
+          ],
+          "output_artifact_type": "review",
+          "depends_on": [
+            "standard-security",
+            "standard-qa",
+            "standard-platform",
+            "standard-writer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        }
+      ]
+    },
+    {
+      "name": "standard-engineering-v2-legacy",
+      "workflow_id": "standard-engineering",
+      "workflow_version": 2,
+      "input_contract": [
+        "job.request"
+      ],
+      "tasks": [
+        {
+          "task_id": "standard-product-owner",
+          "role_id": "product-owner",
+          "role_version": 1,
+          "capability": "product.requirements",
+          "input_contract": [
+            "job.request"
+          ],
+          "output_artifact_type": "requirements",
+          "depends_on": [],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-researcher",
+          "role_id": "researcher",
+          "role_version": 1,
+          "capability": "research.collect",
+          "input_contract": [
+            "requirements"
+          ],
+          "output_artifact_type": "research",
+          "depends_on": [
+            "standard-product-owner"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-architect",
+          "role_id": "architect",
+          "role_version": 1,
+          "capability": "architecture.design",
+          "input_contract": [
+            "requirements",
+            "research"
+          ],
+          "output_artifact_type": "architecture",
+          "depends_on": [
+            "standard-product-owner",
+            "standard-researcher"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-engineer",
+          "role_id": "engineer",
+          "role_version": 1,
+          "capability": "code.modify",
+          "input_contract": [
+            "requirements",
+            "architecture"
+          ],
+          "output_artifact_type": "implementation",
+          "depends_on": [
+            "standard-architect"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-security",
+          "role_id": "security",
+          "role_version": 1,
+          "capability": "security.audit",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "security-review",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-qa",
+          "role_id": "qa",
+          "role_version": 1,
+          "capability": "code.verify",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "qa-report",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-platform",
+          "role_id": "platform",
+          "role_version": 1,
+          "capability": "infrastructure.verify",
+          "input_contract": [
+            "architecture",
+            "implementation"
+          ],
+          "output_artifact_type": "platform-review",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-writer",
+          "role_id": "writer",
+          "role_version": 1,
+          "capability": "documentation.write",
+          "input_contract": [
+            "requirements",
+            "implementation"
+          ],
+          "output_artifact_type": "documentation",
+          "depends_on": [
+            "standard-engineer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        },
+        {
+          "task_id": "standard-reviewer",
+          "role_id": "reviewer",
+          "role_version": 1,
+          "capability": "change.review",
+          "input_contract": [
+            "requirements",
+            "architecture",
+            "implementation",
+            "security-review",
+            "qa-report",
+            "platform-review",
+            "documentation"
+          ],
+          "output_artifact_type": "review",
+          "depends_on": [
+            "standard-security",
+            "standard-qa",
+            "standard-platform",
+            "standard-writer"
+          ],
+          "execution_mode": "host-conversation",
+          "deterministic": false
+        }
+      ]
+    }
+  ]
+}

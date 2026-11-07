@@ -80,16 +80,24 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     throw new Error('dossier inputs must prove read-only reconciliation and preflight with no live/external mutation');
   }
   if (preflight.candidate?.sha256 !== alignment.bundleSha256) throw new Error('candidate SHA-256 differs between alignment and rollout preflight');
-  if (snapshot.goal_id !== 'runalith-agg-e2e-20261026-clean' || snapshot.snapshot?.snapshot_hash !== reconciliation.adaptiveGoalGraph?.goals?.find(g => g.goalId === snapshot.goal_id)?.snapshotHash) {
+  const snapshotGoalId = snapshot.goal_id || snapshot.snapshot?.goal_id || null;
+  if (snapshotGoalId !== 'runalith-agg-e2e-20261026-clean' || snapshot.snapshot?.snapshot_hash !== reconciliation.adaptiveGoalGraph?.goals?.find(g => g.goalId === snapshotGoalId)?.snapshotHash) {
     throw new Error('dedicated live Goal/Idea snapshot does not match the current reconciliation report');
   }
-  if (snapshot.verified !== false || snapshot.eligibleForAttestation !== false || snapshot.evidenceManifest?.length !== 0) {
-    throw new Error('snapshot must retain its observed unverified/evidence-ineligible state; this tool cannot promote it');
+  if (snapshot.verified !== false || snapshot.currentVerification?.verified === true || !Array.isArray(snapshot.evidenceManifest) ||
+      !Array.isArray(snapshot.snapshot?.evidence_refs)) {
+    throw new Error('snapshot must preserve its observed unsigned state and explicit evidence inventory; this tool cannot promote it');
+  }
+  if (snapshot.eligibleForAttestation === true && (!snapshot.evidenceManifest.length || !snapshot.snapshot.evidence_refs.length)) {
+    throw new Error('snapshot claims evidence eligibility but its evidence manifest or reference set is empty');
   }
   const agg = reconciliation.adaptiveGoalGraph || {};
   const summary = reconciliation.summary || {};
   const proposalSummary = agg.proposalSummary || {};
-  const liveGoal = (agg.goals || []).find(g => g.goalId === snapshot.goal_id) || null;
+  const liveGoal = (agg.goals || []).find(g => g.goalId === snapshotGoalId) || null;
+  const currentVerification = snapshot.currentVerification || {};
+  const evidenceReadyForAttestation = snapshot.eligibleForAttestation === true && snapshot.evidenceManifest.length > 0 &&
+    snapshot.snapshot.evidence_refs.length > 0 && currentVerification.verified !== true;
   const sourceMismatchFindings = (agg.findings || []).filter(f => f.detail === 'source_hash_mismatch').map(f => ({
     code: f.code,
     recordType: f.recordType || 'planner_evidence',
@@ -144,11 +152,79 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     authorizationGranted: false
   }));
   const domains = trustStatus.domains || {};
-  const trustDomainState = Object.fromEntries(['goal_idea_verifier', 'action_intent_reviewer'].map(domain => {
+  const trustDomainNames = ['goal_idea_verifier', 'action_intent_reviewer', 'execution_approval_policy', 'action_intent_maker', 'execution_approval'];
+  const trustDomainState = Object.fromEntries(trustDomainNames.map(domain => {
     const item = domains[domain] || {};
-    return [domain, { available: item.available === true, providerIdPresent: Boolean(item.providerId), rootCount: Array.isArray(item.roots) ? item.roots.length : 0,
+    const observed = item.observationStatus || (Object.hasOwn(item, 'available') ? 'OBSERVED_IN_SUPPLIED_TRUST_REPORT' : 'NOT_OBSERVED');
+    return [domain, { observationStatus: observed, available: item.available === true ? true : item.available === false ? false : null,
+      configJsonVariablePresent: item.configJsonVariablePresent ?? null, configJsonNonEmpty: item.configJsonNonEmpty ?? null,
+      providerIdPresent: Boolean(item.providerId), rootCount: Array.isArray(item.roots) ? item.roots.length : 0,
       configurationFingerprintPresent: Boolean(item.configurationFingerprint), blockers: item.blockers || [],
+      trustLedgerObservation: item.trustLedgerObservation || 'NOT_ESTABLISHED_BY_THIS_READ_ONLY_OBSERVATION',
       effectiveTrustVerified: item.available === true && Boolean(item.providerId) && Array.isArray(item.roots) && item.roots.length > 0 && Boolean(item.configurationFingerprint) }];
+  }));
+  const verifierDomain = domains.goal_idea_verifier || snapshot.verifierConfiguration || {};
+  const reviewerDomain = domains.action_intent_reviewer || {};
+  const trustConfigurationFindings = [];
+  if (verifierDomain.available !== true) trustConfigurationFindings.push({
+    code: 'KNOWLEDGE_VERIFIER_NOT_CONFIGURED', confidence: 'CONFIRMED_BY_LIVE_SNAPSHOT_AND_EFFECTIVE_PROCESS_ENVIRONMENT',
+    source: 'adaptive_goal_knowledge_snapshot_get + read-only active-process environment inspection',
+    sourceArtifacts: [
+      { name: 'snapshot', path: snapshot.__path || null, sha256: snapshot.__sha256 || null },
+      { name: 'trustStatus', path: trustStatus.__path || null, sha256: trustStatus.__sha256 || null }
+    ],
+    cause: (verifierDomain.blockers || currentVerification.blockers || []).map(item => item.message || item.code).filter(Boolean).join('; ') ||
+      'The active host does not expose an available independent Goal/Idea verifier configuration.',
+    owner: 'Host/security administrator + independent Goal/Idea verifier authority', provider: verifierDomain.providerId || 'NOT_CONFIGURED_OR_NOT_OBSERVED',
+    runtime: currentVerification.status || 'NOT_VERIFIED', lease: 'Not applicable',
+    allowedAction: 'Obtain the authority-issued versioned public-key configuration and provision it through the host-supported mechanism; then independently verify effective runtime and trust-ledger state.',
+    prohibitedAction: 'Do not inject a locally generated key, test identity, MCP argument, or shell-only variable.',
+    verifyAfter: 'The active host reports the exact configured provider/root/version and an independently verified signature binds the fresh exact current snapshot.'
+  });
+  if (Object.hasOwn(domains, 'action_intent_reviewer') && reviewerDomain.available !== true) trustConfigurationFindings.push({
+    code: 'AGG_TRUST_CONFIG_NOT_CONFIGURED', confidence: 'CONFIRMED_BY_EFFECTIVE_PROCESS_ENVIRONMENT',
+    source: 'read-only active host process environment inspection',
+    sourceArtifact: { name: 'trustStatus', path: trustStatus.__path || null, sha256: trustStatus.__sha256 || null, domain: 'action_intent_reviewer' },
+    cause: (reviewerDomain.blockers || []).map(item => item.message || item.code).filter(Boolean).join('; ') ||
+      'The active host process has no non-empty action-intent reviewer JSON configuration.',
+    owner: 'Host/security administrator + independent action-intent reviewer authority', provider: reviewerDomain.providerId || 'NOT_CONFIGURED',
+    runtime: reviewerDomain.observationStatus || 'NOT_VERIFIED', lease: 'Not applicable',
+    allowedAction: 'Provision the independently administered reviewer config with exact action-intent scope, then verify runtime version/fingerprint and ledger history.',
+    prohibitedAction: 'Do not substitute the Goal/Idea verifier key or any isolated test identity.',
+    verifyAfter: 'Runtime status reports reviewer domain available with distinct provider ID and disjoint canonical SPKI roots.'
+  });
+  for (const domain of ['execution_approval_policy', 'action_intent_maker', 'execution_approval']) {
+    const item = domains[domain];
+    if (!item || item.available === true) continue;
+    trustConfigurationFindings.push({
+      code: 'AGG_APPROVAL_TRUST_DOMAIN_NOT_CONFIGURED', confidence: 'CONFIRMED_BY_EFFECTIVE_PROCESS_ENVIRONMENT',
+      source: 'read-only active host process environment inspection',
+      sourceArtifact: { name: 'trustStatus', path: trustStatus.__path || null, sha256: trustStatus.__sha256 || null, domain },
+      cause: (item.blockers || []).map(entry => entry.message || entry.code).filter(Boolean).join('; ') ||
+        `The active host process has no non-empty ${domain} JSON configuration.`,
+      owner: `Host/security administrator + independent ${domain} authority`, provider: item.providerId || 'NOT_CONFIGURED',
+      runtime: item.observationStatus || 'NOT_VERIFIED', lease: 'Not applicable',
+      allowedAction: 'Provision only authority-issued public roots under the exact domain scope and independently verify provider/root separation, version, revocation and ledger history.',
+      prohibitedAction: 'Do not create or substitute local keys, approvals, quorum, or test identities.',
+      verifyAfter: 'Fresh host observation and independent authority checks verify this exact domain and its distinct trust root.'
+    });
+  }
+  const otherGoalEvidenceFindings = (agg.goals || []).filter(goal => goal.goalId !== snapshotGoalId &&
+    goal.evidenceAssessment?.eligibleForExternalAttestation !== true).map(goal => ({
+    code: 'ADDITIONAL_GOAL_IDEA_GRAPH_EVIDENCE_INELIGIBLE', confidence: 'CONFIRMED_BY_CURRENT_READ_ONLY_GRAPH_RECONCILIATION',
+    source: 'current Goal/Idea graph inventory',
+    sourceArtifact: { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null,
+      goalId: goal.goalId, snapshotHash: goal.snapshotHash },
+    goalId: goal.goalId, snapshotHash: goal.snapshotHash,
+    evidenceReferenceCount: goal.evidenceAssessment?.declaredReferenceCount ?? null,
+    evidenceManifestEligibility: goal.evidenceAssessment?.eligibleForExternalAttestation ?? null,
+    cause: (goal.evidenceAssessment?.blockers || []).map(item => item.message || item.code).filter(Boolean).join('; ') ||
+      'The graph is not currently eligible for independent attestation.',
+    owner: 'Goal/Idea graph owner and the producers responsible for the missing source evidence', provider: 'Independent verifier not established',
+    runtime: 'Current read-only Goal/Idea graph inventory', lease: 'Not applicable',
+    allowedAction: 'Preserve the current graph as history; obtain actual producer-bound artifacts and create a new revision only through the authorized graph owner path.',
+    prohibitedAction: 'Do not reuse evidence from a different goal, insert placeholder references, or overwrite historical graph revisions.',
+    verifyAfter: 'A fresh snapshot of this exact goal has valid producer-bound evidence and receives an independent signature over its current snapshot hash.'
   }));
   const additionalBlockers = (preflight.decision?.blockers || []).filter(code => !RC23_GATES.some(gate => gate.code === code));
   const evidenceInputs = [alignment, reconciliation, preflight, snapshot, trustStatus].map(item => ({
@@ -160,12 +236,20 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     jobs: { ...summary, executingJobs: executingJobs.length, runningTasks: runningTasks.length,
       runningTasksWithoutActiveLease: runningTasks.filter(({ taskEntry }) => !(taskEntry.leases || []).some(lease => String(lease.state).toUpperCase() === 'ACTIVE')).length },
     graph: {
-      goalId: snapshot.goal_id, snapshotHash: snapshot.snapshot.snapshot_hash, nodeCount: snapshot.snapshot.nodes?.length || 0,
+      goalId: snapshotGoalId, snapshotHash: snapshot.snapshot.snapshot_hash, nodeCount: snapshot.snapshot.nodes?.length || 0,
       edgeCount: snapshot.snapshot.edges?.length || 0, membershipCount: snapshot.snapshot.memberships?.length || 0,
       evidenceReferenceCount: snapshot.snapshot.evidence_refs?.length || 0, evidenceManifestCount: snapshot.evidenceManifest?.length || 0,
       evidenceManifestHash: snapshot.evidenceManifestHash, integrityValid: snapshot.snapshot.integrity_valid === true,
       verified: snapshot.verified === true, eligibleForAttestation: snapshot.eligibleForAttestation === true,
-      attestationBlockers: snapshot.attestationBlockers || []
+      currentVerificationStatus: currentVerification.status || 'NOT_REPORTED',
+      currentAttestationId: currentVerification.attestationId || null,
+      claimTruthVerified: currentVerification.verified === true,
+      independenceVerified: currentVerification.verified === true,
+      planningAuthorityEstablished: currentVerification.verified === true && snapshot.verified === true,
+      attestationBlockers: snapshot.attestationBlockers || [],
+      evidenceInterpretation: evidenceReadyForAttestation
+        ? 'DURABLE_EVIDENCE_LINEAGE_ELIGIBLE_FOR_EXTERNAL_ATTESTATION; CLAIM_TRUTH_AND_INDEPENDENCE_NOT_VERIFIED'
+        : 'EVIDENCE_INELIGIBLE_OR_NOT_INDEPENDENTLY_ATTESTED'
     },
     planner: agg.plannerSummary || {},
     sourceHashMismatchCount: sourceMismatchFindings.length,
@@ -189,43 +273,41 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
   };
   const findings = [
     ...sourceMismatchFindings,
-    {
+    ...(evidenceReadyForAttestation ? [{
+      code: 'GOAL_IDEA_EVIDENCE_READY_REQUIRES_INDEPENDENT_ATTESTATION', confidence: 'DURABLE_LINEAGE_REVALIDATED; CLAIM_TRUTH_AND_INDEPENDENCE_NOT_ADJUDICATED',
+      source: 'live Goal/Idea snapshot + current durable artifact resolver',
+      sourceArtifacts: [
+        { name: 'snapshot', path: snapshot.__path || null, sha256: snapshot.__sha256 || null, goalId: snapshotGoalId, snapshotHash: snapshot.snapshot.snapshot_hash },
+        { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null, goalId: snapshotGoalId }
+      ],
+      goalId: snapshotGoalId, snapshotHash: snapshot.snapshot.snapshot_hash,
+      evidenceReferenceCount: snapshot.snapshot.evidence_refs.length, evidenceManifestCount: snapshot.evidenceManifest.length,
+      evidenceManifestHash: snapshot.evidenceManifestHash,
+      cause: `${snapshot.evidenceManifest.length} durable evidence entries resolve for the exact current snapshot, but the configured independent verifier is unavailable and no signed attestation is present. Local lineage is not claim-truth or independence adjudication.`,
+      owner: 'Host/security administrator, each source claim owner, and independent Goal/Idea verifier authority',
+      provider: verifierDomain.providerId || 'NOT_CONFIGURED', runtime: currentVerification.status || 'NOT_VERIFIED', lease: 'Not applicable to the graph snapshot',
+      allowedAction: 'Provision the independently administered verifier and submit the exact signed attestation request to that authority for claim-truth and evidence-independence adjudication.',
+      prohibitedAction: 'Do not self-sign, reuse test keys, treat artifact lineage as proof of claim truth, or promote this snapshot to planning authority.',
+      verifyAfter: 'The verifier signature is independently checked against the configured root and exact current snapshot/evidence-manifest hashes, then read back as the current verification.'
+    }] : [{
       code: 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY', confidence: 'CONFIRMED_BY_DEDICATED_LIVE_SNAPSHOT_AND_RECONCILIATION',
       source: 'live Goal/Idea snapshot + read-only reconciliation',
       sourceArtifacts: [
-        { name: 'snapshot', path: snapshot.__path || null, sha256: snapshot.__sha256 || null, goalId: snapshot.goal_id, snapshotHash: snapshot.snapshot.snapshot_hash },
-        { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null, goalId: snapshot.goal_id }
+        { name: 'snapshot', path: snapshot.__path || null, sha256: snapshot.__sha256 || null, goalId: snapshotGoalId, snapshotHash: snapshot.snapshot.snapshot_hash },
+        { name: 'reconciliation', path: reconciliation.__path || null, sha256: reconciliation.__sha256 || null, goalId: snapshotGoalId }
       ],
-      goalId: snapshot.goal_id, snapshotHash: snapshot.snapshot.snapshot_hash,
-      cause: 'All seven current node revisions have empty evidenceRefs; the canonical evidence manifest has zero entries.',
-      owner: 'Goal/Idea evidence producers and the source artifact owner; no independent claim verifier is currently configured.',
-      provider: 'No trusted verifier provider is configured', runtime: 'Active Runalith RC.26 host process', lease: 'Not applicable to the graph snapshot',
+      goalId: snapshotGoalId, snapshotHash: snapshot.snapshot.snapshot_hash,
+      evidenceReferenceCount: snapshot.snapshot.evidence_refs.length, evidenceManifestCount: snapshot.evidenceManifest.length,
+      cause: (snapshot.attestationBlockers || []).map(item => item.message || item.code).filter(Boolean).join('; ') ||
+        'The current snapshot has no eligible non-empty canonical evidence manifest.',
+      owner: 'Goal/Idea evidence producers, source artifact owners and independent verifier authority',
+      provider: verifierDomain.providerId || 'NOT_CONFIGURED_OR_NOT_OBSERVED', runtime: currentVerification.status || 'NOT_VERIFIED', lease: 'Not applicable to the graph snapshot',
       allowedAction: 'Produce real typed artifacts through the authorized producer path, then reference only durable artifact:// records whose hash and producer/result/attempt/completion lineage revalidate.',
       prohibitedAction: 'Do not add placeholder evidenceRefs, use isolated test artifacts as production evidence, or revise the graph to claim verification.',
-      verifyAfter: 'A fresh snapshot shows non-empty verified durable evidence manifest, current exact snapshot binding, independent signed attestation, and successful revalidation.'
-    },
-    {
-      code: 'KNOWLEDGE_VERIFIER_NOT_CONFIGURED', confidence: 'CONFIRMED_BY_RUNTIME_SNAPSHOT_AND_TRUST_STATUS',
-      source: 'adaptive_goal_knowledge_snapshot_get + adaptive_goal_trust_configuration_status',
-      sourceArtifacts: [
-        { name: 'snapshot', path: snapshot.__path || null, sha256: snapshot.__sha256 || null },
-        { name: 'trustStatus', path: trustStatus.__path || null, sha256: trustStatus.__sha256 || null }
-      ],
-      cause: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON is blank in the effective runtime.', owner: 'Host/security administrator + independent Goal/Idea verifier authority',
-      provider: 'Not configured', runtime: 'Effective process environment reports unavailable', lease: 'Not applicable',
-      allowedAction: 'Provision the authority-issued versioned config through host-supported configuration and verify effective runtime ledger state.',
-      prohibitedAction: 'Do not inject a locally generated key, test identity, MCP argument, or shell-only variable.',
-      verifyAfter: 'Runtime status reports available with provider/root fingerprints and matching versioned trust-ledger history.'
-    },
-    {
-      code: 'AGG_TRUST_CONFIG_NOT_CONFIGURED', confidence: 'CONFIRMED_BY_RUNTIME_TRUST_STATUS',
-      source: 'adaptive_goal_trust_configuration_status', cause: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON is blank in the effective runtime.',
-      sourceArtifact: { name: 'trustStatus', path: trustStatus.__path || null, sha256: trustStatus.__sha256 || null, domain: 'action_intent_reviewer' },
-      owner: 'Host/security administrator + independent action-intent reviewer authority', provider: 'Not configured', runtime: 'Effective process environment reports unavailable', lease: 'Not applicable',
-      allowedAction: 'Provision the independently administered reviewer config with exact action-intent scope, then verify runtime version/fingerprint ledger history.',
-      prohibitedAction: 'Do not substitute the Goal/Idea verifier key or any isolated test identity.',
-      verifyAfter: 'Runtime status reports reviewer domain available with distinct provider ID and disjoint canonical SPKI roots.'
-    },
+      verifyAfter: 'A fresh snapshot shows a non-empty eligible evidence manifest, followed by independent signed attestation bound to the exact current snapshot hash.'
+    }]),
+    ...trustConfigurationFindings,
+    ...otherGoalEvidenceFindings,
     {
       code: 'PLAN_GRAPH_SUPPORTING_EVIDENCE_MISSING', confidence: 'CONFIRMED_BY_CURRENT_READ_ONLY_RECONCILIATION',
       source: 'adaptiveGoalGraph.proposalSummary', cause: `${proposalSummary.planGraphStepsMissingEvidence || 0} observed Plan Graph steps lack validated supporting evidence.`,
@@ -248,7 +330,7 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
   return {
     schemaVersion: 1, recordType: 'runalith-agg-live-readiness-dossier', generatedAt,
     decision: { status: 'BLOCKED', canActivateNow: false, productionReady: false,
-      reason: 'Current evidence confirms source/archive byte identity but does not establish independent release authority, production trust, external checkpoint continuity, graph evidence eligibility, or live workflow/task drain.',
+      reason: 'Current evidence confirms source/archive byte identity and one graph evidence manifest is locally eligible for attestation, but it does not establish independent release authority, production trust, external checkpoint continuity, a signed current Goal/Idea snapshot, planning authority, or live workflow/task drain.',
       activationAuthorized: false, lifecycleMutationAuthorized: false },
     candidate, evidenceInputs,
     checks: {
@@ -263,9 +345,9 @@ export function buildAggReadinessDossier({ alignment, reconciliation, preflight,
     additionalBlockers: additionalBlockers.map(code => ({ code, status: 'OPEN', source: 'current rollout preflight',
       sourceArtifact: { name: 'preflight', path: preflight.__path || null, sha256: preflight.__sha256 || null, blockerCode: code },
       action: code === 'ROLLBACK_BUNDLE_NOT_VERIFIED' || code === 'ROLLBACK_VERSION_DOES_NOT_MATCH_INSTALLED_BASELINE'
-        ? 'Use a verified rollback archive whose version and bytes match the installed baseline; do not claim RC.25 is the current rollback baseline while RC.26 is installed.'
+        ? `Use a verified rollback archive whose version and bytes match the installed baseline ${preflight.host?.installedGeneration?.manifestVersion || 'reported by the host'}; preserve the installed generation and do not infer rollback authority from a content-derived snapshot.`
         : code === 'CANDIDATE_VERSION_ALREADY_INSTALLED'
-          ? 'Treat RC.26 as the installed baseline, not as a new activation candidate; evaluate a separately versioned successor only through host-managed rollout.'
+          ? `Candidate ${preflight.candidate?.version || 'version'} is already the host-installed version ${preflight.host?.installedGeneration?.manifestVersion || 'reported by the host'}; treat the packaged bytes as an unactivated engineering artifact and require a separately versioned candidate plus host-managed rollout authorization.`
           : 'Inspect the exact preflight detail and resolve only through the owner-authorized path.', authorizationGranted: false })),
     policy: { evidenceIsReadOnlyObservation: true, reportHashIsIntegrityNotAuthority: true,
       noTestTrustPromotedToProduction: true, noMissingLeaseMeansWorkerDead: true,

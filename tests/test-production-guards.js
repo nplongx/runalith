@@ -6,7 +6,10 @@ import { tempDir } from './test-temp-dir.js';
 
 const root = '/home/long/work/chatgpt-adapter';
 const tempRoot = tempDir('production-guards-');
-const testDb = path.join(root, 'data', `test-production-guards-${crypto.randomUUID()}.db`);
+// Use the private test fixture root instead of the repository's shared `data`
+// path. The production database guard rejects replaceable writable ancestors
+// such as a group/world-writable workspace parent.
+const testDb = path.join(tempRoot, `test-production-guards-${crypto.randomUUID()}.db`);
 const fakeOpenClaw = path.join(tempRoot, `fake-openclaw-${crypto.randomUUID()}.mjs`);
 process.env.WORKFLOW_DB = testDb;
 process.env.WORKFLOW_DATA_DIR = path.dirname(testDb);

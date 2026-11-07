@@ -2,6 +2,8 @@
 
 This guide takes a contributor from a clean checkout to a locally tested MCP runtime. It does not authorize a real workflow or a release.
 
+For the current checkout's exact validation and acceptance state, see the [repository status snapshot](STATUS_2026-11-07.md). As of 2026-11-07 the full Node and Rust acceptance commands are not green; do not interpret the setup commands below as evidence that this working candidate has passed them.
+
 ## Prerequisites
 
 - Node.js **22.13 or newer** and npm.
@@ -29,14 +31,14 @@ The packer creates a uniquely named `.mcpb` under `dist/`, validates the archive
 
 ## 3. Connect over stdio
 
-For clients that launch an MCP stdio server directly, configure the server with the absolute path to the **versioned runtime entry point selected by the checked-out package metadata**. For the current RC.11 source this is `server/index-v1.0.9-rc.11.js`; `server/index.js` remains a historical, hash-pinned compatibility input. Example configuration (adapt the outer shape to your client):
+For clients that launch an MCP stdio server directly, configure the server with the absolute path selected by `runtimeEntryPoint` in `package.json`. In this checkout, the field selects `server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js`. Do not infer the runtime filename from the package version: this checkout declares package version `1.0.9-rc.72` while pinning the runtime entry point separately. `server/index.js` remains a historical, hash-pinned compatibility input. Example configuration (adapt the outer shape to your client):
 
 ```json
 {
   "mcpServers": {
     "runalith": {
       "command": "node",
-      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.11.js"],
+      "args": ["/absolute/path/to/runalith/server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js"],
       "env": {
         "RUNALITH_DATA_DIR": "/absolute/path/to/private/runalith-data",
         "RUNALITH_WORKSPACE": "/absolute/path/to/workspace"
@@ -49,6 +51,19 @@ For clients that launch an MCP stdio server directly, configure the server with 
 Use a private data directory and a dedicated workspace. If your client supports MCPB installation, you can install the built bundle through the client's own package-management UI; the steps are client-specific. Once connected, call `orchestrator_health`, then `workflow_catalog`.
 
 The runtime speaks newline-delimited JSON-RPC on stdin/stdout and does not open an HTTP listener. Port `8318` belongs to the optional dashboard only.
+
+### Data and workspace paths
+
+The server needs no `.env` file. Set environment variables in the MCP client's server configuration when you need non-default paths:
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `RUNALITH_DATA_DIR` | Private directory for local runtime state | `~/.runalith/agent-orchestrator` on a fresh installation; an existing legacy data directory is retained when applicable. |
+| `RUNALITH_WORKSPACE` | Default workspace root | The current user's home directory. |
+| `RUNALITH_WORKFLOW_DB` | Workflow SQLite database path | `<RUNALITH_DATA_DIR>/workflow.db`. |
+| `RUNALITH_EXECUTION_TMP_DIR` | Local execution temporary directory | `<RUNALITH_DATA_DIR>/runtime`. |
+
+The older `CHAT_ON_STEROIDS_*` and `WORKFLOW_*` aliases remain accepted for compatibility; prefer the `RUNALITH_*` names for new configuration. Keep the data directory private and use canonical, non-symlink paths. On POSIX systems the server enforces restrictive directory permissions and refuses to open workflow state when group/world access remains enabled. Do not point a local test setup at production data or a shared workspace.
 
 ## 4. Understand the approval boundary
 
@@ -66,7 +81,7 @@ When an approved plan contains deterministic local `ExecutionManager` tasks, ins
 
 For code-writing workflows, preflight is expected to require exact deterministic validation task contracts. After execution, inspect per-item results and durable evidence rather than trusting a narrative summary. If approval predates the policy schema, preserve its original plan hash and diagnose the workflow rather than rewriting its stored plan.
 
-**Current change status:** not release-ready. Retry-lineage verification, broader fingerprint roots, direct-completion binding checks, policy-denial audits and schema-v1 migration guards have been updated. Regression fixtures now cover missing/mismatched completion bindings, root-wrapper drift and full synthesis after a same-ID batch retry. No tests, syntax checks, documentation generation or docs checks have run. Preserve the approved plan hash. Run validation only after a separate immutable plan pins exact commands and is explicitly approved; dispatch the approved deterministic tasks only through `execute_batch`.
+The quickstart validates a local checkout only. A green local test suite does not certify production readiness, autonomous worker quality, live provider integration, or exactly-once external delivery. Check the release and acceptance record that matches the exact package identity before evaluating a candidate; never treat local package metadata as publication or activation approval.
 
 ## 5. Optional: start the read-only dashboard
 
@@ -88,6 +103,6 @@ Open the URL printed by the server (default: `http://127.0.0.1:8318`). The dashb
 
 Building or installing a candidate is not release approval. Follow the release policy and [known issues](KNOWN_ISSUES.md) before relying on an artifact outside controlled testing.
 
-### Local Chat On Steroids plugin upgrade
+### Host installation and activation
 
-Do not replace the live generation directory or kill its child process manually. Treat the [RC.8 rollout runbook](runalith-rollout-rc8.md) as historical candidate-specific procedure, not current RC.11 approval. Before any activation, review the [RC.11 acceptance record](goal-plan-execution-acceptance-rc11-20261026.md), perform the read-only host/database preflight, and resolve its host-trust and per-workflow blockers with the responsible authorities. In particular, do not install while the rollout gate is `BLOCKED`, trust/checkpoint authority is unverified, or active jobs/tasks remain unreconciled. The repository deliberately has no live install/restart command.
+Do not replace a live generation directory or kill its child process manually. Local `npm start` and MCPB packaging are not host installation or activation procedures. Use only a candidate-specific runbook and exact acceptance evidence approved by the host owner. Before any activation, perform the authorized read-only host/database preflight and resolve host-trust, external-checkpoint, and per-workflow owner/provider blockers with their responsible authorities. Do not install or activate while the rollout gate is `BLOCKED`, trust/checkpoint authority is unverified, or active jobs/tasks remain unreconciled. This repository deliberately exposes no live install/restart command.

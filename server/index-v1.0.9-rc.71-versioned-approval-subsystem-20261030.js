@@ -84,16 +84,26 @@ try { fs.chmodSync(adaptiveGoalTrustConfigurationDbPath, 0o600); }
 catch (error) { adaptiveGoalTrustConfigurationDb.close(); throw new Error(`cannot enforce private permissions on AGG trust configuration ledger: ${error.message}`); }
 adaptiveGoalTrustConfigurationRuntime.initializeAdaptiveGoalTrustConfigurationLedger(adaptiveGoalTrustConfigurationDb);
 const [{ workflowStore, WORKFLOW_DB_PATH }, { ExecutionManager, isVerifiedSuccessfulLocalExecution, isSuccessfulLocalExecutionSummary, assertExecutionBatchRetryLineage }] = await Promise.all([
-  import(`${runtimePrefix}/job-store.js`),
+  import(`${runtimePrefix}/runalith-runtime-composition.js`),
   import(`${runtimePrefix}/execution-manager.js`)
 ]);
-const [{ artifactSchemaForType, validateArtifact, validateArtifactContent }, { getAgentArtifactType, getAgentInputArtifactTypes, getAgentContract }] = await Promise.all([
+const { createWorkflowStatePort } = await import(`${runtimePrefix}/workflow-state-port.js`);
+const workflowState = createWorkflowStatePort(workflowStore);
+const { createManualInterventionStore } = await import(`${runtimePrefix}/manual-intervention-store.js`);
+const manualInterventionStore = createManualInterventionStore(workflowStore);
+const { createWorkspaceWriteReceiptStore } = await import(`${runtimePrefix}/workspace-write-receipt-store.js`);
+const workspaceWriteReceiptStore = createWorkspaceWriteReceiptStore(workflowStore);
+const { createCase01SnapshotStore } = await import(`${runtimePrefix}/workflow/case01-snapshot-store.js`);
+const case01SnapshotStore = createCase01SnapshotStore(workflowStore);
+const { createAdaptiveGoalTransactionBoundary } = await import(`${runtimePrefix}/adaptive-goal-transaction-boundary.js`);
+const adaptiveGoalTransactions = createAdaptiveGoalTransactionBoundary(workflowStore);
+const [{ artifactSchemaForType, validateArtifact, validateArtifactContent }, workflowAgentContracts] = await Promise.all([
   import(`${runtimePrefix}/workflow/artifacts.js`),
   import(`${runtimePrefix}/workflow/agent-contracts.js`)
 ]);
+const { getAgentArtifactType, getAgentInputArtifactTypes, getAgentContract } = workflowAgentContracts;
 const { assessProductionQaExecution } = await import(`${runtimePrefix}/workflow/catalog/production.js`);
-const { replaceFileWithin, readFileWithin } = await import(`${runtimePrefix}/secure-filesystem.js`);
-const { createCase01WorkspaceSnapshot, removeCase01WorkspaceSnapshot, reconcileCase01WorkspaceSnapshots, validateCase01WorkspaceArtifact, readVerifiedCase01WorkspaceSnapshot, collectCase01SnapshotReferences, validateCase01DurableSnapshotReferences } = await import(`${runtimePrefix}/workflow/case01-artifact-acceptance.js`);
+const secureFilesystemRuntime = await import(`${runtimePrefix}/secure-filesystem.js`);
 const customRoles = await import(`${runtimePrefix}/workflow/custom-roles.js`);
 customRoles.initializeCustomRoleStore(workflowStore.db);
 const roleProfilesRuntime = await import(`${runtimePrefix}/workflow/role-profiles.js`);
@@ -119,6 +129,17 @@ const adaptiveGoalReviewedTaskInputs = await import(`${runtimePrefix}/adaptive-g
 const adaptiveGoalExecutionPlanCandidate = await import(`${runtimePrefix}/adaptive-goal-execution-plan-candidate.js`);
 const adaptiveGoalReviewerIdentity = await import(`${runtimePrefix}/adaptive-goal-reviewer-identity.js`);
 adaptiveGoalReviewerIdentity.configureAdaptiveGoalTrustConfigurationLedger(adaptiveGoalTrustConfigurationDb);
+const adaptiveGoalActionIntentPolicy = await import(`${runtimePrefix}/adaptive-goal-action-intent-policy.js`);
+const adaptiveGoalActionIntentBindingResolverRuntime = await import(`${runtimePrefix}/adaptive-goal-action-intent-binding-resolver.js`);
+workflowAgentContracts.configureCompiledActionIntentSemanticVerifier(
+  adaptiveGoalActionIntentPolicy.validateCompiledAdaptiveGoalActionIntentSemanticVerification
+);
+workflowStore.setAdaptiveGoalActionIntentBindingsResolver(adaptiveGoalActionIntentBindingResolverRuntime.createAdaptiveGoalActionIntentBindingResolver({
+  workflowPort: workflowState,
+  verifyCandidateHash: adaptiveGoalExecutionPlanCandidate.verifyAdaptiveGoalExecutionPlanCandidateHash,
+  assertReviewerAttestation: (jobId, candidate, options) =>
+    adaptiveGoalReviewerIdentity.assertAdaptiveGoalReviewerAttestation(workflowStore, jobId, candidate, options)
+}));
 const adaptiveGoalApprovalSubsystem = await import(`${runtimePrefix}/adaptive-goal-approval-subsystem.js`);
 const adaptiveGoalKnowledgeRuntime = await import(`${runtimePrefix}/adaptive-goal-knowledge-store.js`);
 const adaptiveGoalKnowledgeVerifierRuntime = await import(`${runtimePrefix}/adaptive-goal-knowledge-verifier.js`);
@@ -160,394 +181,58 @@ const workspaceWriteContractRuntime = await import(`${runtimePrefix}/workflow/wo
 const recoveryCompatibility = await import(`${runtimePrefix}/workflow/recovery-compatibility.js`);
 const workflowToolErrors = await import(`${runtimePrefix}/workflow/tool-errors.js`);
 const { getJobLivenessDiagnostics } = await import(`${runtimePrefix}/job-liveness.js`);
+const { createWorkspaceWriteCapabilityService, WorkspaceWriteCapabilityError } = await import(`${runtimePrefix}/workspace-write-capability-service.js`);
+const workspaceWriteCapabilityService = createWorkspaceWriteCapabilityService({
+  workflowPort: {
+    getJob: jobId => workflowStore.getJob(jobId),
+    getTask: taskId => workflowStore.getTask(taskId),
+    getExecutionPlan: jobId => workflowStore.getExecutionPlan(jobId),
+    isApprovalCurrent: jobId => workflowStore.isApprovalCurrent(jobId),
+    getProposal: jobId => proposalFor(jobId),
+    reviewWrapperKind: proposal => adaptiveGoalReviewWrapperKind(proposal),
+    verifyApprovalBinding: (jobId, plan, options) => verifiedAdaptiveGoalApprovalBindingForTransition(jobId, plan, options),
+    compileExecutionPlan: (jobId, options) => workflowStore.compileExecutionPlan(jobId, options),
+    getTaskPlanId: task => taskMetadata(task).workflow_plan_task_id,
+    recordEvent: (...args) => workflowStore.recordEvent(...args)
+  },
+  workspacePort: {
+    realpath: target => fs.realpathSync(target),
+    workspaceWriteScopeForRole: (plan, role) => workspaceWriteContractRuntime.workspaceWriteScopeForRole(plan, role),
+    pathIsWithinWorkspaceWriteScope: (target, scope) => workspaceWriteContractRuntime.pathIsWithinWorkspaceWriteScope(target, scope),
+    readFileWithin: (root, target) => secureFilesystemRuntime.readFileWithin(root, target),
+    replaceFileWithin: (root, target, contents, options) => secureFilesystemRuntime.replaceFileWithin(root, target, contents, options)
+  },
+  receiptStore: workspaceWriteReceiptStore
+});
 
 const CASE01_SNAPSHOT_BASE = path.join(dataDir, 'case01-snapshots');
-workflowStore.db.exec(`CREATE TABLE IF NOT EXISTS case01_snapshot_reservations (
-  snapshot_id TEXT PRIMARY KEY,
-  owner_pid INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);`);
-workflowStore.db.exec(`CREATE TABLE IF NOT EXISTS case01_consumption_acks (
-  job_id TEXT PRIMARY KEY REFERENCES jobs(job_id),
-  source_task_id TEXT NOT NULL REFERENCES tasks(task_id),
-  source_result_id TEXT NOT NULL REFERENCES results(result_id),
-  source_artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id),
-  source_attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id),
-  snapshot_id TEXT NOT NULL,
-  cto_task_id TEXT NOT NULL REFERENCES tasks(task_id),
-  cto_result_id TEXT NOT NULL REFERENCES results(result_id),
-  cto_artifact_id TEXT NOT NULL REFERENCES artifacts(artifact_id),
-  cto_attempt_id TEXT NOT NULL REFERENCES attempts(attempt_id),
-  verified_manifest_sha256 TEXT NOT NULL CHECK(length(verified_manifest_sha256)=64),
-  consumed_manifest_sha256 TEXT NOT NULL CHECK(length(consumed_manifest_sha256)=64),
-  lineage_json TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE(job_id, snapshot_id, cto_result_id)
-);`);
+const { createCase01SnapshotService } = await import(`${runtimePrefix}/workflow/case01-snapshot-service.js`);
+const case01SnapshotService = createCase01SnapshotService({
+  snapshotBase: CASE01_SNAPSHOT_BASE,
+  snapshotStore: case01SnapshotStore,
+  workflowPort: {
+    getExecutionPlan: jobId => workflowStore.getExecutionPlan(jobId),
+    getProposal: jobId => proposalFor(jobId),
+    listArtifacts: (...args) => workflowStore.listArtifacts(...args),
+    listArtifactContents: () => workflowState.listArtifactContents(),
+    getArtifact: artifactId => workflowStore.getArtifact(artifactId),
+    getTask: taskId => workflowState.getTask(taskId),
+    getResult: resultId => workflowState.getResult(resultId),
+    hasSuccessfulTaskResult: (resultId, taskId) => workflowState.hasSuccessfulTaskResult(resultId, taskId),
+    getAttempt: (attemptId, taskId) => workflowState.getAttempt(attemptId, taskId),
+    listEventsForJob: (jobId, options) => workflowState.listEventsForJob(jobId, options),
+    listArtifactCreatedEvents: jobId => workflowState.listArtifactCreatedEvents(jobId),
+    getEvent: eventId => workflowState.getEvent(eventId),
+    recordEvent: (...args) => workflowStore.recordEvent(...args),
+    completeLocalTask: (...args) => workflowStore.completeLocalTask(...args)
+  }
+});
 
-function case01CompletionEvent(jobId, resultId) {
-  const rows = workflowStore.db.prepare("SELECT event_id, job_id, type, payload_json, created_at FROM events WHERE job_id=? AND type='task.local_completed'").all(jobId);
-  const matches = [];
-  for (const row of rows) {
-    let payload;
-    try { payload = parseStrictJson(row.payload_json); } catch { throw new Error('CASE-01 completion trace contains malformed task.local_completed payload'); }
-    if (payload?.resultId === resultId) matches.push({ row, payload });
-  }
-  if (matches.length !== 1) throw new Error('CASE-01 requires exactly one completion event for each consumed result');
-  const { row, payload } = matches[0];
-  const expectedId = createHash('sha256').update(`${jobId}|task.local_completed|${resultId}`).digest('hex');
-  if (row.event_id !== expectedId || row.job_id !== jobId || row.type !== 'task.local_completed' ||
-      row.payload_json !== JSON.stringify(payload) ||
-      Object.keys(payload).sort().join(',') !== 'attemptId,executor,resultId,taskId') {
-    throw new Error('CASE-01 completion event must have exact deterministic identity and canonical payload bytes');
-  }
-  return matches[0];
-}
-
-function case01ArtifactEvent(jobId, artifact) {
-  const rows = workflowStore.db.prepare("SELECT event_id, job_id, type, payload_json, created_at FROM events WHERE job_id=? AND type='artifact.created'").all(jobId);
-  const matches = [];
-  for (const row of rows) {
-    let payload;
-    try { payload = parseStrictJson(row.payload_json); } catch { throw new Error('CASE-01 artifact trace contains malformed artifact.created payload'); }
-    if (payload?.artifactId === artifact.artifact_id) matches.push({ row, payload });
-  }
-  if (matches.length !== 1) throw new Error('CASE-01 requires exactly one artifact.created event for each consumed artifact');
-  const { row, payload } = matches[0];
-  const expectedId = createHash('sha256').update(`${jobId}|artifact.created|${artifact.artifact_id}`).digest('hex');
-  if (row.event_id !== expectedId || row.job_id !== jobId || row.type !== 'artifact.created' ||
-      row.payload_json !== JSON.stringify(payload) || Object.keys(payload).sort().join(',') !== 'artifactId,contentHash,status,supersedes,taskId,type' ||
-      payload.taskId !== artifact.task_id || payload.type !== artifact.type || payload.status !== artifact.status ||
-      payload.contentHash !== artifact.content_hash || (payload.supersedes ?? null) !== (artifact.supersedes ?? null)) {
-    throw new Error('CASE-01 artifact.created event conflicts with durable artifact metadata');
-  }
-  return matches[0];
-}
-
-function recordCase01ConsumptionAck({ jobId, taskArtifact, ctoArtifact, synthesisResultId, consumedWorkspaceBytes }) {
-  if (!Array.isArray(consumedWorkspaceBytes) || consumedWorkspaceBytes.length !== 2) {
-    throw new Error('CASE-01 synthesis must provide the exact workspace bytes it consumed');
-  }
-  const db = workflowStore.db;
-  // Serialize all authority reads, content hashes and acknowledgement writes
-  // behind one writer reservation. Computing lineage before BEGIN IMMEDIATE
-  // allowed a second connection to change a result row after hashing it but
-  // before the acknowledgement transaction started.
-  db.exec('BEGIN IMMEDIATE');
-  try {
-  const lockedSourceArtifact = workflowStore.getArtifact(taskArtifact.artifact_id);
-  const lockedCtoArtifact = workflowStore.getArtifact(ctoArtifact.artifact_id);
-  const sameArtifactSnapshot = (actual, supplied) => actual && supplied &&
-    actual.artifact_id === supplied.artifact_id && actual.job_id === supplied.job_id && actual.task_id === supplied.task_id &&
-    actual.type === supplied.type && actual.status === supplied.status && actual.content_hash === supplied.content_hash &&
-    JSON.stringify(actual.content) === JSON.stringify(supplied.content) &&
-    JSON.stringify(actual.evidence) === JSON.stringify(supplied.evidence);
-  if (!sameArtifactSnapshot(lockedSourceArtifact, taskArtifact) || !sameArtifactSnapshot(lockedCtoArtifact, ctoArtifact) ||
-      lockedSourceArtifact.job_id !== jobId || lockedSourceArtifact.status !== 'active' ||
-      lockedSourceArtifact.type !== 'requirements' || lockedSourceArtifact.evidence.length !== 1 ||
-      lockedCtoArtifact.job_id !== jobId || lockedCtoArtifact.status !== 'active' || lockedCtoArtifact.type !== 'cto-decision' ||
-      lockedCtoArtifact.evidence.length !== 1 || lockedCtoArtifact.evidence[0] !== synthesisResultId) {
-    throw new Error('CASE-01 acknowledgement source/CTO artifacts changed or lost exact active result binding before the writer reservation');
-  }
-  const sourceTaskState = db.prepare('SELECT task_id,job_id,status FROM tasks WHERE task_id=?').get(lockedSourceArtifact.task_id);
-  const ctoTaskState = db.prepare('SELECT task_id,job_id,status FROM tasks WHERE task_id=?').get(lockedCtoArtifact.task_id);
-  if (!sourceTaskState || sourceTaskState.job_id !== jobId || sourceTaskState.status !== 'completed' ||
-      !ctoTaskState || ctoTaskState.job_id !== jobId || ctoTaskState.status !== 'completed') {
-    throw new Error('CASE-01 acknowledgement requires both source and CTO tasks to remain durably completed under the writer reservation');
-  }
-  const verified = readVerifiedCase01WorkspaceSnapshot({
-    content: taskArtifact.content, snapshotBase: CASE01_SNAPSHOT_BASE,
-    snapshotId: taskArtifact.content.workspace_snapshot_id
-  });
-  const consumed = consumedWorkspaceBytes.map((entry, index) => {
-    const expected = verified.workspace_artifacts[index];
-    if (!entry || entry.path !== expected.path || entry.encoding !== 'base64' || typeof entry.bytes !== 'string' ||
-        entry.bytes !== expected.bytes_base64 || entry.sha256 !== expected.sha256 ||
-        Buffer.from(entry.bytes, 'base64').toString('base64') !== entry.bytes) {
-      throw new Error(`CASE-01 consumed bytes do not match the verified snapshot at ${expected.path}`);
-    }
-    const bytes = Buffer.from(entry.bytes, 'base64');
-    const digest = createHash('sha256').update(bytes).digest('hex');
-    if (digest !== entry.sha256) throw new Error(`CASE-01 consumer buffer digest mismatch at ${entry.path}`);
-    return { path: entry.path, sha256: digest, size_bytes: bytes.length };
-  });
-  const manifest = JSON.stringify(consumed);
-  const consumedDigest = createHash('sha256').update(manifest).digest('hex');
-  const verifiedManifest = JSON.stringify(verified.workspace_artifacts.map(entry => ({
-    path: entry.path, sha256: entry.sha256, size_bytes: Buffer.from(entry.bytes_base64, 'base64').length
-  })));
-  const verifiedDigest = createHash('sha256').update(verifiedManifest).digest('hex');
-  if (verifiedDigest !== consumedDigest) throw new Error('CASE-01 consumed manifest differs from the independently re-read verified snapshot manifest');
-
-  const sourceResultId = taskArtifact.evidence?.length === 1 ? taskArtifact.evidence[0] : null;
-  const sourceResult = sourceResultId
-    ? workflowStore.db.prepare('SELECT result_id,task_id,outcome,content FROM results WHERE result_id=?').get(sourceResultId)
-    : null;
-  const ctoResult = workflowStore.db.prepare('SELECT result_id,task_id,outcome,content FROM results WHERE result_id=?').get(synthesisResultId);
-  if (!sourceResult || sourceResult.task_id !== taskArtifact.task_id || sourceResult.outcome !== 'success' ||
-      typeof sourceResult.content !== 'string' || !sourceResult.content.trim() || !ctoResult ||
-      ctoResult.task_id !== ctoArtifact.task_id || ctoResult.outcome !== 'success' ||
-      typeof ctoResult.content !== 'string' || !ctoResult.content.trim()) {
-    throw new Error('CASE-01 downstream acknowledgement requires both exact successful source and CTO result rows');
-  }
-  const sourceCompletion = sourceResultId ? case01CompletionEvent(jobId, sourceResultId) : null;
-  const ctoCompletion = case01CompletionEvent(jobId, synthesisResultId);
-  const sourceAttempt = sourceCompletion?.payload?.attemptId
-    ? workflowStore.db.prepare("SELECT attempt_id, task_id, status FROM attempts WHERE attempt_id=? AND task_id=?").get(sourceCompletion.payload.attemptId, taskArtifact.task_id) : null;
-  const ctoAttempt = ctoCompletion?.payload?.attemptId
-    ? workflowStore.db.prepare("SELECT attempt_id, task_id, status FROM attempts WHERE attempt_id=? AND task_id=?").get(ctoCompletion.payload.attemptId, ctoArtifact.task_id) : null;
-  const sourceArtifactEvent = case01ArtifactEvent(jobId, taskArtifact);
-  const ctoArtifactEvent = case01ArtifactEvent(jobId, ctoArtifact);
-  if (!sourceCompletion || !ctoCompletion || sourceCompletion.payload.taskId !== taskArtifact.task_id ||
-      ctoCompletion.payload.taskId !== ctoArtifact.task_id || sourceCompletion.payload.executor !== 'chat-on-steroids-plugin' ||
-      ctoCompletion.payload.executor !== 'chat-on-steroids-plugin' || sourceAttempt?.status !== 'completed' || ctoAttempt?.status !== 'completed') {
-    throw new Error('CASE-01 consumed bytes lack exact source/CTO task, result, attempt and completion-event lineage');
-  }
-  const lineage = {
-    source_task_id: taskArtifact.task_id, source_result_id: sourceResultId, source_artifact_id: taskArtifact.artifact_id,
-    source_attempt_id: sourceAttempt.attempt_id, source_completion_event_id: sourceCompletion.row.event_id,
-    source_artifact_event_id: sourceArtifactEvent.row.event_id, snapshot_id: verified.snapshot_id,
-    cto_task_id: ctoArtifact.task_id, cto_result_id: synthesisResultId, cto_artifact_id: ctoArtifact.artifact_id,
-    cto_attempt_id: ctoAttempt.attempt_id, cto_completion_event_id: ctoCompletion.row.event_id,
-    cto_artifact_event_id: ctoArtifactEvent.row.event_id, verified_manifest_sha256: verifiedDigest,
-    consumed_manifest_sha256: consumedDigest,
-    source_result_content_sha256: createHash('sha256').update(Buffer.from(sourceResult.content, 'utf8')).digest('hex'),
-    cto_result_content_sha256: createHash('sha256').update(Buffer.from(ctoResult.content, 'utf8')).digest('hex'),
-    consumed_files: consumed
-  };
-  if (process.env.NODE_ENV === 'test' && process.env.CHAT_ON_STEROIDS_TEST_CASE01_ACK_LINEAGE_BARRIER_DIR) {
-    const barrierDir = path.resolve(process.env.CHAT_ON_STEROIDS_TEST_CASE01_ACK_LINEAGE_BARRIER_DIR);
-    const armPath = path.join(barrierDir, `${jobId}.arm`);
-    if (fs.existsSync(armPath)) {
-      const readyPath = path.join(barrierDir, `${jobId}.lineage-ready`);
-      const releasePath = path.join(barrierDir, `${jobId}.release`);
-      fs.writeFileSync(readyPath, 'lineage computed before acknowledgement transaction', { flag: 'wx', mode: 0o600 });
-      const deadline = Date.now() + 15000;
-      while (!fs.existsSync(releasePath)) {
-        if (Date.now() >= deadline) throw new Error('test CASE-01 acknowledgement lineage barrier timed out');
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-      }
-    }
-  }
-  const createdAt = new Date().toISOString();
-    const prior = db.prepare('SELECT * FROM case01_consumption_acks WHERE job_id=?').get(jobId);
-    if (prior) {
-      const expected = {
-        source_task_id: lineage.source_task_id, source_result_id: lineage.source_result_id,
-        source_artifact_id: lineage.source_artifact_id, source_attempt_id: lineage.source_attempt_id,
-        snapshot_id: lineage.snapshot_id, cto_task_id: lineage.cto_task_id, cto_result_id: lineage.cto_result_id,
-        cto_artifact_id: lineage.cto_artifact_id, cto_attempt_id: lineage.cto_attempt_id,
-        verified_manifest_sha256: verifiedDigest, consumed_manifest_sha256: consumedDigest,
-        lineage_json: JSON.stringify(lineage)
-      };
-      for (const [key, value] of Object.entries(expected)) {
-        if (prior[key] !== value) throw new Error(`CASE-01 idempotent consumption acknowledgement conflicts at ${key}`);
-      }
-    } else {
-      db.prepare(`INSERT INTO case01_consumption_acks(job_id,source_task_id,source_result_id,source_artifact_id,source_attempt_id,snapshot_id,cto_task_id,cto_result_id,cto_artifact_id,cto_attempt_id,verified_manifest_sha256,consumed_manifest_sha256,lineage_json,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(jobId, lineage.source_task_id, lineage.source_result_id, lineage.source_artifact_id, lineage.source_attempt_id,
-        lineage.snapshot_id, lineage.cto_task_id, lineage.cto_result_id, lineage.cto_artifact_id, lineage.cto_attempt_id, verifiedDigest, consumedDigest, JSON.stringify(lineage), createdAt);
-    }
-    const payload = { ...lineage, acknowledgement: 'runtime-verified-synthesis-input-bytes', claim_scope: 'submitted bytes match immutable snapshot; does not prove unobservable model cognition' };
-    const expectedEventId = createHash('sha256').update(`${jobId}|case01.snapshot_consumption_acknowledged|${synthesisResultId}`).digest('hex');
-    const eventId = workflowStore.recordEvent(jobId, 'case01.snapshot_consumption_acknowledged', payload, synthesisResultId);
-    const event = db.prepare('SELECT event_id, job_id, type, payload_json FROM events WHERE event_id=?').get(eventId);
-    if (eventId !== expectedEventId || !event || event.event_id !== expectedEventId || event.job_id !== jobId ||
-        event.type !== 'case01.snapshot_consumption_acknowledged' || event.payload_json !== JSON.stringify(payload)) {
-      throw new Error('CASE-01 consumption acknowledgement event identity or exact durable payload conflicts with its lineage');
-    }
-    db.exec('COMMIT');
-    return { snapshot_id: verified.snapshot_id, consumed_manifest_sha256: consumedDigest, acknowledgement: 'durable' };
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch {}
-    throw error;
-  }
-}
-
-function validateCase01ConsumptionAck(jobId) {
-  const ack = workflowStore.db.prepare('SELECT * FROM case01_consumption_acks WHERE job_id=?').get(jobId);
-  if (!ack) throw new Error('durable CASE-01 downstream consumption acknowledgement is missing');
-  const source = workflowStore.getArtifact(ack.source_artifact_id);
-  const cto = workflowStore.getArtifact(ack.cto_artifact_id);
-  if (!source || !cto || source.job_id !== jobId || cto.job_id !== jobId || source.status !== 'active' || cto.status !== 'active' ||
-      source.task_id !== ack.source_task_id || cto.task_id !== ack.cto_task_id || source.type !== 'requirements' || cto.type !== 'cto-decision' ||
-      source.content?.workspace_snapshot_id !== ack.snapshot_id || cto.content?.workspace_snapshot_id !== ack.snapshot_id ||
-      JSON.stringify(source.content?.workspace_artifacts) !== JSON.stringify(cto.content?.workspace_artifacts)) {
-    throw new Error('durable CASE-01 consumption acknowledgement no longer matches source/CTO artifacts');
-  }
-  const verified = readVerifiedCase01WorkspaceSnapshot({ content: source.content, snapshotBase: CASE01_SNAPSHOT_BASE, snapshotId: ack.snapshot_id });
-  const files = verified.workspace_artifacts.map(entry => ({
-    path: entry.path, sha256: createHash('sha256').update(Buffer.from(entry.bytes_base64, 'base64')).digest('hex'),
-    size_bytes: Buffer.from(entry.bytes_base64, 'base64').length
-  }));
-  const digest = createHash('sha256').update(JSON.stringify(files)).digest('hex');
-  if (digest !== ack.verified_manifest_sha256 || digest !== ack.consumed_manifest_sha256) {
-    throw new Error('durable CASE-01 consumption digest does not match actual recovered snapshot bytes');
-  }
-  const lineage = parseStrictJson(ack.lineage_json);
-  if (ack.lineage_json !== JSON.stringify(lineage)) {
-    throw new Error('durable CASE-01 consumption acknowledgement lineage JSON is non-canonical or contains duplicate decoded keys');
-  }
-  const expectedLineageKeys = 'consumed_files,consumed_manifest_sha256,cto_artifact_event_id,cto_artifact_id,cto_attempt_id,cto_completion_event_id,cto_result_content_sha256,cto_result_id,cto_task_id,snapshot_id,source_artifact_event_id,source_artifact_id,source_attempt_id,source_completion_event_id,source_result_content_sha256,source_result_id,source_task_id,verified_manifest_sha256';
-  if (!lineage || typeof lineage !== 'object' || Array.isArray(lineage) || Object.keys(lineage).sort().join(',') !== expectedLineageKeys ||
-      !/^[a-f0-9]{64}$/.test(lineage.source_result_content_sha256 || '') || !/^[a-f0-9]{64}$/.test(lineage.cto_result_content_sha256 || '')) {
-    throw new Error('durable CASE-01 consumption acknowledgement lineage schema or result-byte digests are invalid');
-  }
-  const sourceResult = workflowStore.db.prepare('SELECT result_id,task_id,outcome,content FROM results WHERE result_id=?').get(ack.source_result_id);
-  const ctoResult = workflowStore.db.prepare('SELECT result_id,task_id,outcome,content FROM results WHERE result_id=?').get(ack.cto_result_id);
-  if (!sourceResult || sourceResult.result_id !== ack.source_result_id || sourceResult.task_id !== ack.source_task_id ||
-      sourceResult.outcome !== 'success' || typeof sourceResult.content !== 'string' || !sourceResult.content.trim() ||
-      !ctoResult || ctoResult.result_id !== ack.cto_result_id || ctoResult.task_id !== ack.cto_task_id ||
-      ctoResult.outcome !== 'success' || typeof ctoResult.content !== 'string' || !ctoResult.content.trim() ||
-      lineage.source_result_content_sha256 !== createHash('sha256').update(Buffer.from(sourceResult.content, 'utf8')).digest('hex') ||
-      lineage.cto_result_content_sha256 !== createHash('sha256').update(Buffer.from(ctoResult.content, 'utf8')).digest('hex')) {
-    throw new Error('durable CASE-01 consumption acknowledgement no longer matches exact successful source/CTO result bytes');
-  }
-  const exact = {
-    source_task_id: ack.source_task_id, source_result_id: ack.source_result_id, source_artifact_id: ack.source_artifact_id,
-    source_attempt_id: ack.source_attempt_id, snapshot_id: ack.snapshot_id, cto_task_id: ack.cto_task_id,
-    cto_result_id: ack.cto_result_id, cto_artifact_id: ack.cto_artifact_id, cto_attempt_id: ack.cto_attempt_id,
-    verified_manifest_sha256: ack.verified_manifest_sha256, consumed_manifest_sha256: ack.consumed_manifest_sha256
-  };
-  for (const [key, value] of Object.entries(exact)) if (lineage[key] !== value) throw new Error(`durable CASE-01 consumption lineage mismatch at ${key}`);
-  if (JSON.stringify(lineage.consumed_files) !== JSON.stringify(files)) throw new Error('durable CASE-01 consumed file manifest differs from recovered bytes');
-  const sourceCompletion = case01CompletionEvent(jobId, ack.source_result_id);
-  const ctoCompletion = case01CompletionEvent(jobId, ack.cto_result_id);
-  const sourceAttempt = workflowStore.db.prepare("SELECT attempt_id, task_id, status FROM attempts WHERE attempt_id=? AND task_id=?").get(ack.source_attempt_id, ack.source_task_id);
-  const ctoAttempt = workflowStore.db.prepare("SELECT attempt_id, task_id, status FROM attempts WHERE attempt_id=? AND task_id=?").get(ack.cto_attempt_id, ack.cto_task_id);
-  if (sourceCompletion.row.event_id !== lineage.source_completion_event_id || ctoCompletion.row.event_id !== lineage.cto_completion_event_id ||
-      sourceCompletion.payload.taskId !== ack.source_task_id || ctoCompletion.payload.taskId !== ack.cto_task_id ||
-      sourceCompletion.payload.executor !== 'chat-on-steroids-plugin' || ctoCompletion.payload.executor !== 'chat-on-steroids-plugin' ||
-      sourceCompletion.payload.attemptId !== ack.source_attempt_id || ctoCompletion.payload.attemptId !== ack.cto_attempt_id ||
-      sourceAttempt?.status !== 'completed' || ctoAttempt?.status !== 'completed') {
-    throw new Error('durable CASE-01 consumption acknowledgement completion-event or attempt lineage is invalid');
-  }
-  const sourceArtifactEvent = case01ArtifactEvent(jobId, source);
-  const ctoArtifactEvent = case01ArtifactEvent(jobId, cto);
-  if (sourceArtifactEvent.row.event_id !== lineage.source_artifact_event_id || ctoArtifactEvent.row.event_id !== lineage.cto_artifact_event_id) {
-    throw new Error('durable CASE-01 consumption acknowledgement artifact-event lineage is invalid');
-  }
-  const ackRows = workflowStore.db.prepare("SELECT event_id, job_id, type, payload_json, created_at FROM events WHERE job_id=? AND type='case01.snapshot_consumption_acknowledged'").all(jobId);
-  if (ackRows.length !== 1) throw new Error('CASE-01 consumption trace must contain exactly one acknowledgement event for the workflow');
-  const ackEvent = ackRows[0];
-  let payload;
-  try { payload = parseStrictJson(ackEvent.payload_json); } catch { throw new Error('CASE-01 consumption trace contains malformed acknowledgement payload'); }
-  const expectedPayload = {
-    ...lineage,
-    acknowledgement: 'runtime-verified-synthesis-input-bytes',
-    claim_scope: 'submitted bytes match immutable snapshot; does not prove unobservable model cognition'
-  };
-  if (Object.keys(payload).sort().join(',') !== Object.keys(expectedPayload).sort().join(',')) {
-    throw new Error('CASE-01 acknowledgement event contains missing or unknown lineage fields');
-  }
-  const expectedEventId = createHash('sha256').update(`${jobId}|case01.snapshot_consumption_acknowledged|${ack.cto_result_id}`).digest('hex');
-  if (ackEvent.event_id !== expectedEventId || ackEvent.job_id !== jobId || ackEvent.type !== 'case01.snapshot_consumption_acknowledged' ||
-      ackEvent.payload_json !== JSON.stringify(expectedPayload)) {
-    throw new Error('CASE-01 consumption acknowledgement event does not exactly match durable acknowledgement lineage');
-  }
-  return true;
-}
-
-function case01ReferencedSnapshotIds() {
-  return collectCase01SnapshotReferences(workflowStore.db.prepare('SELECT content FROM artifacts').all());
-}
-
-// Serialize the durable-reference decision and filesystem compensation with
-// every other SQLite writer. A plain SELECT followed by unlink is not safe:
-// another writer could publish a reference after the SELECT and before the
-// snapshot is removed. SQLite cannot make the filesystem atomic, but holding
-// the writer reservation closes that database interleaving window. If the
-// reference set cannot be read or cleanup fails, leave the reservation and
-// bytes in place for conservative restart reconciliation.
-function compensateCase01SnapshotIfUnreferenced(snapshotBase, snapshotId) {
-  workflowStore.db.exec('BEGIN IMMEDIATE');
-  try {
-    const referenced = case01ReferencedSnapshotIds();
-    if (referenced.has(snapshotId)) {
-      workflowStore.db.prepare('DELETE FROM case01_snapshot_reservations WHERE snapshot_id=?').run(snapshotId);
-      workflowStore.db.exec('COMMIT');
-      return { removed: false, referenced: true };
-    }
-    removeCase01WorkspaceSnapshot({ snapshotBase, snapshotId });
-    workflowStore.db.prepare('DELETE FROM case01_snapshot_reservations WHERE snapshot_id=?').run(snapshotId);
-    workflowStore.db.exec('COMMIT');
-    return { removed: true, referenced: false };
-  } catch (error) {
-    try { workflowStore.db.exec('ROLLBACK'); } catch {}
-    throw error;
-  }
-}
-
-function processIsAlive(pid) {
-  if (!Number.isSafeInteger(Number(pid)) || Number(pid) < 1) return false;
-  try { process.kill(Number(pid), 0); return true; }
-  catch (error) { return error?.code === 'EPERM'; }
-}
-
-function reconcileCase01SnapshotStore() {
-  // Serialize durable reference/reservation reads with SQLite writers. Without
-  // this transaction, reconciliation could read no reference, then observe a
-  // reservation already deleted by a just-committed completion, and collect a
-  // now-referenced directory using the stale reference set. BEGIN IMMEDIATE
-  // prevents completion from committing between the reads and filesystem sweep.
-  workflowStore.db.exec('BEGIN IMMEDIATE');
-  try {
-    const artifactRows = workflowStore.db.prepare('SELECT content FROM artifacts').all();
-    // A durable artifact reference is a promise that its finalized snapshot
-    // still exists and hashes correctly. Verify that promise before recovery
-    // can collect anything; missing or tampered bytes fail closed, even when
-    // the snapshot base itself has disappeared.
-    const referenced = validateCase01DurableSnapshotReferences({
-      artifactRows,
-      snapshotBase: CASE01_SNAPSHOT_BASE,
-    });
-    let baseExists = true;
-    try { fs.lstatSync(CASE01_SNAPSHOT_BASE); }
-    catch (error) { if (error?.code === 'ENOENT') baseExists = false; else throw error; }
-    if (!baseExists) {
-      workflowStore.db.exec('COMMIT');
-      return { removed: [], preserved: [], errors: [] };
-    }
-
-    const reservations = workflowStore.db.prepare('SELECT snapshot_id, owner_pid, created_at FROM case01_snapshot_reservations').all();
-    const now = Date.now();
-    for (const reservation of reservations) {
-      const createdAt = Date.parse(reservation.created_at);
-      const staleEnough = Number.isFinite(createdAt) && now - createdAt >= 60_000;
-      if (processIsAlive(reservation.owner_pid) || !staleEnough) continue;
-      if (referenced.has(reservation.snapshot_id)) {
-        workflowStore.db.prepare('DELETE FROM case01_snapshot_reservations WHERE snapshot_id=?').run(reservation.snapshot_id);
-        continue;
-      }
-      try {
-        removeCase01WorkspaceSnapshot({ snapshotBase: CASE01_SNAPSHOT_BASE, snapshotId: reservation.snapshot_id });
-        workflowStore.db.prepare('DELETE FROM case01_snapshot_reservations WHERE snapshot_id=?').run(reservation.snapshot_id);
-      } catch (error) {
-        process.stderr.write(`[case01-snapshot-recovery] preserved ${reservation.snapshot_id}: ${String(error?.message || error)}\n`);
-      }
-    }
-    const liveReservations = workflowStore.db.prepare('SELECT snapshot_id FROM case01_snapshot_reservations').all().map(row => row.snapshot_id);
-    const result = reconcileCase01WorkspaceSnapshots({
-      snapshotBase: CASE01_SNAPSHOT_BASE,
-      referencedSnapshotIds: [...referenced],
-      reservedSnapshotIds: liveReservations,
-      minOrphanAgeMs: 60 * 60 * 1000
-    });
-    for (const failure of result.errors) process.stderr.write(`[case01-snapshot-recovery] cleanup failed for ${failure.snapshot_id}: ${failure.error}\n`);
-    workflowStore.db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    try { workflowStore.db.exec('ROLLBACK'); } catch {}
-    throw error;
-  }
-}
-
-// Reservations are committed before any snapshot bytes are created. A crash
-// therefore leaves either a discoverable reservation or an untracked legacy
-// directory subject to the conservative orphan grace period.
-reconcileCase01SnapshotStore();
+// Reconcile snapshots at startup and periodically. The service owns the
+// reservation/reference transaction and conservative filesystem recovery.
+case01SnapshotService.reconcileSnapshots();
 const case01SnapshotRecoveryTimer = setInterval(() => {
-  try { reconcileCase01SnapshotStore(); }
+  try { case01SnapshotService.reconcileSnapshots(); }
   catch (error) { process.stderr.write(`[case01-snapshot-recovery] reconciliation failed: ${String(error?.message || error)}\n`); }
 }, 60_000);
 case01SnapshotRecoveryTimer.unref?.();
@@ -699,26 +384,9 @@ const workflowWriteFilesSchema = {
   required: ['job_id', 'task_id', 'patch_id', 'writes']
 };
 
-// Filesystem mutation and SQLite receipt cannot commit atomically together.
-// The unique patch/path key lets retries reconcile intended bytes after a crash.
-workflowStore.db.exec(`
-  CREATE TABLE IF NOT EXISTS workspace_write_receipts (
-    receipt_id TEXT PRIMARY KEY,
-    job_id TEXT NOT NULL,
-    task_id TEXT NOT NULL,
-    plan_hash TEXT NOT NULL,
-    patch_id TEXT NOT NULL,
-    request_hash TEXT NOT NULL,
-    path TEXT NOT NULL,
-    outcome TEXT NOT NULL CHECK (outcome IN ('created','replaced','already_present','reconciled_after_restart')),
-    before_sha256 TEXT NOT NULL,
-    after_sha256 TEXT NOT NULL,
-    size_bytes INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    UNIQUE(job_id, task_id, patch_id, path)
-  );
-  CREATE INDEX IF NOT EXISTS idx_workspace_write_receipts_job ON workspace_write_receipts(job_id, created_at);
-`);
+// WorkspaceWriteReceiptStore owns the receipt schema. The MCP use case keeps
+// filesystem mutation, receipt insert and workflow event inside one named
+// SQLite writer transaction on the same connection.
 
 const adaptiveGoalGraphIdentifierSchema = {
   type: 'string', minLength: 1, maxLength: 80,
@@ -1508,7 +1176,7 @@ const TOOL_DEFS = [
   { name: 'workflow_artifacts', description: 'Read-only listing of persisted typed artifacts and their metadata/status for a local workflow; content is redacted and bounded. Use to check artifact presence/lineage before review or synthesis, not as a replacement for schema/provenance validation.', inputSchema: { type: 'object', properties: { job_id: { type: 'string', minLength: 1 } }, required: ['job_id'] } },
   { name: 'workflow_e2e_run', description: 'State-changing convenience runner for deterministic local steps of an already-approved workflow. Use only when advancing deterministic tasks without host reasoning is sufficient; it never fabricates specialist results, approves a proposal, or self-approves synthesis. Use the coordinator/next-task path when specialist work is required.', inputSchema: { type: 'object', properties: { job_id: { type: 'string', minLength: 1 }, max_tasks: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['job_id'] } },
   { name: 'workflow_recovery_verify', description: 'Read-only post-recovery check of persisted workflow invariants using an independent fresh Node process against the same SQLite database. Use to verify stored-state consistency; this does not prove runtime correctness, a supervisor restart, or external service health.', inputSchema: { type: 'object', properties: { job_id: { type: 'string', minLength: 1 } }, required: ['job_id'] } },
-  { name: 'workflow_record_intervention', description: 'State-changing audit note for a real manual intervention/workaround, capturing reason and what was done for future automation. Use only after an actual intervention; it does not change workflow state, approval, or security policy and must not be used to manufacture evidence.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, task_id: { type: 'string' }, actor: { type: 'string' }, reason: { type: 'string', minLength: 1 }, workaround: { type: 'string', minLength: 1 }, proposed_automation: { type: 'string' }, duration_minutes: { type: 'number', minimum: 0 } }, required: ['reason', 'workaround'] } },
+  { name: 'workflow_record_intervention', description: 'State-changing audit note for a real manual intervention/workaround, capturing reason and what was done for future automation. A task association requires its owning job_id. Record and workflow event commit together; this does not change workflow state, approval, or security policy.', inputSchema: { type: 'object', additionalProperties: false, properties: { job_id: { type: 'string', minLength: 1, maxLength: 200 }, task_id: { type: 'string', minLength: 1, maxLength: 200 }, actor: { type: 'string', minLength: 1, maxLength: 200 }, reason: { type: 'string', minLength: 1, maxLength: 4000 }, workaround: { type: 'string', minLength: 1, maxLength: 8000 }, proposed_automation: { type: 'string', maxLength: 8000 }, duration_minutes: { type: 'number', minimum: 0 } }, required: ['reason', 'workaround'] } },
   { name: 'workflow_interventions', description: 'Read-only query of previously recorded manual interventions, optionally scoped to a workflow. Use for operational learning; it does not apply or validate a workaround.', inputSchema: { type: 'object', properties: { job_id: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 200 } } } },
   { name: 'workflow_validate_artifact', description: 'Read-only validation of typed artifact content against a known schema/optional role. Use before persisting a candidate artifact to catch missing/invalid fields; this alone does not persist it or prove task-result lineage, approval, or overall workflow success.', inputSchema: { type: 'object', properties: { artifact_type: { type: 'string', minLength: 1 }, artifact: { type: 'object' }, role: { type: 'string' } }, required: ['artifact_type', 'artifact'] } },
   { name: 'workflow_access_diagnostics', description: 'Read-only local diagnostics for trust/config clues relevant to CHAT_NOT_TRUSTED. Use to investigate the underlying configuration; it never bypasses or changes trust policy.', inputSchema: { type: 'object', properties: {} } },
@@ -1537,11 +1205,7 @@ for (const tool of TOOL_DEFS) {
   }
 }
 
-workflowStore.db.exec(`CREATE TABLE IF NOT EXISTS manual_interventions (
-  intervention_id TEXT PRIMARY KEY, job_id TEXT, task_id TEXT, actor TEXT NOT NULL,
-  reason TEXT NOT NULL, workaround TEXT NOT NULL, proposed_automation TEXT,
-  duration_minutes REAL, created_at TEXT NOT NULL
-); CREATE INDEX IF NOT EXISTS idx_manual_interventions_job_created ON manual_interventions(job_id, created_at);`);
+// ManualInterventionStore owns its append/list audit table.
 
 function assertString(value, field, max = 12000) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${field} must be a non-empty string`);
@@ -1641,16 +1305,16 @@ function terminalizeFailedWorkflow(jobId, failedTasks) {
   const activeCto = tasks.find(task => task.task_id === job.active_task_id && task.role === 'cto');
   const runningChildren = tasks.filter(task => task.parent_task_id === activeCto?.task_id && task.status === 'running');
   if (runningChildren.length) return { terminalized: false, reason: 'other specialist tasks are still running' };
-  const activeSessions = workflowStore.db.prepare("SELECT session_id, task_id FROM agent_sessions WHERE job_id=? AND state IN ('CREATED','ACTIVE','PAUSED')").all(jobId);
+  const activeSessions = workflowState.listActiveAgentSessionsForJob(jobId);
   const runningExecutions = tasks.filter(task => task.execution_status === 'running');
-  const activeBatches = workflowStore.db.prepare("SELECT batch_id FROM execution_batches WHERE job_id=? AND status IN ('RUNNING','WAITING')").all(jobId);
+  const activeBatches = workflowState.listActiveExecutionBatchesForJob(jobId);
   if (activeSessions.length || runningExecutions.length || activeBatches.length) {
     return { terminalized: false, reason: 'live runtime resources must settle before failure terminalization' };
   }
   const ts = new Date().toISOString();
-  workflowStore.db.prepare("UPDATE tasks SET status='cancelled', updated_at=? WHERE job_id=? AND status='pending'").run(ts, jobId);
+  workflowState.cancelPendingTasksForJob(jobId, ts);
   if (activeCto && ['pending', 'running'].includes(activeCto.status)) {
-    workflowStore.db.prepare("UPDATE tasks SET status='failed', updated_at=? WHERE task_id=? AND status IN ('pending','running')").run(ts, activeCto.task_id);
+    workflowState.failOpenTask(activeCto.task_id, ts);
   }
   const runtime = workflowStore.getWorkflowRuntimeState(jobId);
   if (runtime && runtime.phase !== 'FAILED') {
@@ -1748,7 +1412,7 @@ function recordBatchPolicyDenial(jobId, taskId, plan, rejectedRoute, reasonCode)
   const payload = { jobId, taskId, planHash, policyVersion, rejectedRoute, reasonCode };
   const dedupeKey = ['batch-policy-denied', taskId, planHash, rejectedRoute, reasonCode].join('|');
   const eventIdValue = workflowStore.recordEvent(jobId, 'batch_execution.policy_denied', payload, dedupeKey);
-  const event = workflowStore.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventIdValue);
+  const event = workflowState.getEvent(eventIdValue);
   if (!event || event.job_id !== jobId || event.type !== 'batch_execution.policy_denied' || event.payload_json !== JSON.stringify(payload)) {
     throw new Error('mandatory batch policy denial audit could not be durably verified');
   }
@@ -1757,9 +1421,8 @@ function recordBatchPolicyDenial(jobId, taskId, plan, rejectedRoute, reasonCode)
 function hasUnbatchedSchemaV1ExecutionHistory(task, plan) {
   if (!task || (plan?.schema_version ?? 1) !== 1) return false;
   const hasHistory = (Number.isSafeInteger(task.execution_attempt) && task.execution_attempt > 0) ||
-    Boolean(task.execution_session_id) || Boolean(task.execution_status) ||
-    Boolean(workflowStore.db.prepare('SELECT 1 FROM attempts WHERE task_id=? LIMIT 1').get(task.task_id));
-  return hasHistory && !workflowStore.db.prepare('SELECT 1 FROM execution_batch_items WHERE task_id=? LIMIT 1').get(task.task_id);
+    Boolean(task.execution_session_id) || Boolean(task.execution_status) || workflowState.hasTaskAttemptHistory(task.task_id);
+  return hasHistory && !workflowState.hasTaskBatchItemHistory(task.task_id);
 }
 
 function assertMandatoryBatchEvidence(jobId, plan, children, workspace) {
@@ -1782,11 +1445,7 @@ function assertMandatoryBatchEvidence(jobId, plan, children, workspace) {
         !Number.isSafeInteger(task.execution_attempt) || task.execution_attempt < 1) {
       throw new Error('mandatory batch evidence is missing a successful durable task execution for plan task ' + spec.id);
     }
-    const rows = workflowStore.db.prepare(`SELECT i.batch_id,i.task_id,i.command,i.cwd,i.timeout_ms,i.status AS item_status,
-        i.execution_session_id,i.execution_pid,i.exit_code,i.attempt AS item_attempt,
-        b.job_id AS batch_job_id,b.parent_task_id AS batch_parent_task_id,b.status AS batch_status,b.attempt AS batch_attempt
-      FROM execution_batch_items i JOIN execution_batches b ON b.batch_id=i.batch_id
-      WHERE i.task_id=? AND b.job_id=?`).all(task.task_id, jobId);
+    const rows = workflowState.getMandatoryBatchItemForTask(jobId, task.task_id);
     if (rows.length !== 1) throw new Error('mandatory batch evidence requires exactly one durable batch item for task ' + spec.id);
     const row = rows[0];
     const expectedCommand = canonicalStructuredExecutionCommand(spec.execution.executable, spec.execution.args);
@@ -1797,30 +1456,22 @@ function assertMandatoryBatchEvidence(jobId, plan, children, workspace) {
         Number(row.timeout_ms) !== Number(spec.execution.timeout_ms)) {
       throw new Error('durable batch/item ledger does not match the immutable task contract and successful execution for ' + spec.id);
     }
-    const creationRows = workflowStore.db.prepare("SELECT type,payload_json FROM events WHERE job_id=? AND type='execution.batch.created' AND json_extract(payload_json,'$.batchId')=?")
-      .all(jobId, row.batch_id);
-    const retryRows = workflowStore.db.prepare("SELECT type,payload_json FROM events WHERE job_id=? AND type='execution.batch.retry_started' AND json_extract(payload_json,'$.batchId')=? ORDER BY created_at ASC,rowid ASC")
-      .all(jobId, row.batch_id);
-    const terminalRows = workflowStore.db.prepare("SELECT type,payload_json FROM events WHERE job_id=? AND type IN ('execution.batch.completed','execution.batch.failed') AND json_extract(payload_json,'$.batchId')=? ORDER BY created_at ASC,rowid ASC")
-      .all(jobId, row.batch_id);
-    const batchItems = workflowStore.db.prepare("SELECT task_id,status,exit_code FROM execution_batch_items WHERE batch_id=? ORDER BY rowid ASC")
-      .all(row.batch_id);
+    const batchEvidence = workflowState.getExecutionBatchLineageEvidence(jobId, row.batch_id);
     try {
       assertExecutionBatchRetryLineage({
         batchId: row.batch_id,
-        creationEvents: creationRows.map(event => ({ type: event.type, payload: parseStrictJson(event.payload_json, 'batch creation evidence') })),
-        retryEvents: retryRows.map(event => ({ type: event.type, payload: parseStrictJson(event.payload_json, 'batch retry evidence') })),
-        terminalEvents: terminalRows.map(event => ({ type: event.type, payload: parseStrictJson(event.payload_json, 'batch terminal evidence') })),
+        creationEvents: batchEvidence.creationEvents.map(event => ({ type: event.type, payload: parseStrictJson(event.payload_json, 'batch creation evidence') })),
+        retryEvents: batchEvidence.retryEvents.map(event => ({ type: event.type, payload: parseStrictJson(event.payload_json, 'batch retry evidence') })),
+        terminalEvents: batchEvidence.terminalEvents.map(event => ({ type: event.type, payload: parseStrictJson(event.payload_json, 'batch terminal evidence') })),
         finalAttempt: row.batch_attempt,
-        items: batchItems
+        items: batchEvidence.items
       });
     } catch (error) {
       throw new Error('mandatory batch evidence retry/terminal lineage rejected for ' + spec.id + ': ' + String(error?.message || error));
     }
     if (validationSpecIds.includes(spec.id)) {
       if (!currentFingerprint) throw new Error('deterministic validation requires workspace fingerprint evidence but none was computed');
-      const fingerprintRows = workflowStore.db.prepare("SELECT payload_json FROM events WHERE job_id=? AND type='execution.batch.workspace_fingerprint' AND json_extract(payload_json,'$.batchId')=?")
-        .all(jobId, row.batch_id);
+      const fingerprintRows = batchEvidence.workspaceFingerprintEvents;
       if (fingerprintRows.length !== 1) throw new Error('deterministic validation batch lacks a unique workspace fingerprint record: ' + row.batch_id);
       const fingerprint = parseStrictJson(fingerprintRows[0].payload_json, 'workspace fingerprint evidence');
       if (fingerprint.planHash !== plan.plan_hash || fingerprint.fingerprint !== currentFingerprint || fingerprint.workspace !== path.resolve(workspace) ||
@@ -2062,8 +1713,7 @@ function workflowPreflight(jobId, { actionIntentBindingsOverride = undefined, ap
   try { reviewWrapperKind = adaptiveGoalReviewWrapperKind(proposal); }
   catch (error) { blockers.push({ code: error?.code || 'AGG_REVIEW_WRAPPER_AMBIGUOUS', category: 'policy_denial', message: String(error?.message || error) }); }
   const candidateEventCount = reviewWrapperKind === 'execution_graph'
-    ? workflowStore.db.prepare('SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type=?')
-      .get(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT).count
+    ? workflowState.countEventsForJobType(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT)
     : 0;
   let approvalEvidenceSummary = null;
   if (enforceApprovalQuorum && reviewWrapperKind === 'execution_graph' && candidateEventCount > 0) {
@@ -2176,45 +1826,15 @@ function resolveRoleProfilesForProposal(proposal) {
 }
 
 function isCase01ArtifactLineage(jobId) {
-  return workflowStore.getExecutionPlan(jobId)?.workflow_id === 'custom-case01-artifact-lineage';
+  return case01SnapshotService.isApplicable(jobId);
 }
 
 function validateCase01TaskEvidence(jobId, taskId, artifactContent, artifactId, resultId) {
-  const proposal = proposalFor(jobId);
-  if (typeof artifactContent?.workspace_snapshot_id !== 'string') throw new Error('CASE-01 task artifact is missing its immutable workspace snapshot identity');
-  validateCase01WorkspaceArtifact({ workspace: proposal.workspace, content: artifactContent, snapshotBase: path.join(dataDir, 'case01-snapshots'), snapshotId: artifactContent?.workspace_snapshot_id });
-  const artifact = artifactId ? workflowStore.getArtifact(artifactId) : null;
-  const task = workflowStore.getTask(taskId);
-  const result = workflowStore.db.prepare('SELECT result_id, task_id, outcome FROM results WHERE result_id=?').get(resultId);
-  if (!task || task.job_id !== jobId || task.status !== 'completed' || !artifact || artifact.status !== 'active' || artifact.job_id !== jobId || artifact.task_id !== taskId || artifact.type !== 'requirements' ||
-      artifact.artifact_id !== `requirements-${resultId}` || artifact.evidence.length !== 1 || artifact.evidence[0] !== resultId ||
-      artifact.content?.workspace_snapshot_id !== artifactContent.workspace_snapshot_id ||
-      JSON.stringify(artifact.content?.workspace_artifacts) !== JSON.stringify(artifactContent.workspace_artifacts) ||
-      !result || result.task_id !== taskId || result.outcome !== 'success') {
-    throw new Error('CASE-01 task artifact is not bound to its durable successful task result');
-  }
+  return case01SnapshotService.validateTaskEvidence(jobId, taskId, artifactContent, artifactId, resultId);
 }
 
 function validateCase01SynthesisEvidence(jobId, ctoContent, taskArtifact) {
-  const proposal = proposalFor(jobId);
-  if (typeof taskArtifact.content?.workspace_snapshot_id !== 'string') throw new Error('CASE-01 task artifact is missing its immutable workspace snapshot identity');
-  validateCase01WorkspaceArtifact({ workspace: proposal.workspace, content: ctoContent, taskArtifactId: taskArtifact.artifact_id, snapshotBase: path.join(dataDir, 'case01-snapshots'), snapshotId: taskArtifact.content?.workspace_snapshot_id });
-  if (ctoContent?.workspace_snapshot_id !== taskArtifact.content?.workspace_snapshot_id) {
-    throw new Error('CASE-01 CTO snapshot identity must exactly match the active task artifact');
-  }
-  const persistedPairs = taskArtifact.content?.workspace_artifacts;
-  if (JSON.stringify(persistedPairs) !== JSON.stringify(ctoContent.workspace_artifacts)) {
-    throw new Error('CASE-01 CTO workspace hashes must exactly match the active task artifact');
-  }
-  const task = workflowStore.getTask(taskArtifact.task_id);
-  const resultRefs = taskArtifact.evidence.filter(value => workflowStore.db.prepare('SELECT 1 FROM results WHERE result_id=? AND task_id=? AND outcome=\'success\'').get(value, taskArtifact.task_id));
-  const resultId = resultRefs.length === 1 ? resultRefs[0] : null;
-  const result = resultId ? workflowStore.db.prepare('SELECT result_id, task_id, outcome FROM results WHERE result_id=?').get(resultId) : null;
-  if (taskArtifact.status !== 'active' || taskArtifact.type !== 'requirements' || taskArtifact.job_id !== jobId ||
-      taskArtifact.artifact_id !== `requirements-${resultId}` || taskArtifact.evidence.length !== 1 ||
-      !task || task.job_id !== jobId || task.status !== 'completed' || !result || result.task_id !== task.task_id || result.outcome !== 'success') {
-    throw new Error('CASE-01 synthesis requires a completed task and its durable successful result');
-  }
+  return case01SnapshotService.validateSynthesisEvidence(jobId, ctoContent, taskArtifact);
 }
 
 function getTasks(jobId) {
@@ -2407,8 +2027,7 @@ async function executeDurableBatch(args) {
         (task.execution_attempt != null && task.execution_attempt !== 0)) {
       throw new Error(`execute_batch task already has execution evidence or an unresolved attempt: ${taskId}`);
     }
-    if (workflowStore.db.prepare('SELECT COUNT(*) AS n FROM attempts WHERE task_id=?').get(taskId).n !== 0 ||
-        workflowStore.db.prepare('SELECT COUNT(*) AS n FROM execution_batch_items WHERE task_id=?').get(taskId).n !== 0) {
+    if (workflowState.countTaskAttempts(taskId) !== 0 || workflowState.countTaskBatchItems(taskId) !== 0) {
       throw new Error(`execute_batch task already has prior execution or batch history: ${taskId}`);
     }
 
@@ -2517,7 +2136,7 @@ async function executeDurableBatch(args) {
       fingerprint: workspaceFingerprint, taskIds: tasks.map(item => item.task.task_id).sort()
     };
     const fingerprintEventId = workflowStore.recordEvent(jobId, 'execution.batch.workspace_fingerprint', fingerprintPayload, batch.batch_id + '|workspace-fingerprint');
-    const fingerprintEvent = workflowStore.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(fingerprintEventId);
+    const fingerprintEvent = workflowState.getEvent(fingerprintEventId);
     if (!fingerprintEvent || fingerprintEvent.job_id !== jobId || fingerprintEvent.type !== 'execution.batch.workspace_fingerprint' || fingerprintEvent.payload_json !== JSON.stringify(fingerprintPayload)) {
       throw new Error(`workspace fingerprint event did not persist exact evidence for batch ${batch.batch_id}`);
     }
@@ -3218,10 +2837,10 @@ async function callToolImpl(name, args, telemetryContext = null) {
       }
 
       const conversationKey = `chat-on-steroids:agg-plan:${fingerprint}`;
-      const db = workflowStore.db;
-      db.exec('BEGIN IMMEDIATE');
+      adaptiveGoalTransactions.beginPlanGraphProposalCreate();
       try {
-        const prior = db.prepare("SELECT job_id FROM events WHERE type='job.proposal_requested' AND json_extract(payload_json, '$.adaptive_goal_plan_proposal.fingerprint') = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(fingerprint);
+        const prior = workflowState.findEventsByTypePayload('job.proposal_requested', 'adaptive_goal_plan_proposal.fingerprint', fingerprint,
+          { limit: 1, newestFirst: true })[0] || null;
         if (prior) {
           const priorJob = workflowStore.getJob(prior.job_id);
           const priorPlan = workflowStore.getExecutionPlan(prior.job_id);
@@ -3236,7 +2855,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
               'the durable Plan Graph proposal does not revalidate against the current candidate and exact mapping');
           }
           const approved = Boolean(priorPlan) && workflowStore.isApprovalCurrent(prior.job_id);
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitPlanGraphProposalCreate();
           return {
             created: false, idempotent: true, status: priorJob?.state || 'existing', workflow_status: priorJob?.status || null,
             job_id: prior.job_id, candidate_plan_id: candidate.planId, draftHash: draft.draftHash, bindingHash, fingerprint,
@@ -3248,7 +2867,18 @@ async function callToolImpl(name, args, telemetryContext = null) {
         }
         const job = workflowStore.createJob({ conversationKey, title });
         workflowStore.recordEvent(job.job_id, 'job.proposal_requested', eventPayload, `${job.job_id}|proposal`);
-        db.exec('COMMIT');
+        // Source verification and draft construction happen before the writer
+        // transaction. Rebuild the just-persisted proposal while BEGIN IMMEDIATE
+        // is held so a Goal/Idea mutation between verification and persistence
+        // cannot be reported as a successfully created current Plan Graph.
+        const readback = readAdaptiveGoalPlanProposal(job.job_id);
+        if (!readback.found || readback.fingerprint !== fingerprint ||
+            readback.draft.draftHash !== draft.draftHash ||
+            readback.snapshot.binding_hash !== bindingHash) {
+          throw adaptiveGoalError('AGG_PLAN_PROPOSAL_READBACK_FAILED',
+            'new Plan Graph proposal did not reproduce its current source graph, candidate, draft and exact task mapping under the persistence lock');
+        }
+        adaptiveGoalTransactions.commitPlanGraphProposalCreate();
         return {
           created: true,
           idempotent: false,
@@ -3272,7 +2902,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
           dispatch_started: false
         };
       } catch (error) {
-        try { db.exec('ROLLBACK'); } catch {}
+        adaptiveGoalTransactions.rollbackPlanGraphProposalCreate();
         throw error;
       }
     }
@@ -3325,13 +2955,12 @@ async function callToolImpl(name, args, telemetryContext = null) {
     case 'adaptive_goal_execution_graph_proposal_create': {
       assertOnlyKeys(args, ['plan_proposal_job_id', 'task_bindings', 'title'], name);
       const sourcePlanProposalJobId = assertString(args.plan_proposal_job_id, 'plan_proposal_job_id', 200);
-      const db = workflowStore.db;
-      db.exec('BEGIN IMMEDIATE');
+      adaptiveGoalTransactions.beginExecutionGraphProposalCreate();
       try {
         let source;
         try { source = readAdaptiveGoalPlanProposal(sourcePlanProposalJobId, { requireApproved: true }); }
         catch (error) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionGraphProposalCreate();
           return {
             created: false, status: 'blocked', source_plan_proposal_job_id: sourcePlanProposalJobId,
             blockers: [{ code: error?.code || 'SOURCE_PLAN_PROPOSAL_INVALID', message: String(error?.message || error) }],
@@ -3339,13 +2968,13 @@ async function callToolImpl(name, args, telemetryContext = null) {
           };
         }
         if (!source.found) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionGraphProposalCreate();
           return { created: false, status: 'blocked', source_plan_proposal_job_id: sourcePlanProposalJobId,
             blockers: source.blockers, gates: { executionGraphMaterialized: false, executableContractsCreated: false, immutableExecutionPlanCreated: false, dispatchAllowed: false, executionAuthorized: false } };
         }
         const sourceAttestationBlocker = adaptiveGoalExecutionGraphSourceBlocker(source);
         if (sourceAttestationBlocker) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionGraphProposalCreate();
           return {
             created: false, status: 'blocked', source_plan_proposal_job_id: sourcePlanProposalJobId,
             blockers: [sourceAttestationBlocker],
@@ -3356,7 +2985,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
         const evaluated = assessAdaptiveGoalExecutionReadinessForProposal(source, args.task_bindings);
         const readiness = evaluated.readiness;
         if (!readiness.readyForExecutionGraphReview) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionGraphProposalCreate();
           return {
             created: false,
             status: readiness.contractReady ? 'evidence_pending' : 'blocked',
@@ -3428,11 +3057,12 @@ async function callToolImpl(name, args, telemetryContext = null) {
         if (Buffer.byteLength(JSON.stringify(eventPayload), 'utf8') > 512 * 1024) {
           throw adaptiveGoalError('EXECUTION_GRAPH_PROPOSAL_TOO_LARGE', 'Execution Graph proposal snapshot exceeds 512 KiB; reduce graph path/evidence before retrying');
         }
-        const priorRows = db.prepare("SELECT job_id FROM events WHERE type='job.proposal_requested' AND json_extract(payload_json, '$.adaptive_goal_execution_graph_proposal.fingerprint') = ? ORDER BY created_at ASC,rowid ASC").all(graphProposal.fingerprint);
+        const priorRows = workflowState.findEventsByTypePayload('job.proposal_requested',
+          'adaptive_goal_execution_graph_proposal.fingerprint', graphProposal.fingerprint);
         if (priorRows.length > 1) throw adaptiveGoalError('EXECUTION_GRAPH_IDEMPOTENCY_CONFLICT', 'multiple durable review proposals claim the same Execution Graph fingerprint');
         if (priorRows.length === 1) {
           const prior = readAdaptiveGoalExecutionGraphProposal(priorRows[0].job_id);
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionGraphProposalCreate();
           if (!prior.found || prior.status !== 'fresh') {
             return { created: false, idempotent: true, status: 'stale', job_id: priorRows[0].job_id,
               blockers: prior.blockers || [{ code: 'EXECUTION_GRAPH_PRIOR_PROPOSAL_STALE', message: 'existing proposal could not be reproduced from current inputs' }] };
@@ -3458,7 +3088,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
         if (!readback.found || readback.status !== 'fresh' || readback.proposalHash !== graphProposal.proposalHash) {
           throw adaptiveGoalError('EXECUTION_GRAPH_PROPOSAL_READBACK_FAILED', 'new proposal did not pass its immediate source/evidence/hash read-back check');
         }
-        db.exec('COMMIT');
+        adaptiveGoalTransactions.commitExecutionGraphProposalCreate();
         return {
           created: true,
           idempotent: false,
@@ -3483,34 +3113,32 @@ async function callToolImpl(name, args, telemetryContext = null) {
           gates: graphProposal.gates
         };
       } catch (error) {
-        try { db.exec('ROLLBACK'); } catch {}
+        adaptiveGoalTransactions.rollbackExecutionGraphProposalCreate();
         throw error;
       }
     }
     case 'adaptive_goal_execution_graph_proposal_get': {
       assertOnlyKeys(args, ['job_id'], name);
       const jobId = assertString(args.job_id, 'job_id', 200);
-      const db = workflowStore.db;
-      db.exec('BEGIN');
+      adaptiveGoalTransactions.beginExecutionGraphProposalRead();
       try {
         const result = readAdaptiveGoalExecutionGraphProposal(jobId);
-        db.exec('COMMIT');
+        adaptiveGoalTransactions.commitExecutionGraphProposalRead();
         return result;
       } catch (error) {
-        try { db.exec('ROLLBACK'); } catch {}
+        adaptiveGoalTransactions.rollbackExecutionGraphProposalRead();
         throw error;
       }
     }
     case 'adaptive_goal_execution_plan_candidate_create': {
       assertOnlyKeys(args, ['job_id', 'reviewed_action_intents'], name);
       const jobId = assertString(args.job_id, 'job_id', 200);
-      const db = workflowStore.db;
-      db.exec('BEGIN IMMEDIATE');
+      adaptiveGoalTransactions.beginExecutionPlanCandidateCreate();
       try {
         let prepared;
         try { prepared = prepareAdaptiveGoalExecutionPlanCandidate(jobId, args.reviewed_action_intents); }
         catch (error) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           return {
             created: false, status: 'blocked', job_id: jobId,
             blockers: [{ code: error?.code || 'EXECUTION_PLAN_CANDIDATE_BUILD_FAILED', message: String(error?.message || error) }],
@@ -3518,7 +3146,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
           };
         }
         if (!prepared.ready) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           return {
             created: false,
             status: prepared.status || 'blocked',
@@ -3528,18 +3156,17 @@ async function callToolImpl(name, args, telemetryContext = null) {
           };
         }
         const candidate = prepared.candidate;
-        const priorRows = db.prepare(`SELECT event_id,job_id,type,payload_json FROM events
-          WHERE job_id=? AND type=? AND json_extract(payload_json,'$.fingerprint')=? ORDER BY created_at ASC,rowid ASC`)
-          .all(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT, candidate.fingerprint);
+        const priorRows = workflowState.listEventsForJobPayload(jobId,
+          ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT, 'fingerprint', candidate.fingerprint);
         if (priorRows.length > 1) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           return { created: false, status: 'stale', job_id: jobId,
             blockers: [{ code: 'EXECUTION_PLAN_CANDIDATE_IDEMPOTENCY_CONFLICT', message: 'multiple candidate events claim the same deterministic fingerprint' }],
             gates: { immutableExecutionPlanCreated: false, approvalCreated: false, taskRowsCreated: false, dispatchAllowed: false, executionAuthorized: false } };
         }
         if (priorRows.length === 1) {
           const readback = readAdaptiveGoalExecutionPlanCandidate(jobId);
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           if (readback.status !== 'fresh' || readback.candidateHash !== candidate.candidateHash) {
             return { created: false, idempotent: true, status: 'stale', job_id: jobId,
               candidateId: candidate.candidateId, fingerprint: candidate.fingerprint,
@@ -3562,10 +3189,9 @@ async function callToolImpl(name, args, telemetryContext = null) {
             gates: readback.gates
           };
         }
-        const candidateEvents = db.prepare(`SELECT event_id FROM events WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC`)
-          .all(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT);
+        const candidateEvents = workflowState.listEventsForJob(jobId, { type: ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT });
         if (candidateEvents.length > 0) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           return { created: false, status: 'blocked', job_id: jobId,
             blockers: [{ code: 'EXECUTION_PLAN_CANDIDATE_PRIOR_SNAPSHOT_EXISTS', message: 'a different candidate snapshot already exists for this proposal; create a new upstream proposal instead of replacing its candidate' }] };
         }
@@ -3573,16 +3199,16 @@ async function callToolImpl(name, args, telemetryContext = null) {
         const runtime = workflowStore.getWorkflowRuntimeState(jobId);
         const immutablePlan = workflowStore.getExecutionPlan(jobId);
         const latestApproval = workflowStore.getLatestApproval(jobId);
-        const taskCount = db.prepare('SELECT COUNT(*) AS count FROM tasks WHERE job_id=?').get(jobId).count;
+        const taskCount = workflowState.countTasksForJob(jobId);
         if (!job || job.state !== 'IDLE' || job.status !== 'active' || runtime?.phase !== 'PROPOSED' ||
             immutablePlan || latestApproval || taskCount !== 0 || workflowStore.isApprovalCurrent(jobId)) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           return { created: false, status: 'blocked', job_id: jobId,
             blockers: [{ code: 'EXECUTION_PLAN_CANDIDATE_CREATE_REQUIRES_UNAPPROVED_PROPOSAL', message: 'a new candidate snapshot can only be persisted on an active PROPOSED wrapper with no approval, immutable plan or task rows' }],
             gates: { immutableExecutionPlanCreated: false, approvalCreated: false, taskRowsCreated: false, dispatchAllowed: false, executionAuthorized: false } };
         }
         if (prepared.preflight.required_operations?.length || prepared.preflight.workspace_write_scopes?.length) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           return { created: false, status: 'blocked', job_id: jobId,
             blockers: [{ code: 'EXECUTION_PLAN_CANDIDATE_PERMISSION_SCOPE_UNSUPPORTED', message: 'candidate wrapper introduces permissions outside this review-only slice' }] };
         }
@@ -3594,12 +3220,12 @@ async function callToolImpl(name, args, telemetryContext = null) {
           candidate
         };
         if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > 512 * 1024) {
-          db.exec('COMMIT');
+          adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
           return { created: false, status: 'blocked', job_id: jobId,
             blockers: [{ code: 'EXECUTION_PLAN_CANDIDATE_TOO_LARGE', message: 'execution-plan candidate snapshot exceeds 512 KiB; narrow the graph/evidence before creating a new proposal' }] };
         }
         const eventId = workflowStore.recordEvent(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT, payload, candidate.fingerprint);
-        const storedEvent = db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+        const storedEvent = workflowState.getEvent(eventId);
         const expectedEventId = createHash('sha256').update(`${jobId}|${ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT}|${candidate.fingerprint}`).digest('hex');
         if (!storedEvent || storedEvent.event_id !== expectedEventId || storedEvent.job_id !== jobId ||
             storedEvent.type !== ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT || storedEvent.payload_json !== JSON.stringify(payload)) {
@@ -3611,7 +3237,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
             readback.wrapperApproved || readback.taskRowsCreated || readback.dispatchStarted || readback.executionAuthorized) {
           throw adaptiveGoalError('EXECUTION_PLAN_CANDIDATE_READBACK_FAILED', 'candidate failed fresh-source/compiler/preflight read-back or unexpectedly crossed an execution gate');
         }
-        db.exec('COMMIT');
+        adaptiveGoalTransactions.commitExecutionPlanCandidateCreate();
         return {
           created: true,
           idempotent: false,
@@ -3631,21 +3257,20 @@ async function callToolImpl(name, args, telemetryContext = null) {
           gates: readback.gates
         };
       } catch (error) {
-        try { db.exec('ROLLBACK'); } catch {}
+        adaptiveGoalTransactions.rollbackExecutionPlanCandidateCreate();
         throw error;
       }
     }
     case 'adaptive_goal_execution_plan_candidate_get': {
       assertOnlyKeys(args, ['job_id'], name);
       const jobId = assertString(args.job_id, 'job_id', 200);
-      const db = workflowStore.db;
-      db.exec('BEGIN');
+      adaptiveGoalTransactions.beginExecutionPlanCandidateRead();
       try {
         const result = readAdaptiveGoalExecutionPlanCandidate(jobId);
-        db.exec('COMMIT');
+        adaptiveGoalTransactions.commitExecutionPlanCandidateRead();
         return result;
       } catch (error) {
-        try { db.exec('ROLLBACK'); } catch {}
+        adaptiveGoalTransactions.rollbackExecutionPlanCandidateRead();
         throw error;
       }
     }
@@ -3676,8 +3301,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
         engineering: 'Engineering M4: AGG execution-readiness preview',
         production: 'Production E2E: AGG execution-readiness preview'
       };
-      const db = workflowStore.db;
-      db.exec('BEGIN');
+      adaptiveGoalTransactions.beginExecutionReadinessPreview();
       try {
         const templatePlan = workflowCompiler.compileWorkflowPlan({
           job_id: 'agg-execution-readiness-preview', title: titleByWorkflow[args.workflow_id]
@@ -3690,10 +3314,10 @@ async function callToolImpl(name, args, telemetryContext = null) {
           args.draft, args.workflow_id, templatePlan, args.task_bindings, evidenceRecords, sourceEvidenceRecords,
           { requireCompleteTaskMapping: args.workflow_id === 'standard-engineering' }
         );
-        db.exec('COMMIT');
+        adaptiveGoalTransactions.commitExecutionReadinessPreview();
         return report;
       } catch (error) {
-        try { db.exec('ROLLBACK'); } catch {}
+        adaptiveGoalTransactions.rollbackExecutionReadinessPreview();
         throw error;
       }
     }
@@ -3938,136 +3562,20 @@ async function callToolImpl(name, args, telemetryContext = null) {
       });
     case 'workflow_write_files': {
       assertOnlyKeys(args, ['job_id', 'task_id', 'patch_id', 'writes'], 'workflow_write_files');
-      const jobId = assertString(args.job_id, 'job_id', 200);
-      const taskId = assertString(args.task_id, 'task_id', 200);
-      const patchId = assertString(args.patch_id, 'patch_id', 120);
-      const job = workflowStore.getJob(jobId);
-      const task = workflowStore.getTask(taskId);
-      const plan = workflowStore.getExecutionPlan(jobId);
-      const deny = (code, category, message, extra = {}) => { throw makeWorkflowToolError(code, category, message, {
-        job_id: jobId, workflow_id: plan?.workflow_id || null, workflow_version: plan?.workflow_version || null,
-        job_state: job?.state || null, task_id: taskId, capability: 'workspace.write', retryable: false,
-        side_effects: [], workspace_mutation_status: 'not_modified', ...extra
-      }); };
-      if (!job || !task || task.job_id !== jobId) deny('WORKSPACE_WRITE_TASK_MISMATCH', 'invalid_state', 'Task does not belong to the requested workflow.');
-      if (job.status !== 'active' || String(job.state).toUpperCase() !== 'EXECUTING') deny('WORKFLOW_NOT_EXECUTING', 'invalid_state', 'Workspace writes require an active EXECUTING workflow.');
-      if (!plan || plan.workflow_id !== 'standard-engineering' || plan.workflow_version < 3 || !plan.required_operations?.includes('workspace.write')) {
-        deny('WORKSPACE_WRITE_UNSUPPORTED_PLAN', 'unsupported_operation', 'Workspace writes require an approved standard-engineering v3+ plan that pins workspace.write.');
-      }
-      if (!workflowStore.isApprovalCurrent(jobId)) deny('WORKFLOW_APPROVAL_NOT_CURRENT', 'policy_denial', 'The current approval does not authorize this plan.');
-      const proposal = proposalFor(jobId);
-      const reviewWrapperKind = adaptiveGoalReviewWrapperKind(proposal);
-      if (reviewWrapperKind === 'execution_graph') {
-        try { verifiedAdaptiveGoalApprovalBindingForTransition(jobId, plan, { allowExecutingWrapper: true, allowSandboxActionContinuation: true }); }
-        catch (error) { deny(error?.code || 'AGG_APPROVAL_EVIDENCE_INVALID', 'policy_denial', `Approval policy/quorum/evidence was revoked or no longer verifies immediately before workspace write: ${String(error?.message || error)}`); }
-      }
-      const workspace = fs.realpathSync(proposal.workspace);
-      let revalidatedPlan;
-      try { revalidatedPlan = workflowStore.compileExecutionPlan(jobId, { workspace }); }
-      catch (error) { deny('IMMUTABLE_PLAN_MISMATCH', 'policy_denial', `Current proposal cannot be revalidated against the immutable plan: ${String(error?.message || error)}`); }
-      if (revalidatedPlan?.plan_hash !== plan.plan_hash) deny('IMMUTABLE_PLAN_MISMATCH', 'policy_denial',
-        `Current proposal no longer compiles to the approved immutable plan (candidate=${revalidatedPlan?.plan_hash || 'none'}, approved=${plan.plan_hash}).`,
-        { details: { candidate_plan_hash: revalidatedPlan?.plan_hash || null, approved_plan_hash: plan.plan_hash } });
-      const planTaskId = taskMetadata(task).workflow_plan_task_id;
-      const planned = plan.children.find(item => item.id === planTaskId);
-      const writeContract = planned?.execution?.workspace_write_contract;
-      const scope = workspaceWriteContractRuntime.workspaceWriteScopeForRole({
-        required_operations: plan.required_operations,
-        scopes: plan.workspace_write_scopes
-      }, task.role);
-      if (!planned || planned.role !== task.role || !writeContract || !scope ||
-          writeContract.role !== task.role || !['engineer', 'writer'].includes(task.role) ||
-          !['running'].includes(String(task.status).toLowerCase())) {
-        deny('WORKSPACE_WRITE_TASK_NOT_AUTHORIZED', 'permission_denied', 'Task is not a running built-in engineer/writer task with an exact plan-pinned write scope.');
-      }
-      if (!Array.isArray(args.writes) || args.writes.length < 1 || args.writes.length > 16) deny('WORKSPACE_WRITE_REQUEST_INVALID', 'validation_failure', 'writes must contain 1..16 file changes.');
-      const requestHash = createHash('sha256').update(JSON.stringify({ jobId, taskId, patchId, writes: args.writes })).digest('hex');
-      const validated = [];
-      const seenPaths = new Set();
-      for (const [index, write] of args.writes.entries()) {
-        if (!write || typeof write !== 'object' || Array.isArray(write) || Object.keys(write).some(key => !['path', 'base_sha256', 'content'].includes(key)) ||
-            typeof write.path !== 'string' || typeof write.content !== 'string' || Buffer.byteLength(write.content, 'utf8') > 2_000_000 ||
-            !/^(ABSENT|[a-f0-9]{64})$/.test(write.base_sha256 || '')) {
-          deny('WORKSPACE_WRITE_REQUEST_INVALID', 'validation_failure', `writes[${index}] has invalid path, content, or base_sha256.`);
+      const request = {
+        jobId: assertString(args.job_id, 'job_id', 200),
+        taskId: assertString(args.task_id, 'task_id', 200),
+        patchId: assertString(args.patch_id, 'patch_id', 120),
+        writes: args.writes
+      };
+      try {
+        return workspaceWriteCapabilityService.applyWrite(request);
+      } catch (error) {
+        if (error instanceof WorkspaceWriteCapabilityError) {
+          throw makeWorkflowToolError(error.code, error.category, error.message, error.details);
         }
-        if (!workspaceWriteContractRuntime.pathIsWithinWorkspaceWriteScope(write.path, scope)) deny('WORKSPACE_WRITE_SCOPE_DENIED', 'permission_denied', `Path is outside the approved ${task.role} workspace scope: ${write.path}`);
-        if (seenPaths.has(write.path)) deny('WORKSPACE_WRITE_REQUEST_INVALID', 'validation_failure', `Duplicate path in one patch: ${write.path}`);
-        seenPaths.add(write.path);
-        const prior = workflowStore.db.prepare('SELECT * FROM workspace_write_receipts WHERE job_id=? AND task_id=? AND patch_id=? AND path=?').get(jobId, taskId, patchId, write.path);
-        if (prior && prior.request_hash !== requestHash) deny('WORKSPACE_WRITE_PATCH_ID_REUSED', 'policy_denial', 'patch_id was already used with a different request payload.');
-        let currentBytes = null;
-        try { currentBytes = readFileWithin(workspace, write.path); }
-        catch (error) { if (error?.code !== 'ENOENT') deny('WORKSPACE_WRITE_TARGET_INVALID', 'validation_failure', `Cannot safely inspect ${write.path}: ${String(error?.message || error)}`); }
-        const currentHash = currentBytes === null ? null : createHash('sha256').update(currentBytes).digest('hex');
-        const intendedHash = createHash('sha256').update(write.content, 'utf8').digest('hex');
-        if (currentHash !== intendedHash && (write.base_sha256 === 'ABSENT' ? currentHash !== null : currentHash !== write.base_sha256)) {
-          deny('WORKSPACE_WRITE_BASE_HASH_MISMATCH', 'validation_failure', `Base SHA-256 precondition does not match current bytes for ${write.path}; no files were changed.`,
-            { evidence_missing: [write.path], details: { expected_sha256: write.base_sha256, observed_sha256: currentHash } });
-        }
-        validated.push({ ...write, prior });
+        throw error;
       }
-      const receipts = [];
-      const failures = [];
-      for (const write of validated) {
-        if (write.prior) { receipts.push({ receipt_id: write.prior.receipt_id, path: write.path, outcome: write.prior.outcome, after_sha256: write.prior.after_sha256, size_bytes: write.prior.size_bytes, replayed: true }); continue; }
-        let observedMutation = null;
-        try {
-          workflowStore.db.exec('BEGIN IMMEDIATE');
-          try {
-            const currentJob = workflowStore.getJob(jobId);
-            const currentTask = workflowStore.getTask(taskId);
-            if (!currentJob || currentJob.status !== 'active' || currentJob.state !== 'EXECUTING' || !currentTask || currentTask.status !== 'running' ||
-                !workflowStore.isApprovalCurrent(jobId) || workflowStore.getExecutionPlan(jobId)?.plan_hash !== plan.plan_hash) {
-              throw new Error('workflow/task/approval changed during workspace write; inspect file bytes before recovery');
-            }
-            if (reviewWrapperKind === 'execution_graph') {
-              // Recheck the signed policy, trust-root revocation, maker/checker
-              // quorum, source/evidence freshness and immutable plan under the
-              // same writer lock immediately before the filesystem mutation.
-              verifiedAdaptiveGoalApprovalBindingForTransition(jobId, plan, { allowExecutingWrapper: true, allowSandboxActionContinuation: true });
-            }
-            const racedReceipt = workflowStore.db.prepare('SELECT * FROM workspace_write_receipts WHERE job_id=? AND task_id=? AND patch_id=? AND path=?')
-              .get(jobId, taskId, patchId, write.path);
-            if (racedReceipt) {
-              if (racedReceipt.request_hash !== requestHash) throw new Error('patch_id was concurrently reused with a different request payload');
-              workflowStore.db.exec('COMMIT');
-              receipts.push({ receipt_id: racedReceipt.receipt_id, path: racedReceipt.path, outcome: racedReceipt.outcome,
-                after_sha256: racedReceipt.after_sha256, size_bytes: racedReceipt.size_bytes, replayed: true });
-              continue;
-            }
-            const result = replaceFileWithin(workspace, write.path, write.content, { expectedSha256: write.base_sha256, maxBytes: 2_000_000 });
-            if (result.changed) observedMutation = { path: write.path, outcome: result.outcome, before_sha256: result.before_sha256 || 'ABSENT', after_sha256: result.after_sha256, size_bytes: result.size_bytes };
-            const receiptId = `wwr_${createHash('sha256').update(`${jobId}\0${taskId}\0${patchId}\0${write.path}`).digest('hex').slice(0, 32)}`;
-            const outcome = result.outcome;
-            workflowStore.db.prepare(`INSERT INTO workspace_write_receipts
-              (receipt_id,job_id,task_id,plan_hash,patch_id,request_hash,path,outcome,before_sha256,after_sha256,size_bytes,created_at)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).run(receiptId, jobId, taskId, plan.plan_hash, patchId, requestHash, write.path, outcome,
-              result.before_sha256 || 'ABSENT', result.after_sha256, result.size_bytes, new Date().toISOString());
-            workflowStore.recordEvent(jobId, 'workflow.workspace_file_written', {
-              receipt_id: receiptId, task_id: taskId, plan_hash: plan.plan_hash, patch_id: patchId, request_hash: requestHash,
-              path: write.path, outcome, before_sha256: result.before_sha256 || 'ABSENT', after_sha256: result.after_sha256, size_bytes: result.size_bytes
-            }, `${receiptId}:${requestHash}`);
-            workflowStore.db.exec('COMMIT');
-            receipts.push({ receipt_id: receiptId, path: write.path, outcome, before_sha256: result.before_sha256 || 'ABSENT', after_sha256: result.after_sha256, size_bytes: result.size_bytes });
-          } catch (error) { workflowStore.db.exec('ROLLBACK'); throw error; }
-        } catch (error) {
-          failures.push({ path: write.path, code: observedMutation ? 'WORKSPACE_WRITE_RECEIPT_UNRESOLVED' : (error?.code || 'WORKSPACE_WRITE_FAILED'), message: String(error?.message || error), observed_mutation: observedMutation });
-          break;
-        }
-      }
-      if (failures.length) throw makeWorkflowToolError('WORKSPACE_WRITE_PARTIAL_OR_FAILED', 'validation_failure',
-        receipts.length ? 'Workspace patch partially applied; inspect per-file receipts before retrying.' : 'Workspace patch failed before any receipt was recorded.', {
-          category: failures.some(item => item.observed_mutation) ? 'unresolved_execution_outcome' : 'validation_failure',
-          job_id: jobId, workflow_id: plan.workflow_id, workflow_version: plan.workflow_version, job_state: workflowStore.getJob(jobId)?.state,
-          task_id: taskId, capability: 'workspace.write', retryable: false, side_effects: [
-            ...receipts.map(item => ({ receipt_id: item.receipt_id, path: item.path, outcome: item.outcome })),
-            ...failures.filter(item => item.observed_mutation).map(item => ({ ...item.observed_mutation, receipt_id: null }))
-          ],
-          workspace_mutation_status: receipts.length && failures.some(item => item.observed_mutation) ? 'partial_unreceipted' : receipts.length ? 'partial' : failures.some(item => item.observed_mutation) ? 'unreceipted' : 'not_modified', evidence_missing: failures.map(item => item.path),
-          next_actions: [{ tool: 'workflow_write_files', reason: 'Inspect current file bytes and durable receipts. If bytes already match the intended content, replay only the exact same patch_id and identical request to reconcile the missing receipt; never infer success from the write alone.' }],
-          details: { receipts, failures, patch_id: patchId, request_hash: requestHash }
-        });
-      return { status: 'applied', job_id: jobId, task_id: taskId, patch_id: patchId, request_hash: requestHash, plan_hash: plan.plan_hash, receipts, atomic_across_files: false };
     }
     case 'workflow_approve': {
       assertOnlyKeys(args, ['job_id', 'confirmation', 'approval_evidence'], name);
@@ -4086,15 +3594,16 @@ async function callToolImpl(name, args, telemetryContext = null) {
           throw adaptiveGoalError('EXECUTION_GRAPH_PROPOSAL_NOT_APPROVABLE',
             source.blockers?.map(item => item.code).join(', ') || 'Execution Graph source snapshot/evidence is not fresh');
         }
-        const candidateCount = workflowStore.db.prepare('SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type=?')
-          .get(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT).count;
-        if (candidateCount > 0) {
-          executionCandidateReadback = readAdaptiveGoalExecutionPlanCandidate(jobId);
-          if (!executionCandidateReadback.found || executionCandidateReadback.status !== 'fresh' ||
-              executionCandidateReadback.reviewerIdentityVerified !== true || executionCandidateReadback.executionReviewReady !== true) {
-            throw adaptiveGoalError('AGG_EXECUTION_AUTHORIZATION_NOT_VERIFIED',
-              `${executionCandidateReadback.blockers?.map(item => `${item.code}${item.message ? `: ${item.message}` : ''}${item.mismatchFields ? ` [fields=${item.mismatchFields.join(',')}]` : ''}`).join('; ') || 'stored action-intent candidate is stale or lacks a trusted current reviewer attestation'}${executionCandidateReadback.mismatchFields ? `; candidate fields differ=${executionCandidateReadback.mismatchFields.join(',')}; stored=${executionCandidateReadback.storedCandidateHash}; rebuilt=${executionCandidateReadback.rebuiltCandidateHash}; storedPlan=${executionCandidateReadback.storedCompilerPlanHash}; rebuiltPlan=${executionCandidateReadback.rebuiltCompilerPlanHash}` : ''}`);
-          }
+        const candidateCount = workflowState.countEventsForJobType(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT);
+        if (candidateCount !== 1) {
+          throw adaptiveGoalError('AGG_EXECUTION_CANDIDATE_REQUIRED',
+            `Execution Graph approval requires exactly one persisted Execution Plan Candidate; observed ${candidateCount}`);
+        }
+        executionCandidateReadback = readAdaptiveGoalExecutionPlanCandidate(jobId);
+        if (!executionCandidateReadback.found || executionCandidateReadback.status !== 'fresh' ||
+            executionCandidateReadback.reviewerIdentityVerified !== true || executionCandidateReadback.executionReviewReady !== true) {
+          throw adaptiveGoalError('AGG_EXECUTION_AUTHORIZATION_NOT_VERIFIED',
+            `${executionCandidateReadback.blockers?.map(item => `${item.code}${item.message ? `: ${item.message}` : ''}${item.mismatchFields ? ` [fields=${item.mismatchFields.join(',')}]` : ''}`).join('; ') || 'stored action-intent candidate is stale or lacks a trusted current reviewer attestation'}${executionCandidateReadback.mismatchFields ? `; candidate fields differ=${executionCandidateReadback.mismatchFields.join(',')}; stored=${executionCandidateReadback.storedCandidateHash}; rebuilt=${executionCandidateReadback.rebuiltCandidateHash}; storedPlan=${executionCandidateReadback.storedCompilerPlanHash}; rebuiltPlan=${executionCandidateReadback.rebuiltCompilerPlanHash}` : ''}`);
         }
       }
       const customWorkflow = proposal.customWorkflowPlanId
@@ -4516,8 +4025,9 @@ async function callToolImpl(name, args, telemetryContext = null) {
             next_actions: [{ tool: 'workflow_write_files', reason: 'Inspect the task write receipts and include their exact IDs in the typed artifact before submitting task success.' }]
           });
         }
-        const persistedReceipts = workflowStore.db.prepare('SELECT receipt_id FROM workspace_write_receipts WHERE job_id=? AND task_id=? AND plan_hash=? ORDER BY created_at, receipt_id')
-          .all(task.job_id, taskId, approvedPlan.plan_hash).map(row => row.receipt_id);
+        const persistedReceipts = workspaceWriteReceiptStore.listForTaskPlan({
+          jobId: task.job_id, taskId, planHash: approvedPlan.plan_hash
+        }).map(row => row.receipt_id);
         if (!persistedReceipts.length || persistedReceipts.length !== receiptIds.length || persistedReceipts.some(id => !receiptIds.includes(id))) {
           throw makeWorkflowToolError('WORKSPACE_WRITE_RECEIPTS_INVALID', 'validation_failure', 'Artifact receipt IDs do not exactly match durable workspace-write receipts for this task and immutable plan.', {
             job_id: task.job_id, workflow_id: approvedPlan.workflow_id, workflow_version: approvedPlan.workflow_version,
@@ -4528,80 +4038,13 @@ async function callToolImpl(name, args, telemetryContext = null) {
         }
       }
       const case01 = isCase01ArtifactLineage(task.job_id) && outcome === 'success';
-      let newlyCreatedSnapshotId = null;
-      let case01SnapshotBase = null;
-      if (case01) {
-        const existing = workflowStore.listArtifacts(task.job_id, { taskId, activeOnly: true, type: 'requirements' }).at(-1);
-        if (task.status === 'completed' && existing) {
-          // Idempotent retries must validate the already persisted immutable snapshot,
-          // not create a second snapshot with a different identity.
-          artifactContent = existing.content;
-        } else {
-          case01SnapshotBase = CASE01_SNAPSHOT_BASE;
-          try { fs.lstatSync(case01SnapshotBase); }
-          catch (error) {
-            if (error?.code !== 'ENOENT') throw error;
-            fs.mkdirSync(case01SnapshotBase, { mode: 0o700 });
-          }
-          const snapshotBaseStat = fs.lstatSync(case01SnapshotBase);
-          if (!snapshotBaseStat.isDirectory() || snapshotBaseStat.isSymbolicLink()) {
-            throw new Error('CASE-01 snapshot base must be a non-symlink directory');
-          }
-          const stableSnapshotBaseStat = fs.lstatSync(case01SnapshotBase);
-          if (!stableSnapshotBaseStat.isDirectory() || stableSnapshotBaseStat.isSymbolicLink() ||
-              stableSnapshotBaseStat.dev !== snapshotBaseStat.dev || stableSnapshotBaseStat.ino !== snapshotBaseStat.ino) {
-            throw new Error('CASE-01 snapshot base changed during initialization');
-          }
-          if ((stableSnapshotBaseStat.mode & 0o077) !== 0) {
-            throw new Error('CASE-01 snapshot base permissions are too broad; refusing to chmod a path that may be concurrently replaced');
-          }
-          const snapshotId = randomUUID();
-          workflowStore.db.prepare('INSERT INTO case01_snapshot_reservations(snapshot_id, owner_pid, created_at) VALUES(?, ?, ?)')
-            .run(snapshotId, process.pid, new Date().toISOString());
-          let snapshot;
-          try {
-            snapshot = createCase01WorkspaceSnapshot({ workspace: proposalFor(task.job_id).workspace, content: artifactContent, snapshotBase: case01SnapshotBase, snapshotId });
-          } catch (error) {
-            // The reservation predates directory creation. Resolve it only if
-            // the helper successfully removed any partial directory; otherwise
-            // leave it for crash recovery to retry after this process exits.
-            try { compensateCase01SnapshotIfUnreferenced(case01SnapshotBase, snapshotId); }
-            catch { /* retain reservation and original creation error */ }
-            throw error;
-          }
-          newlyCreatedSnapshotId = snapshot.snapshot_id;
-          artifactContent = { ...artifactContent, workspace_snapshot_id: snapshot.snapshot_id, workspace_artifacts: snapshot.workspace_artifacts };
-        }
-      }
-      let result;
-      try {
-        result = workflowStore.completeLocalTask(taskId, {
-          content: redactText(content), artifact: artifactContent, outcome,
-          validateBeforeCommit: case01 ? ({ resultId, artifactId }) => validateCase01TaskEvidence(task.job_id, taskId, artifactContent, artifactId, resultId) : null
+      const result = case01
+        ? case01SnapshotService.completeRequirementsTask({
+          task, taskId, jobId: task.job_id, content: redactText(content), artifactContent, outcome
+        })
+        : workflowStore.completeLocalTask(taskId, {
+          content: redactText(content), artifact: artifactContent, outcome
         });
-      } catch (error) {
-        // Filesystem creation precedes SQLite COMMIT, so compensate if the DB
-        // transaction rejects. Never delete a snapshot that any durable typed
-        // artifact already references (including a commit-then-throw failure).
-        if (newlyCreatedSnapshotId) {
-          try {
-            compensateCase01SnapshotIfUnreferenced(case01SnapshotBase, newlyCreatedSnapshotId);
-          } catch (cleanupError) {
-            try {
-              workflowStore.recordEvent(task.job_id, 'case01.snapshot_cleanup_failed', {
-                taskId, snapshotId: newlyCreatedSnapshotId, error: String(cleanupError?.message || cleanupError).slice(0, 500)
-              }, `${taskId}|snapshot-cleanup-failed|${newlyCreatedSnapshotId}`);
-            } catch { /* preserve the original task failure if the DB is also unavailable */ }
-          }
-        }
-        throw error;
-      }
-      if (newlyCreatedSnapshotId) {
-        // The artifact is now durable. Removing a stale reservation cannot make
-        // the snapshot collectible because reconciliation also checks durable
-        // artifact references. A failed delete is safe and self-healing.
-        try { workflowStore.db.prepare('DELETE FROM case01_snapshot_reservations WHERE snapshot_id=?').run(newlyCreatedSnapshotId); } catch {}
-      }
       return { completed: result.task.status === 'completed', task: taskSummary(result.task), result_id: result.resultId || null, idempotent: result.idempotent };
     }
     case 'execute_batch':
@@ -4753,7 +4196,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
         validateBeforeCommit: case01 ? ({ resultId, artifactId }) => {
           validateCase01SynthesisEvidence(jobId, ctoArtifact, case01TaskArtifact);
           const artifactRow = artifactId ? workflowStore.getArtifact(artifactId) : null;
-          const resultRow = workflowStore.db.prepare('SELECT result_id, task_id, outcome FROM results WHERE result_id=?').get(resultId);
+          const resultRow = workflowState.getResult(resultId);
           if (!artifactRow || artifactRow.status !== 'active' || artifactRow.type !== 'cto-decision' || artifactRow.job_id !== jobId ||
               artifactRow.artifact_id !== `cto-decision-${resultId}` || artifactRow.task_id !== parent.task_id ||
               artifactRow.evidence.length !== 1 || artifactRow.evidence[0] !== resultId || !resultRow ||
@@ -4771,13 +4214,13 @@ async function callToolImpl(name, args, telemetryContext = null) {
       if (case01) {
         const persistedCto = workflowStore.listArtifacts(jobId, { taskId: parent.task_id, activeOnly: true, type: 'cto-decision' }).at(-1);
         validateCase01SynthesisEvidence(jobId, persistedCto?.content, case01TaskArtifact);
-        const synthesisResultId = result.resultId || persistedCto?.evidence?.find(value => workflowStore.db.prepare('SELECT 1 FROM results WHERE result_id=? AND task_id=? AND outcome=\'success\'').get(value, parent.task_id));
-        const synthesisResult = synthesisResultId ? workflowStore.db.prepare('SELECT result_id, task_id, outcome FROM results WHERE result_id=?').get(synthesisResultId) : null;
+        const synthesisResultId = result.resultId || persistedCto?.evidence?.find(value => workflowState.hasSuccessfulTaskResult(value, parent.task_id));
+        const synthesisResult = synthesisResultId ? workflowState.getResult(synthesisResultId) : null;
         if (!persistedCto || persistedCto.artifact_id !== `cto-decision-${synthesisResultId}` || persistedCto.evidence.length !== 1 ||
             persistedCto.evidence[0] !== synthesisResultId || !synthesisResult || synthesisResult.task_id !== parent.task_id || synthesisResult.outcome !== 'success') {
           throw new Error('CASE-01 terminalization requires the exact successful synthesis result/artifact link');
         }
-        recordCase01ConsumptionAck({ jobId, taskArtifact: case01TaskArtifact, ctoArtifact: persistedCto,
+        case01SnapshotService.recordConsumptionAck({ jobId, taskArtifact: case01TaskArtifact, ctoArtifact: persistedCto,
           synthesisResultId, consumedWorkspaceBytes: args.consumed_workspace_bytes });
         // Deterministic child-process crash probe for the integration suite.
         // It is inert unless the process is explicitly running as NODE_ENV=test.
@@ -4806,15 +4249,45 @@ async function callToolImpl(name, args, telemetryContext = null) {
       const reason = assertString(args.reason, 'reason', 4000);
       const workaround = assertString(args.workaround, 'workaround', 8000);
       const jobId = args.job_id ? assertString(args.job_id, 'job_id', 200) : null;
+      const taskId = args.task_id ? assertString(args.task_id, 'task_id', 200) : null;
+      const actor = args.actor === undefined ? 'user' : assertString(args.actor, 'actor', 200);
       if (jobId && !workflowStore.getJob(jobId)) throw new Error(`workflow not found: ${jobId}`);
-      const intervention = { intervention_id: randomUUID(), job_id: jobId, task_id: args.task_id || null, actor: String(args.actor || 'user').slice(0, 200), reason: redactText(reason), workaround: redactText(workaround), proposed_automation: args.proposed_automation ? redactText(String(args.proposed_automation)).slice(0, 8000) : null, duration_minutes: args.duration_minutes == null ? null : Math.max(0, Number(args.duration_minutes)), created_at: new Date().toISOString() };
-      workflowStore.db.prepare('INSERT INTO manual_interventions (intervention_id,job_id,task_id,actor,reason,workaround,proposed_automation,duration_minutes,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(intervention.intervention_id, intervention.job_id, intervention.task_id, intervention.actor, intervention.reason, intervention.workaround, intervention.proposed_automation, intervention.duration_minutes, intervention.created_at);
-      if (jobId) workflowStore.recordEvent(jobId, 'manual_intervention.recorded', { intervention_id: intervention.intervention_id, reason: intervention.reason, proposed_automation: intervention.proposed_automation }, intervention.task_id || jobId);
-      return { recorded: true, intervention };
+      if (taskId && !jobId) throw new Error('task_id requires its owning job_id');
+      if (taskId) {
+        const task = workflowState.getTask(taskId);
+        if (!task || task.job_id !== jobId) throw new Error(`task ${taskId} does not belong to workflow ${jobId}`);
+      }
+      const interventionId = randomUUID();
+      manualInterventionStore.beginRecordTransaction();
+      try {
+        if (jobId && !workflowStore.getJob(jobId)) throw new Error(`workflow not found: ${jobId}`);
+        if (taskId) {
+          const currentTask = workflowState.getTask(taskId);
+          if (!currentTask || currentTask.job_id !== jobId) {
+            throw new Error(`task ${taskId} does not belong to workflow ${jobId}`);
+          }
+        }
+        const intervention = manualInterventionStore.record({
+          intervention_id: interventionId, job_id: jobId, task_id: taskId, actor,
+          reason: redactText(reason), workaround: redactText(workaround),
+          proposed_automation: args.proposed_automation === undefined ? null : redactText(assertString(args.proposed_automation, 'proposed_automation', 8000)),
+          duration_minutes: args.duration_minutes === undefined ? null : args.duration_minutes,
+          created_at: new Date().toISOString()
+        });
+        if (jobId) workflowStore.recordEvent(jobId, 'manual_intervention.recorded', {
+          intervention_id: intervention.intervention_id, reason: intervention.reason,
+          proposed_automation: intervention.proposed_automation
+        }, intervention.intervention_id);
+        manualInterventionStore.commitRecordTransaction();
+        return { recorded: true, intervention };
+      } catch (error) {
+        manualInterventionStore.rollbackRecordTransaction();
+        throw error;
+      }
     }
     case 'workflow_interventions': {
       const limit = Math.min(200, Math.max(1, Number(args.limit) || 50));
-      const rows = args.job_id ? workflowStore.db.prepare('SELECT * FROM manual_interventions WHERE job_id=? ORDER BY created_at DESC, rowid DESC LIMIT ?').all(assertString(args.job_id, 'job_id', 200), limit) : workflowStore.db.prepare('SELECT * FROM manual_interventions ORDER BY created_at DESC, rowid DESC LIMIT ?').all(limit);
+      const rows = manualInterventionStore.list({ jobId: args.job_id ? assertString(args.job_id, 'job_id', 200) : null, limit });
       return { interventions: rows };
     }
     case 'workflow_validate_artifact': {
@@ -4871,11 +4344,12 @@ async function callToolImpl(name, args, telemetryContext = null) {
           detail: proposalAwaitingApproval ? 'not_applicable_before_approval' :
             approvedAwaitingDispatch ? 'not_applicable_before_cto_spawn' : null },
         { name: 'workspace_write_receipts_match_immutable_plan_and_events', pass: (() => {
-          const receipts = workflowStore.db.prepare('SELECT * FROM workspace_write_receipts WHERE job_id=? ORDER BY created_at, receipt_id').all(jobId);
+          const receipts = workspaceWriteReceiptStore.listForJob(jobId);
           if (!receipts.length) return true;
           if (!plan?.plan_hash || !plan.required_operations?.includes('workspace.write') || plan.workflow_id !== 'standard-engineering' || plan.workflow_version < 3) return false;
           let events;
-          try { events = workflowStore.db.prepare("SELECT payload_json FROM events WHERE job_id=? AND type='workflow.workspace_file_written'").all(jobId).map(row => parseStrictJson(row.payload_json, 'workspace write event')); }
+          try { events = workflowState.listEventsForJob(jobId, { type: 'workflow.workspace_file_written' })
+            .map(row => parseStrictJson(row.payload_json, 'workspace write event')); }
           catch { return false; }
           if (events.length !== receipts.length) return false;
           const scopes = { required_operations: plan.required_operations, scopes: plan.workspace_write_scopes || [] };
@@ -4896,7 +4370,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
         })() },
         { name: 'completed_scoped_write_artifacts_cite_receipts', pass: (() => {
           if (!plan?.children?.some(spec => spec.execution?.workspace_write_contract)) return true;
-          const receipts = workflowStore.db.prepare('SELECT receipt_id,task_id FROM workspace_write_receipts WHERE job_id=? AND plan_hash=?').all(jobId, plan.plan_hash);
+          const receipts = workspaceWriteReceiptStore.listForJobPlan(jobId, plan.plan_hash);
           return plan.children.filter(spec => spec.execution?.workspace_write_contract).every(spec => {
             const task = children.find(item => { try { return taskMetadata(item).workflow_plan_task_id === spec.id; } catch { return false; } });
             if (!task || task.status !== 'completed') return true;
@@ -4919,28 +4393,28 @@ async function callToolImpl(name, args, telemetryContext = null) {
           catch { return false; }
         })() },
         { name: 'terminal_state_phase_consistent', pass: trace.job.status !== 'completed' && trace.job.status !== 'failed' || runtime?.phase === (trace.job.status === 'completed' ? 'COMPLETED' : 'FAILED') },
-        { name: 'terminal_report_exists', pass: !['completed', 'failed'].includes(trace.job.status) || Boolean(trace.job.report_id || workflowStore.db.prepare('SELECT report_id FROM reports WHERE job_id=? LIMIT 1').get(jobId)) },
+        { name: 'terminal_report_exists', pass: !['completed', 'failed'].includes(trace.job.status) || Boolean(trace.job.report_id || workflowState.listReportsForJob(jobId).length) },
         // A successful CTO task is a durable transition toward business-job
         // terminalization, not a terminal state by itself. A crash after the
         // synthesis result/artifact commits but before report/delivery/job
         // completion must not be reported as recovered PASS merely because
         // the Job projection still says EXECUTING.
         { name: 'completed_cto_has_terminal_report', pass: !trace.tasks.some(task => task.role === 'cto' && task.status === 'completed') ||
-          (['completed', 'failed'].includes(trace.job.status) && Boolean(trace.job.report_id || workflowStore.db.prepare('SELECT report_id FROM reports WHERE job_id=? LIMIT 1').get(jobId))) },
+          (['completed', 'failed'].includes(trace.job.status) && Boolean(trace.job.report_id || workflowState.listReportsForJob(jobId).length)) },
         // A terminal Job projection and report row do not prove that delivery
         // and terminalization events committed. Apply this check to all
         // workflows; CASE-01 adds the stronger workspace-byte/attempt checks.
         { name: 'completed_cto_has_durable_delivery_and_terminal_event', pass: (() => {
           if (!trace.tasks.some(task => task.role === 'cto' && task.status === 'completed')) return true;
           if (trace.job.state !== 'COMPLETED' || trace.job.status !== 'completed') return false;
-          const reports = workflowStore.db.prepare("SELECT report_id, job_id, kind, content FROM reports WHERE job_id=? AND kind='final'").all(jobId);
+          const reports = workflowState.listReportsForJob(jobId, { kind: 'final' });
           if (reports.length !== 1 || reports[0].job_id !== jobId) return false;
           const report = reports[0];
-          const terminalRows = workflowStore.db.prepare("SELECT event_id, payload_json, created_at FROM events WHERE job_id=? AND type='job.completed'").all(jobId);
-          const deliveryRows = workflowStore.db.prepare("SELECT event_id, payload_json, created_at FROM events WHERE job_id=? AND type='delivery.claimed'").all(jobId);
-          const reportEvents = workflowStore.db.prepare("SELECT event_id, payload_json, created_at FROM events WHERE job_id=? AND type='report.created'").all(jobId);
+          const terminalRows = workflowState.listEventsForJob(jobId, { type: 'job.completed' });
+          const deliveryRows = workflowState.listEventsForJob(jobId, { type: 'delivery.claimed' });
+          const reportEvents = workflowState.listEventsForJob(jobId, { type: 'report.created' });
           const ctoTask = trace.tasks.find(task => task.role === 'cto' && task.status === 'completed');
-          const ctoResults = ctoTask ? workflowStore.db.prepare("SELECT result_id, content FROM results WHERE task_id=? AND outcome='success'").all(ctoTask.task_id) : [];
+          const ctoResults = ctoTask ? workflowState.listSuccessfulResultsForTask(ctoTask.task_id) : [];
           if (terminalRows.length !== 1 || deliveryRows.length !== 1 || reportEvents.length !== 1 || ctoResults.length !== 1) return false;
           let terminal; let delivery; let reportCreated;
           try {
@@ -4972,7 +4446,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
           const completedCtoTasks = trace.tasks.filter(task => task.role === 'cto' && task.status === 'completed');
           if (completedCtoTasks.length === 0) return true;
           if (!parent || parent.status !== 'completed' || !completedCtoTasks.some(task => task.task_id === parent.task_id)) return false;
-          const results = workflowStore.db.prepare("SELECT result_id, task_id, outcome, created_at FROM results WHERE task_id=? AND outcome='success'").all(parent.task_id);
+          const results = workflowState.listSuccessfulResultsForTask(parent.task_id);
           if (results.length !== 1 || results[0].task_id !== parent.task_id) return false;
           const result = results[0];
           const artifacts = workflowStore.listArtifacts(jobId, { taskId: parent.task_id, activeOnly: true, type: 'cto-decision' });
@@ -4981,7 +4455,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
           if (artifact.artifact_id !== `cto-decision-${result.result_id}` || artifact.job_id !== jobId || artifact.task_id !== parent.task_id ||
               artifact.status !== 'active' || artifact.evidence.filter(value => value === result.result_id).length !== 1) return false;
           const artifactEventId = createHash('sha256').update(`${jobId}|artifact.created|${artifact.artifact_id}`).digest('hex');
-          const artifactEventRows = workflowStore.db.prepare("SELECT event_id, job_id, type, payload_json, created_at FROM events WHERE job_id=? AND type='artifact.created'").all(jobId);
+          const artifactEventRows = workflowState.listArtifactCreatedEvents(jobId);
           const artifactEventMatches = [];
           for (const row of artifactEventRows) {
             let payload; try { payload = parseStrictJson(row.payload_json); } catch { continue; }
@@ -4993,7 +4467,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
               artifactPayload.taskId !== parent.task_id || artifactPayload.type !== 'cto-decision' || artifactPayload.status !== artifact.status ||
               (artifactPayload.supersedes ?? null) !== (artifact.supersedes ?? null) ||
               artifactPayload.contentHash !== artifact.content_hash) return false;
-          const completionRows = workflowStore.db.prepare("SELECT event_id, job_id, type, payload_json, created_at FROM events WHERE job_id=? AND type='task.local_completed'").all(jobId);
+          const completionRows = workflowState.listEventsForJob(jobId, { type: 'task.local_completed' });
           const completionMatches = [];
           for (const row of completionRows) {
             let payload; try { payload = parseStrictJson(row.payload_json); } catch { return false; }
@@ -5005,7 +4479,8 @@ async function callToolImpl(name, args, telemetryContext = null) {
           if (completion.payload_json !== JSON.stringify(payload) || completion.event_id !== expectedCompletionId ||
               payload.taskId !== parent.task_id || payload.resultId !== result.result_id ||
               payload.executor !== 'chat-on-steroids-plugin' || typeof payload.attemptId !== 'string') return false;
-          const attempts = workflowStore.db.prepare("SELECT attempt_id, task_id, status, finished_at FROM attempts WHERE attempt_id=? AND task_id=?").all(payload.attemptId, parent.task_id);
+          const attempt = workflowState.getAttempt(payload.attemptId, parent.task_id);
+          const attempts = attempt ? [attempt] : [];
           if (attempts.length !== 1 || attempts[0].status !== 'completed' || !attempts[0].finished_at) return false;
           const times = [result.created_at, artifactEvent.created_at, completion.created_at].map(value => Date.parse(value));
           return times.every(Number.isFinite) && times[0] <= times[1] && times[1] <= times[2];
@@ -5027,14 +4502,14 @@ async function callToolImpl(name, args, telemetryContext = null) {
         const taskArtifact = taskArtifacts.length === 1 ? taskArtifacts[0] : null;
         if (taskArtifact) {
           addCase01Check('case01_snapshot_bytes_match_persisted_sha256', () => {
-            validateCase01WorkspaceArtifact({ workspace: proposalFor(jobId).workspace, content: taskArtifact.content,
-              snapshotBase: CASE01_SNAPSHOT_BASE, snapshotId: taskArtifact.content?.workspace_snapshot_id });
+            case01SnapshotService.validateWorkspaceArtifact({ workspace: proposalFor(jobId).workspace, content: taskArtifact.content,
+              snapshotId: taskArtifact.content?.workspace_snapshot_id });
             return true;
           });
           addCase01Check('case01_task_artifact_binds_exact_successful_result', () => {
             const refs = taskArtifact.evidence || [];
             if (refs.length !== 1 || taskArtifact.artifact_id !== `requirements-${refs[0]}` || taskArtifact.status !== 'active') return false;
-            const result = workflowStore.db.prepare('SELECT result_id, task_id, outcome FROM results WHERE result_id=?').get(refs[0]);
+            const result = workflowState.getResult(refs[0]);
             const task = workflowStore.getTask(taskArtifact.task_id);
             return Boolean(result && result.result_id === refs[0] && result.task_id === taskArtifact.task_id && result.outcome === 'success' &&
               task?.status === 'completed' && task.job_id === jobId && taskArtifact.job_id === jobId);
@@ -5044,8 +4519,8 @@ async function callToolImpl(name, args, telemetryContext = null) {
           const ctoArtifact = ctoArtifacts.length === 1 ? ctoArtifacts[0] : null;
           if (ctoArtifact) {
             addCase01Check('case01_cto_snapshot_identity_hash_and_task_reference_match', () => {
-              validateCase01WorkspaceArtifact({ workspace: proposalFor(jobId).workspace, content: ctoArtifact.content,
-                taskArtifactId: taskArtifact.artifact_id, snapshotBase: CASE01_SNAPSHOT_BASE,
+              case01SnapshotService.validateWorkspaceArtifact({ workspace: proposalFor(jobId).workspace, content: ctoArtifact.content,
+                taskArtifactId: taskArtifact.artifact_id,
                 snapshotId: taskArtifact.content?.workspace_snapshot_id });
               return ctoArtifact.content?.decision === 'approve' &&
                 ctoArtifact.content?.workspace_snapshot_id === taskArtifact.content?.workspace_snapshot_id &&
@@ -5054,15 +4529,15 @@ async function callToolImpl(name, args, telemetryContext = null) {
             addCase01Check('case01_cto_artifact_binds_exact_successful_synthesis_result', () => {
               const refs = ctoArtifact.evidence || [];
               if (refs.length !== 1 || ctoArtifact.artifact_id !== `cto-decision-${refs[0]}` || ctoArtifact.task_id !== parent?.task_id) return false;
-              const result = workflowStore.db.prepare('SELECT result_id, task_id, outcome FROM results WHERE result_id=?').get(refs[0]);
+              const result = workflowState.getResult(refs[0]);
               return Boolean(result && result.result_id === refs[0] && result.task_id === parent?.task_id && result.outcome === 'success');
             });
           }
         }
         addCase01Check('case01_durable_consumption_ack_binds_actual_bytes_and_full_lineage', () => {
           const completedCto = trace.tasks.some(task => task.role === 'cto' && task.status === 'completed');
-          if (!completedCto) return !workflowStore.db.prepare('SELECT 1 FROM case01_consumption_acks WHERE job_id=?').get(jobId);
-          return validateCase01ConsumptionAck(jobId) === true;
+          if (!completedCto) return !case01SnapshotStore.getConsumptionAck(jobId);
+          return case01SnapshotService.validateConsumptionAck(jobId) === true;
         });
         addCase01Check('case01_trace_contains_completion_artifact_and_terminal_events', () => {
           // Presence of event *types* is insufficient: unrelated or conflicting
@@ -5075,7 +4550,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
             // does not prove it is the only row describing that same logical
             // transition. SQLite permits a second event_id with a duplicated
             // payload, which older recovery checks silently ignored.
-            const rows = workflowStore.db.prepare('SELECT event_id, job_id, type, payload_json, created_at FROM events WHERE job_id=? AND type=?').all(jobId, type);
+            const rows = workflowState.listEventsForJob(jobId, { type });
             const matches = [];
             for (const row of rows) {
               let payload;
@@ -5140,7 +4615,7 @@ async function callToolImpl(name, args, telemetryContext = null) {
           const ctoRefs = ctoArtifact.evidence || [];
           const synthesisResultId = ctoRefs.length === 1 ? ctoRefs[0] : null;
           const synthesisResult = synthesisResultId
-            ? workflowStore.db.prepare('SELECT result_id, task_id, outcome, content FROM results WHERE result_id=?').get(synthesisResultId)
+            ? workflowState.getResult(synthesisResultId)
             : null;
           const synthesisCompletion = synthesisResultId ? readEvent('task.local_completed', synthesisResultId) : null;
           const synthesisAttempt = synthesisCompletion?.payload?.attemptId
@@ -5157,13 +4632,13 @@ async function callToolImpl(name, args, telemetryContext = null) {
           if (trace.job.status === 'completed') {
             // The report ID is authoritative in the terminal event on older DB
             // schemas; do not assume a nullable jobs.report_id projection exists.
-            const terminalRows = workflowStore.db.prepare("SELECT event_id, payload_json, created_at FROM events WHERE job_id=? AND type='job.completed'").all(jobId);
+            const terminalRows = workflowState.listEventsForJob(jobId, { type: 'job.completed' });
             if (terminalRows.length !== 1) throw new Error('expected exactly one durable job.completed event');
             let terminalPayload;
             try { terminalPayload = parseStrictJson(terminalRows[0].payload_json); } catch { throw new Error('job.completed payload is malformed'); }
             const reportId = terminalPayload.reportId;
             const terminal = reportId ? readEvent('job.completed', `${reportId}|terminal|success`) : null;
-            const report = reportId ? workflowStore.db.prepare('SELECT report_id, job_id, kind, content FROM reports WHERE report_id=?').get(reportId) : null;
+            const report = reportId ? workflowState.getReport(reportId) : null;
             const deliveryKey = reportId ? createHash('sha256').update(`${reportId}|chat-on-steroids-plugin|local`).digest('hex') : null;
             const delivery = deliveryKey ? readEvent('delivery.claimed', deliveryKey) : null;
             const reportCreated = reportId ? readEvent('report.created', reportId) : null;
@@ -5431,7 +4906,7 @@ function collectCompletedResults(jobId, children, currentTask) {
     }));
     const snapshotArtifact = artifacts.find(item => item.type === 'requirements' && typeof item.content?.workspace_snapshot_id === 'string');
     const verifiedWorkspaceBytes = snapshotArtifact
-      ? readVerifiedCase01WorkspaceSnapshot({ content: snapshotArtifact.content, snapshotBase: CASE01_SNAPSHOT_BASE, snapshotId: snapshotArtifact.content.workspace_snapshot_id })
+      ? case01SnapshotService.readVerifiedWorkspaceSnapshot({ content: snapshotArtifact.content, snapshotId: snapshotArtifact.content.workspace_snapshot_id })
       : null;
     return {
       task_id: task.task_id, role: task.role, outcome: row?.outcome || null, result_id: row?.result_id || null,
@@ -5932,9 +5407,7 @@ function verifiedAdaptiveGoalApprovalBindingForTransition(jobId, plan = workflow
       candidate.immutablePlanHash !== plan.plan_hash || !workflowStore.isApprovalCurrent(jobId)) {
     throw adaptiveGoalError('AGG_APPROVAL_CANDIDATE_NOT_CURRENT', 'approval requires current independent source verification, reviewer identity, evidence, and exact immutable plan');
   }
-  const rows = workflowStore.db.prepare(`SELECT event_id,job_id,type,payload_json,created_at FROM events
-    WHERE job_id=? AND type='approval.approved' AND json_extract(payload_json,'$.proposalHash')=? ORDER BY created_at ASC,rowid ASC`)
-    .all(jobId, currentProposal.proposalHash);
+  const rows = workflowState.listEventsForJobPayload(jobId, 'approval.approved', 'proposalHash', currentProposal.proposalHash);
   if (rows.length !== 1) {
     throw adaptiveGoalError('AGG_APPROVAL_EVIDENCE_EVENT_AMBIGUOUS', `exactly one immutable approval evidence event is required for this proposal; observed ${rows.length}`);
   }
@@ -6044,6 +5517,24 @@ workflowStore.setAdaptiveGoalExecutionApprovalGuard((jobId, expectedProposalHash
     approvalBinding: verified.approvalBinding,
     approvalBindingHash: verified.approvalBinding.binding_record_hash,
     approvalPolicySummary: verified.summary
+  };
+});
+
+workflowStore.setAdaptiveGoalPlanApprovalGuard((jobId, expectedProposalHash) => {
+  const currentProposal = workflowStore.getCurrentProposal(jobId);
+  if (!currentProposal || currentProposal.proposalHash !== expectedProposalHash) return null;
+  const source = readAdaptiveGoalPlanProposal(jobId);
+  if (!source.found || source.job.status !== 'active' || source.job.state !== 'APPROVED') return null;
+  const immutablePlan = workflowStore.getExecutionPlan(jobId);
+  if (!immutablePlan) return null;
+  return {
+    planReviewReady: true,
+    proposalHash: currentProposal.proposalHash,
+    sourceFingerprint: source.fingerprint,
+    sourceGraphHash: source.draft.source.graphHash,
+    draftHash: source.draft.draftHash,
+    bindingHash: source.snapshot.binding_hash,
+    immutablePlanHash: immutablePlan.plan_hash
   };
 });
 
@@ -6167,6 +5658,9 @@ function readAdaptiveGoalPlanProposal(jobId, { requireApproved = false } = {}) {
   }
   const runtime = workflowStore.getWorkflowRuntimeState(jobId);
   const existingPlan = workflowStore.getExecutionPlan(jobId);
+  if (job.status !== 'active') {
+    corrupt('SOURCE_PLAN_LIFECYCLE_INACTIVE', 'source Plan Graph proposal is not active; inactive wrappers cannot be treated as current or approved sources');
+  }
   if (job.state === 'IDLE') {
     if (runtime?.phase !== 'PROPOSED' || existingPlan || workflowStore.getLatestApproval(jobId)) {
       corrupt('SOURCE_PLAN_LIFECYCLE_INCONSISTENT', 'unapproved source Plan Graph proposal unexpectedly has an immutable plan, approval, or non-PROPOSED phase');
@@ -6181,7 +5675,7 @@ function readAdaptiveGoalPlanProposal(jobId, { requireApproved = false } = {}) {
   } else {
     corrupt('SOURCE_PLAN_ALREADY_DISPATCHED', 'source Plan Graph workflow has left its proposal/approved checkpoint; create a new review-only source instead');
   }
-  if (requireApproved && (job.state !== 'APPROVED' || !existingPlan || !workflowStore.isApprovalCurrent(jobId))) {
+  if (requireApproved && (job.status !== 'active' || job.state !== 'APPROVED' || !existingPlan || !workflowStore.isApprovalCurrent(jobId))) {
     corrupt('SOURCE_PLAN_APPROVAL_REQUIRED', 'Execution Graph creation requires a current human approval and immutable plan pin on the exact revalidated Plan Graph review proposal');
   }
   const sourceEvidenceRefs = [...new Set(snapshot.source_graph.nodes.flatMap(node => Array.isArray(node.evidenceRefs) ? node.evidenceRefs : []))]
@@ -6240,11 +5734,7 @@ function resolveAdaptiveGoalEvidenceRecords(draft) {
       // Preserve only the durable identity and a bounded failure category; do
       // not return the corrupted artifact content or trust its claimed digest.
       let persistedIdentity = null;
-      try {
-        persistedIdentity = workflowStore.db.prepare(
-          'SELECT artifact_id,job_id FROM artifacts WHERE artifact_id=?'
-        ).get(candidateId) || null;
-      } catch {}
+      try { persistedIdentity = workflowState.getArtifactIdentity(candidateId); } catch {}
       if (persistedIdentity) {
         const validationMessage = String(error?.message || error || 'artifact validation failed');
         const failureCode = /content[_ ]hash mismatch|artifact content_hash mismatch/i.test(validationMessage)
@@ -6272,7 +5762,7 @@ function resolveAdaptiveGoalEvidenceRecords(draft) {
       artifactId: artifact.artifact_id, taskId: artifact.task_id, type: artifact.type,
       status: artifact.status, supersedes: artifact.supersedes, contentHash: artifact.content_hash
     };
-    const rawArtifactRow = workflowStore.db.prepare('SELECT uri,metadata_json,content,content_hash FROM artifacts WHERE artifact_id=?').get(artifact.artifact_id);
+    const rawArtifactRow = workflowState.getArtifactStorageRecord(artifact.artifact_id);
     // The event only repeats the database's claimed digest; that agreement is
     // not evidence that the stored artifact bytes still match it. Re-hash the
     // exact persisted content bytes on every readiness resolution.
@@ -6290,7 +5780,7 @@ function resolveAdaptiveGoalEvidenceRecords(draft) {
       });
       continue;
     }
-    const events = workflowStore.db.prepare("SELECT event_id,job_id,type,payload_json FROM events WHERE job_id=? AND type='artifact.created' AND json_extract(payload_json,'$.artifactId')=? ORDER BY created_at ASC,rowid ASC").all(artifact.job_id, artifact.artifact_id);
+    const events = workflowState.listArtifactCreatedEvents(artifact.job_id, artifact.artifact_id);
     let lineageValid = false;
     if (events.length === 1) {
       try {
@@ -6336,7 +5826,7 @@ function resolveAdaptiveGoalEvidenceRecords(draft) {
         break;
       }
       seenEvidenceRefs.add(evidenceRef);
-      const resultRow = workflowStore.db.prepare('SELECT result_id,task_id,outcome,content,created_at FROM results WHERE result_id=?').get(evidenceRef);
+      const resultRow = workflowState.getResult(evidenceRef);
       if (resultRow) {
         if (resultRow.task_id !== artifact.task_id) {
           evidenceReferenceFailureReason = `artifact evidence references result ${evidenceRef} owned by a different producer task`;
@@ -6365,8 +5855,7 @@ function resolveAdaptiveGoalEvidenceRecords(draft) {
       producerResultLineageFailureReason = `producer task is not completed in the artifact's owning job`;
     } else {
       producerResult = referencedResults[0];
-      const rawCompletionRows = workflowStore.db.prepare("SELECT event_id,job_id,type,payload_json,created_at FROM events WHERE job_id=? AND type IN ('task.completed','task.local_completed') ORDER BY rowid ASC")
-        .all(artifact.job_id);
+      const rawCompletionRows = workflowState.listTaskCompletionEvents(artifact.job_id);
       const completionRows = [];
       let completionLedgerFailureReason = null;
       for (const row of rawCompletionRows) {
@@ -6397,7 +5886,7 @@ function resolveAdaptiveGoalEvidenceRecords(draft) {
           completionLedgerFailureReason = 'producer task completion event omits a non-empty result ID';
           break;
         }
-        const completionResult = workflowStore.db.prepare('SELECT result_id,task_id,outcome,content,created_at FROM results WHERE result_id=?').get(payload.resultId);
+        const completionResult = workflowState.getResult(payload.resultId);
         if (!completionResult || completionResult.task_id !== artifact.task_id || completionResult.outcome !== 'success') {
           completionLedgerFailureReason = `producer task completion event refers to a missing, foreign-task, or non-success result ${payload.resultId}`;
           break;
@@ -6411,8 +5900,7 @@ function resolveAdaptiveGoalEvidenceRecords(draft) {
         try {
           const completionPayload = completion.payload;
           const attempt = typeof completionPayload.attemptId === 'string' && completionPayload.attemptId.trim()
-            ? workflowStore.db.prepare('SELECT attempt_id,task_id,status,openclaw_run_id,started_at,finished_at,error FROM attempts WHERE attempt_id=?').get(completionPayload.attemptId)
-            : null;
+            ? workflowState.getAttempt(completionPayload.attemptId) : null;
           const lineage = adaptiveGoalEvidenceLineage.validateAdaptiveGoalProducerLineage({
             jobId: artifact.job_id,
             taskId: artifact.task_id,
@@ -6566,11 +6054,11 @@ function readAdaptiveGoalExecutionGraphProposal(jobId, { allowExecutingWrapper =
   const runtime = workflowStore.getWorkflowRuntimeState(jobId);
   const executionPlan = workflowStore.getExecutionPlan(jobId);
   if (job.state === 'IDLE') {
-    if (runtime?.phase !== 'PROPOSED' || executionPlan || workflowStore.getLatestApproval(jobId)) {
+    if (job.status !== 'active' || runtime?.phase !== 'PROPOSED' || executionPlan || workflowStore.getLatestApproval(jobId)) {
       return stale('EXECUTION_GRAPH_WRAPPER_LIFECYCLE_INCONSISTENT', 'unapproved Execution Graph review proposal unexpectedly has an immutable plan, approval, or non-PROPOSED phase', evaluated.readiness);
     }
   } else if (job.state === 'APPROVED') {
-    if (runtime?.phase !== 'APPROVED' || !executionPlan || !workflowStore.isApprovalCurrent(jobId) ||
+    if (job.status !== 'active' || runtime?.phase !== 'APPROVED' || !executionPlan || !workflowStore.isApprovalCurrent(jobId) ||
         executionPlan.workflow_id !== source.workflowId || executionPlan.workflow_version !== expectedWrapperVersion ||
         !String(executionPlan.success_contract?.goal || '').includes(rebuilt.proposalHash) ||
         !String(executionPlan.success_contract?.goal || '').includes(rebuilt.fingerprint)) {
@@ -6718,13 +6206,12 @@ function readAdaptiveGoalExecutionPlanCandidate(jobId, { allowExecutingWrapper =
   const job = workflowStore.getJob(jobId);
   if (!job) return { found: false, status: 'not_found', job_id: jobId,
     blockers: [{ code: 'EXECUTION_PLAN_CANDIDATE_JOB_NOT_FOUND', message: 'Execution Graph proposal job does not exist' }] };
-  const rows = workflowStore.db.prepare(`SELECT event_id,job_id,type,payload_json,created_at FROM events
-    WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC`).all(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT);
+  const rows = workflowState.listEventsForJob(jobId, { type: ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT });
   if (rows.length === 0) return { found: false, status: 'not_found', job_id: jobId,
     blockers: [{ code: 'EXECUTION_PLAN_CANDIDATE_NOT_FOUND', message: 'no persisted execution-plan candidate exists for this Execution Graph proposal' }] };
   const stale = (code, message, extra = {}) => ({ found: true, status: 'stale', job_id: jobId,
     blockers: [{ code, message }],
-    immutablePlanPinned: Boolean(workflowStore.db.prepare('SELECT 1 AS present FROM workflow_plans WHERE job_id=?').get(jobId)),
+    immutablePlanPinned: workflowState.hasWorkflowPlan(jobId),
     wrapperApproved: workflowStore.getJob(jobId)?.state === 'APPROVED',
     executionAuthorized: false, dispatchStarted: false, ...extra });
   if (rows.length !== 1) return stale('EXECUTION_PLAN_CANDIDATE_DUPLICATE_SNAPSHOTS', 'more than one candidate snapshot exists; refusing to choose a winner');
@@ -6769,14 +6256,14 @@ function readAdaptiveGoalExecutionPlanCandidate(jobId, { allowExecutingWrapper =
   let executionPlan;
   try { executionPlan = workflowStore.getExecutionPlan(jobId); }
   catch (error) { return stale('EXECUTION_PLAN_CANDIDATE_IMMUTABLE_PLAN_INVALID', String(error?.message || error)); }
-  const approvals = workflowStore.db.prepare('SELECT approval_id,decision,proposal_hash FROM approvals WHERE job_id=? ORDER BY created_at ASC,rowid ASC').all(jobId);
-  const tasksCount = workflowStore.db.prepare('SELECT COUNT(*) AS count FROM tasks WHERE job_id=?').get(jobId).count;
+  const approvals = workflowState.listApprovalsForJob(jobId);
+  const tasksCount = workflowState.countTasksForJob(jobId);
   if (job.state === 'IDLE') {
-    if (workflowStore.getWorkflowRuntimeState(jobId)?.phase !== 'PROPOSED' || executionPlan || approvals.length || tasksCount) {
+    if (job.status !== 'active' || workflowStore.getWorkflowRuntimeState(jobId)?.phase !== 'PROPOSED' || executionPlan || approvals.length || tasksCount) {
       return stale('EXECUTION_PLAN_CANDIDATE_UNAPPROVED_LIFECYCLE_MISMATCH', 'unapproved candidate wrapper has unexpected immutable plan, approval, task rows or runtime phase');
     }
   } else if (job.state === 'APPROVED') {
-    if (!executionPlan || executionPlan.plan_hash !== rebuilt.candidate.compiler.compilerPlanHash ||
+    if (job.status !== 'active' || !executionPlan || executionPlan.plan_hash !== rebuilt.candidate.compiler.compilerPlanHash ||
         !workflowStore.isApprovalCurrent(jobId) || approvals.at(-1)?.decision !== 'approved' ||
         approvals.at(-1)?.proposal_hash !== rebuilt.current.proposalHash || tasksCount !== 0 ||
         workflowStore.getWorkflowRuntimeState(jobId)?.phase !== 'APPROVED') {
@@ -6858,8 +6345,7 @@ function readAdaptiveGoalExecutionPlanCandidate(jobId, { allowExecutingWrapper =
 }
 
 function resolveAdaptiveGoalActionIntentBindingsForWorkflow(jobId, { allowExecutingWrapper = false, allowSandboxActionContinuation = false } = {}) {
-  const rows = workflowStore.db.prepare(`SELECT event_id,job_id,type,payload_json FROM events
-    WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC`).all(jobId, ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT);
+  const rows = workflowState.listEventsForJob(jobId, { type: ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT });
   if (rows.length === 0) return [];
   if (rows.length !== 1) throw adaptiveGoalError('EXECUTION_PLAN_CANDIDATE_DUPLICATE_SNAPSHOTS', 'multiple action-intent candidate snapshots exist; refusing to compile any of them');
   const row = rows[0];
@@ -6926,8 +6412,7 @@ function resolveAdaptiveGoalActionIntentBindingsForWorkflow(jobId, { allowExecut
 }
 
 function readAdaptiveGoalSandboxEvents(jobId, type, taskId) {
-  return workflowStore.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC')
-    .all(jobId, type).map(row => {
+  return workflowState.listEventsForJob(jobId, { type }).map(row => {
       let payload;
       try { payload = parseStrictJson(row.payload_json, `AGG sandbox ${type} event`); }
       catch { throw adaptiveGoalError('AGG_SANDBOX_EVENT_MALFORMED', `a durable ${type} event is malformed`); }
@@ -6937,7 +6422,7 @@ function readAdaptiveGoalSandboxEvents(jobId, type, taskId) {
 
 function persistAdaptiveGoalSandboxEvent(jobId, type, payload, dedupeKey) {
   const eventId = workflowStore.recordEvent(jobId, type, payload, dedupeKey);
-  const row = workflowStore.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+  const row = workflowState.getEvent(eventId);
   const expectedEventId = createHash('sha256').update(`${jobId}|${type}|${dedupeKey}`).digest('hex');
   if (!row || row.event_id !== expectedEventId || row.job_id !== jobId || row.type !== type || row.payload_json !== JSON.stringify(payload)) {
     throw adaptiveGoalError('AGG_SANDBOX_EVENT_PERSISTENCE_MISMATCH', `the durable ${type} event did not round-trip exactly`);
@@ -6947,7 +6432,6 @@ function persistAdaptiveGoalSandboxEvent(jobId, type, payload, dedupeKey) {
 
 function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
   adaptiveGoalSandboxExecutor.assertAdaptiveGoalSandboxExecutorEnabled();
-  const db = workflowStore.db;
   const sandboxRoot = assertString(process.env.AGG_SANDBOX_ROOT || '', 'AGG_SANDBOX_ROOT', 2000);
   const claimedType = adaptiveGoalSandboxExecutor.ADAPTIVE_GOAL_SANDBOX_ACTION_CLAIMED_EVENT;
   const completedType = adaptiveGoalSandboxExecutor.ADAPTIVE_GOAL_SANDBOX_ACTION_COMPLETED_EVENT;
@@ -6961,7 +6445,7 @@ function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
   if (!job || job.status !== 'active' || job.state !== 'EXECUTING' || !plan || !workflowStore.isApprovalCurrent(jobId)) {
     throw adaptiveGoalError('AGG_SANDBOX_WORKFLOW_NOT_APPROVED_AND_DISPATCHED', 'the sandbox executor requires an active dispatched workflow and a current approval over its immutable plan');
   }
-  const candidateRows = db.prepare("SELECT event_id,job_id,type,payload_json FROM events WHERE job_id=? AND type='adaptive_goal.execution_plan_candidate_created' ORDER BY created_at ASC,rowid ASC").all(jobId);
+  const candidateRows = workflowState.listEventsForJob(jobId, { type: 'adaptive_goal.execution_plan_candidate_created' });
   if (candidateRows.length !== 1) throw adaptiveGoalError('AGG_SANDBOX_CANDIDATE_AMBIGUOUS', 'exactly one durable AGG execution-plan candidate is required');
   const candidateRow = candidateRows[0];
   const candidatePayload = parseStrictJson(candidateRow.payload_json, 'AGG sandbox candidate snapshot');
@@ -7024,10 +6508,10 @@ function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
       jobId, candidateHash: candidate.candidateHash, immutablePlanHash: plan.plan_hash, taskId, intentHash
     });
     const durableTask = workflowStore.getTask(taskId);
-    const durableResult = db.prepare('SELECT result_id,task_id,outcome,content FROM results WHERE result_id=?').get(completed.payload.resultId);
+    const durableResult = workflowState.getResult(completed.payload.resultId);
     const durableArtifact = workflowStore.getArtifact(completed.payload.artifactId);
     const rawDurableArtifact = durableArtifact
-      ? db.prepare('SELECT content,content_hash,uri,metadata_json FROM artifacts WHERE artifact_id=?').get(durableArtifact.artifact_id)
+      ? workflowState.getArtifactStorageRecord(durableArtifact.artifact_id)
       : null;
     // A stored content_hash matching the completion event is only a pair of
     // agreeing claims. Re-hash the exact persisted content bytes on replay so
@@ -7103,8 +6587,8 @@ function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
     const claimed = existingClaimed[0];
     const recoveryInputs = resolveAdaptiveGoalActionIntentTaskInputSnapshots(jobId, planTask, plan);
     const expectedClaimId = createHash('sha256').update(`${jobId}|${claimedType}|${dedupeKey}`).digest('hex');
-    const recoveryResults = db.prepare('SELECT result_id,task_id,outcome,content FROM results WHERE task_id=? ORDER BY created_at ASC,rowid ASC').all(taskId);
-    const attempt = db.prepare('SELECT attempt_id,task_id,status,openclaw_run_id FROM attempts WHERE attempt_id=?').get(claimed.payload.attemptId);
+    const recoveryResults = workflowState.listResultsForTask(taskId);
+    const attempt = workflowState.getAttempt(claimed.payload.attemptId);
     if (claimed.event_id !== expectedClaimId || claimed.payload.schemaVersion !== 1 || claimed.payload.state !== 'claimed' ||
         claimed.payload.actionId !== adaptiveGoalSandboxExecutor.ADAPTIVE_GOAL_SANDBOX_ACTION_ID ||
         claimed.payload.candidateHash !== candidate.candidateHash || claimed.payload.immutablePlanHash !== plan.plan_hash ||
@@ -7187,15 +6671,15 @@ function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
       throw adaptiveGoalError('AGG_SANDBOX_FAILURE_RECOVERY_BINDING_MISMATCH', 'stored failure event does not match the exact one-shot claim, candidate, immutable plan and intent');
     }
     if (task.status === 'running') {
-      const activeAttempt = db.prepare("SELECT attempt_id,task_id,status,openclaw_run_id FROM attempts WHERE attempt_id=?").get(claimed.payload.attemptId);
+      const activeAttempt = workflowState.getAttempt(claimed.payload.attemptId);
       if (!activeAttempt || activeAttempt.task_id !== taskId || activeAttempt.status !== 'started' || activeAttempt.openclaw_run_id) {
         throw adaptiveGoalError('AGG_SANDBOX_FAILURE_RECOVERY_ATTEMPT_MISMATCH', 'a failure ledger may only terminalize the exact still-active local attempt');
       }
       workflowStore.completeLocalTask(taskId, { content: JSON.stringify(failed.payload), outcome: 'failed' });
     } else {
-      const terminalResults = db.prepare('SELECT result_id,task_id,outcome,content FROM results WHERE task_id=? ORDER BY created_at ASC,rowid ASC').all(taskId);
-      const failedAttempts = db.prepare('SELECT attempt_id,task_id,status,openclaw_run_id FROM attempts WHERE attempt_id=?').get(claimed.payload.attemptId);
-      const terminalEvents = db.prepare("SELECT event_id,payload_json FROM events WHERE job_id=? AND type='task.local_failed'").all(jobId)
+      const terminalResults = workflowState.listResultsForTask(taskId);
+      const failedAttempts = workflowState.getAttempt(claimed.payload.attemptId);
+      const terminalEvents = workflowState.listEventsForJob(jobId, { type: 'task.local_failed' })
         .map(row => ({ ...row, payload: parseStrictJson(row.payload_json, 'AGG sandbox failed task event') }))
         .filter(row => row.payload.taskId === taskId);
       if (terminalResults.length !== 1 || terminalResults[0].task_id !== taskId || terminalResults[0].outcome !== 'failed' ||
@@ -7218,7 +6702,7 @@ function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
     throw adaptiveGoalError('AGG_SANDBOX_REPLAY_BLOCKED', 'an earlier claim/failure lacks an unambiguous verifiable completion; action is not retried automatically and requires isolated manual reconciliation');
   }
   if (task.status !== 'running') throw adaptiveGoalError('AGG_SANDBOX_TASK_NOT_STARTED', 'workflow_next_task must start the exact approved task after dispatch and completed dependencies');
-  const activeAttempts = db.prepare("SELECT attempt_id,task_id,status,openclaw_run_id FROM attempts WHERE task_id=? AND status='started' ORDER BY started_at ASC,rowid ASC").all(taskId);
+  const activeAttempts = workflowState.listActiveLocalAttemptsForTask(taskId);
   if (activeAttempts.length !== 1 || activeAttempts[0].openclaw_run_id) {
     throw adaptiveGoalError('AGG_SANDBOX_TASK_ATTEMPT_INVALID', 'sandbox execution requires exactly one active local attempt and no remote run identity');
   }
@@ -7227,13 +6711,13 @@ function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
 
   // Claim under SQLite's writer lock. A crash after this point leaves a claim
   // that blocks replay, rather than risking a duplicate action side effect.
-  db.exec('BEGIN IMMEDIATE');
+  adaptiveGoalTransactions.beginSandboxActionClaim();
   try {
     workflowStore.assertApprovalCurrent(jobId);
     const currentJob = workflowStore.getJob(jobId);
     const currentTask = workflowStore.getTask(taskId);
     const currentPlan = workflowStore.getExecutionPlan(jobId);
-    const claimRows = db.prepare('SELECT event_id,payload_json FROM events WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC').all(jobId, claimedType);
+    const claimRows = workflowState.listEventsForJob(jobId, { type: claimedType });
     const hasClaimForTask = claimRows.some(row => {
       try { return parseStrictJson(row.payload_json, 'AGG sandbox claim event').taskId === taskId; } catch { return true; }
     });
@@ -7248,9 +6732,9 @@ function executeAdaptiveGoalSandboxActionForWorkflow(jobId, taskId) {
       prerequisiteArtifactIds: taskInputSnapshots.map(item => item.artifactMetadata?.artifact_id).sort()
     };
     persistAdaptiveGoalSandboxEvent(jobId, claimedType, claimPayload, dedupeKey);
-    db.exec('COMMIT');
+    adaptiveGoalTransactions.commitSandboxActionClaim();
   } catch (error) {
-    try { db.exec('ROLLBACK'); } catch {}
+    adaptiveGoalTransactions.rollbackSandboxActionClaim();
     throw error;
   }
 

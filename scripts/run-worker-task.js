@@ -391,7 +391,7 @@ try {
   // the only component allowed to invoke the task command.
   process.env.WORKFLOW_DATA_DIR = path.join(evidenceDir, 'state');
   process.env.WORKFLOW_DB = path.join(process.env.WORKFLOW_DATA_DIR, 'worker.db');
-  const { WorkflowStore } = await import('../src/runtime/job-store.js');
+  const { WorkflowStore } = await import('../job-store.js');
   const { ExecutionManager } = await import('../src/runtime/execution-manager.js');
   store = new WorkflowStore();
   const job = store.createJob({ conversationKey: `github-actions:${process.env.JOB_ID}`, title: `worker ${process.env.TASK_ID}` });

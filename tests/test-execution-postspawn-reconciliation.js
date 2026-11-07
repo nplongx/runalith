@@ -28,7 +28,7 @@ esac
 `, { flag: 'wx', mode: 0o700 });
 fs.chmodSync(tmuxStub, 0o700);
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { ExecutionManager } = await import('../src/runtime/execution-manager.js');
 const store = new WorkflowStore();
 const manager = new ExecutionManager(store, { tmuxBin: tmuxStub, timeoutMs: 1000, executionTmpDir: runtimeDir });

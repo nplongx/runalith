@@ -88,6 +88,17 @@ function p3PersistedStore(runId = '24680', dispatchKey = p3DispatchKey, runAttem
     } };
     return { run() { return { changes: 1 }; } };
   } } };
+  store.getTaskLease = leaseId => String(leaseId) === input.lease_id ? {
+    lease_id: input.lease_id, job_id: input.job_id, task_id: input.task_id,
+    state: 'ACTIVE', attempt: input.attempt, owner_epoch: input.owner_epoch,
+    expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+  } : null;
+  store.getTask = taskId => String(taskId) === input.task_id ? {
+    task_id: input.task_id, job_id: input.job_id, status: 'running', execution_attempt: input.attempt
+  } : null;
+  store.getJob = jobId => String(jobId) === input.job_id ? {
+    job_id: input.job_id, status: 'active', state: 'EXECUTING'
+  } : null;
   store.inspectRun = () => ({ ...row });
   return store;
 }

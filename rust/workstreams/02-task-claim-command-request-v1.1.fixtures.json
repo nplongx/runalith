@@ -1,0 +1,114 @@
+{
+  "fixture_set": "WS2-TaskClaim-CommandRequestV1.1",
+  "status": "DRAFT_NOT_RATIFIED",
+  "schema_version": 1,
+  "consumer_source": "runalith_sandbox::CommandRequest",
+  "consumer_vector_source": "rust/workstreams/03-command-request-v1-differential-vectors.json",
+  "consumer_vector_source_sha256": "2c6a8fdf9743786389fe2d1bfc93e4fdb957067c105cb20d1a6c780055e52532",
+  "producer_mapping": "TaskClaimEnvelopeV4.command is exactly one CommandRequestV1 JSON object. command_sha256 is runalith_domain::content_hash(CommandRequest) over the current Rust serde struct serialization. This is a logical command field mapping only; it is not the outer claim signature preimage.",
+  "serializer_profile": "serde_json::to_vec(CommandRequest) in struct field order; PathBuf as UTF-8 string; environment as BTreeMap key order; stdin Vec<u8> as JSON integer array.",
+  "positive_vectors": [
+    {
+      "name": "minimal-true",
+      "command": {
+        "executable": "/usr/bin/true",
+        "arguments": [],
+        "working_directory": ".",
+        "environment": {},
+        "stdin": []
+      },
+      "serialized_json": "{\"executable\":\"/usr/bin/true\",\"arguments\":[],\"working_directory\":\".\",\"environment\":{},\"stdin\":[]}",
+      "command_sha256": "7cdb59b2331c7eed448b46c971fe1d6dccf915ddc82ad6d1b21bca4bae55a3a5",
+      "execution": "NOT_RUN_FIXTURE_ONLY"
+    },
+    {
+      "name": "unicode-environment-binary-stdin",
+      "command": {
+        "executable": "/usr/bin/env",
+        "arguments": [
+          "-u",
+          "TOKEN",
+          "python3",
+          "-c",
+          "print('café 🧪')"
+        ],
+        "working_directory": "jobs/run-1",
+        "environment": {
+          "ZED": "last",
+          "ALPHA": "first",
+          "TOKEN": "shadow"
+        },
+        "stdin": [
+          0,
+          255,
+          10
+        ]
+      },
+      "serialized_json": "{\"executable\":\"/usr/bin/env\",\"arguments\":[\"-u\",\"TOKEN\",\"python3\",\"-c\",\"print('café 🧪')\"],\"working_directory\":\"jobs/run-1\",\"environment\":{\"ALPHA\":\"first\",\"TOKEN\":\"shadow\",\"ZED\":\"last\"},\"stdin\":[0,255,10]}",
+      "command_sha256": "6e3fbfe695f74f36739e454c6cd541f7cd4c0487d2d1c9e91302e8a2d9833fb7",
+      "execution": "NOT_RUN_FIXTURE_ONLY"
+    },
+    {
+      "name": "ws2-current-producer-command-vector",
+      "command": {
+        "executable": "/usr/bin/printf",
+        "arguments": [
+          "%s\\n",
+          "ws2-command-vector"
+        ],
+        "working_directory": ".",
+        "environment": {
+          "LANG": "C.UTF-8",
+          "RUNALITH_MODE": "fixture"
+        },
+        "stdin": [
+          65,
+          0,
+          66
+        ]
+      },
+      "serialized_json": "{\"executable\":\"/usr/bin/printf\",\"arguments\":[\"%s\\\\n\",\"ws2-command-vector\"],\"working_directory\":\".\",\"environment\":{\"LANG\":\"C.UTF-8\",\"RUNALITH_MODE\":\"fixture\"},\"stdin\":[65,0,66]}",
+      "command_sha256": "d663cd8fd7c063804596f5403532efe767ed302d01ec4f153d9c287df409c730",
+      "execution": "NOT_RUN_FIXTURE_ONLY"
+    }
+  ],
+  "negative_cases": [
+    {
+      "id": "missing_executable",
+      "mutation": "remove executable",
+      "expected": "REJECT_DESERIALIZATION"
+    },
+    {
+      "id": "unknown_field",
+      "mutation": "add shell=true",
+      "expected": "REJECT_DENY_UNKNOWN_FIELDS"
+    },
+    {
+      "id": "stdin_not_byte_array",
+      "mutation": "stdin=[-1,256]",
+      "expected": "REJECT_DESERIALIZATION"
+    },
+    {
+      "id": "environment_not_string_map",
+      "mutation": "environment.TOKEN=7",
+      "expected": "REJECT_DESERIALIZATION"
+    },
+    {
+      "id": "changed_command_bytes_same_digest",
+      "mutation": "arguments change but retain command_sha256",
+      "expected": "REJECT_DIGEST_MISMATCH"
+    },
+    {
+      "id": "changed_digest_same_command",
+      "mutation": "command_sha256 differs from serialized command",
+      "expected": "REJECT_DIGEST_MISMATCH"
+    }
+  ],
+  "limits": [
+    "The Rust CommandRequest type and serde profile are current consumer implementation evidence, not a ratified cross-part schema.",
+    "These command digests are distinct from TaskClaim V4 signed claim subject/preimage digest, plan_sha256, ACL digest, provider request digest and W8 outer payload digest.",
+    "No command is executed; the authenticator/signature and claim authority remain unresolved.",
+    "Timeout, working-directory policy, executable roots, environment allowlist and sandbox policy are not authorized by this fixture."
+  ],
+  "supersedes_fixture_sha256": "2995ea0be2b1d4465e2306021b4a4fd730be5c0d5f258d297855b8a2d0a7958f"
+}

@@ -1,0 +1,2052 @@
+{
+  "schemaVersion": 1,
+  "registerId": "agg-v2-record-event-caller-register-20261031-v0.5.7",
+  "status": "source-callsite-drift-baseline-not-authorization-registry",
+  "capturedAt": "2026-10-31T12:18:00.000Z",
+  "configuredEntrypoint": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+  "sourceFiles": [
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "sha256": "a612d17a2b982112dba2151693863799a9e5a9ce40c5b5972c0a46fa00ec2a21",
+      "recordEventCallsites": 12
+    },
+    {
+      "file": "src/runtime/adaptive-goal-action-intent-policy.js",
+      "sha256": "70c338f3ebff96ae45a3b7d00ee6a189d5f9666ee6596f4a8e2ca04064e6114d",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-approval-subsystem.js",
+      "sha256": "f29a64fec402003da1f800abb740ef7b72e8baeb6f09d43c08002972faf4334b",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-compatibility.js",
+      "sha256": "4d0eb5882066c7e89e640ed16edf9001f605f30044b921d7f53c56edd8725485",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-discriminator.js",
+      "sha256": "9f4f5ac8a82acdc366499da2b5b678824895816a77f51dafc8f1152ce74a350e",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-evidence-lineage.js",
+      "sha256": "ef0edd71e5ccfd2ded33bf059ebbc8043bb8ffe14f58def16bdb6db1386e620e",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-execution-graph-proposal.js",
+      "sha256": "e4eed374f52a6aba7a7f3038aabfe06148a3698e6ed2e0a78b0cb8ae332bb45f",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-execution-plan-candidate.js",
+      "sha256": "6ff01b9dfe5c6657689aa5e0006f37b7da37b69ccc73500b1993b1c81f23c4bf",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-execution-readiness.js",
+      "sha256": "5afffb98215b5c1cf0fe3ff9914b32705f3e510e2d8e2348ae1ca98eefbad339",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-graph.js",
+      "sha256": "08a6ea8ba74efca2402a56bfb067c3b1e44b0807d13e10e66780c9108086db64",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-knowledge-capture.js",
+      "sha256": "afbfa182566cba10f86e0fff3f8d259f6d5e9da6556362dabd0fc8fd82b79a7c",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-knowledge-store.js",
+      "sha256": "25497ab8260dac444ca8c43a7c3dcf8ea5b5c2c4edc3b5f760969cbf375cebc8",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-knowledge-verifier.js",
+      "sha256": "8d294a8b72280ad72b78808071d9a14f4bcfce736f570f4b6745bf20873671fd",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-phase2-dataset.js",
+      "sha256": "2df83956b8853d4f9435c9f7594511caa9eb2c776192a9acc6fe6c860b2e642d",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-phase2-plan-shadow.js",
+      "sha256": "5d6c261df8364dfb8fdcc3ed7c19f714c7b1118dd804f906c9a9d126860c610f",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-phase2-search.js",
+      "sha256": "871cc438938a17ef380abd95c4e352263b3053454502be5384495e093b9f89a8",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-phase3-mcts.js",
+      "sha256": "2b3758d43433370f21fa87efd49c9aabe5e96a162ef0a6e6ed279fc0565ddb01",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-plan-adapter.js",
+      "sha256": "1e0edfaebc139f9aeeaa11bef68ab09d626ac71b9aef2d32e1d32ad0dabf4dca",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-planner-telemetry.js",
+      "sha256": "30ad37f207251fad636b055ff9d2911de876d7a77b8e94d3527511072a4dbd86",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-reviewed-task-inputs.js",
+      "sha256": "df0bc254f46c46c5668c6a1c091be1015ff57d69a9896cccaa0775a66df473f4",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-reviewer-identity.js",
+      "sha256": "0b33fba3ae9e7437a13cad6d5263660f1dd24b35b8a645900c86c0a8a88991d0",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-sandbox-executor.js",
+      "sha256": "3acd1a90d4d3c6e8345cfdaa48482b089814f6098a83fc1a3295ce701346cc37",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-source-evidence.js",
+      "sha256": "c106a18f4518c8e819b96af41f9202d630884b76b69e177e463e23319b36e11d",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-transaction-boundary.js",
+      "sha256": "51e7739d3c4efe9a2e08d1a52cbdf5984eaa894b9b7fcafa387492b8796e59bf",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-trust-configuration.js",
+      "sha256": "cb92249ee0e3267a0948107122b1458a5d1eec556c2ed03598470f6537ab1e33",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/adaptive-goal-trust-domains.js",
+      "sha256": "7818905c2c6e7005c701274e50793aa695f50adadcff2f8b1db1b9e73fe2b884",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/agg-checkpoint-jcs-v2.js",
+      "sha256": "3b2978fec433d510c27010f4304809b8acbfc3a18c17695b225d473246f7b124",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/autonomous-delivery.js",
+      "sha256": "8b03523af604e13782abf2f8435dbb278e0a08d0241754fd2c56f4c82e32e6bd",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/canonical-json.js",
+      "sha256": "2ce5230005bd3e497be08540bfe2da44c2a47e82c89bf886f284bc6b4afbfc78",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/cdp.js",
+      "sha256": "e355dc09d81167d9ad08d48f3f168d2bdcc98d74ebe306380c9cd80e98dd3966",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/coordinator-workflow.js",
+      "sha256": "63a15fc4c88636a44b7f351fe28e743fec0176ede95907f42c80daf8474cf0c4",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/distributed-scheduler.js",
+      "sha256": "eaa9b46773a99df37b1821e7974180955d3ee2b516c0ac20008425df22915d02",
+      "recordEventCallsites": 2
+    },
+    {
+      "file": "src/runtime/exclusive-file.js",
+      "sha256": "9d2b3fee69b013e880bc8cace9afdf2b938fa40a70aed225f86e1b419d99a6aa",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/execution-contract.js",
+      "sha256": "2a0a7cf446242c86bb80d5d53d3450005c6bb1dea7560904b5446c1a3a220016",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/execution-manager.js",
+      "sha256": "b7702e214263a2532b9b6a01de73ae386d4da1b15347f0e0306cdf79fd23f20e",
+      "recordEventCallsites": 3
+    },
+    {
+      "file": "src/runtime/execution-verifier.js",
+      "sha256": "6102646acc8c3c019d82fa8b868ac53be9cc40bce9184ee7a3ecde3b15cd4151",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/gateway-runner-admission.js",
+      "sha256": "efc764b1e9a1468861f843dde114ca9c53c68d3c568fd0861193d88f80660e8e",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/github-actions-provider.js",
+      "sha256": "3c6769bbe178fdcb4f9b6e5321cbcacf0c7ee0fa6e2e9be1e24f25d1e24cbfb9",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/job-liveness.js",
+      "sha256": "a07acda4ef3f8c0ba25b7748693bd4da7c26e3dcc91bd423dce8b0cdaeafe577",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "sha256": "a6091bd6c97fe7b4862ee90134c408e626d1d1dd665750122d1909c2f8e4ef3d",
+      "recordEventCallsites": 79
+    },
+    {
+      "file": "src/runtime/langgraph-control-loop.js",
+      "sha256": "4eb66e24fa1b24d9957780f2964e6dfd8bd7453c96076529c1c18aae43dc8e30",
+      "recordEventCallsites": 3
+    },
+    {
+      "file": "src/runtime/langgraph-orchestrator.js",
+      "sha256": "2173fcd1a5f97ae107b46206ebedbde15f402d3f0fc739e169e0b90f9c577c38",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/m11-runner-provider.js",
+      "sha256": "d40a63816067ede5194d43aef8f8c89de2e834ac35e855c89f7d1b9ce851bcf4",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/m12-native-specialist-bridge.js",
+      "sha256": "e7f61110146fdca524b741855b001ed843a456bc30ee37e5d42d142be01cee3e",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/manual-intervention-store.js",
+      "sha256": "e3a89b32124761401c9559e14b45e98eeeb65993f0aab7a52db9221e56a1ce86",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/observability.js",
+      "sha256": "357e553cae6560c219e72f9e1dd4339f1fdfccae63af1fbeb565ac5c72308c8b",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/openclaw-message-receipt.js",
+      "sha256": "26571fdc94506807d733318c3ae57f01a12c8be56e458164640a15a8d8d4e017",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/openclaw-message-send.js",
+      "sha256": "b899b9a10ffad4558ad9aa0a2678db8fc545ee46f4610f76e75d33ff89b2de53",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/provider-admission.js",
+      "sha256": "f4d073dbce069f44a6426e6fc1fe47e0e3f6353f35f072b37657501d2cf6180d",
+      "recordEventCallsites": 1
+    },
+    {
+      "file": "src/runtime/provider-dispatch-identity.js",
+      "sha256": "bd8708bcfe8d259d16876774024d85adf030d4736953e71c39fe46e72a110085",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "sha256": "8a42a95fda576e3a93d2217f758e602d972a0c23bf2a8d706ed63fdfb25663c0",
+      "recordEventCallsites": 12
+    },
+    {
+      "file": "src/runtime/runner-admission-broker.js",
+      "sha256": "4d75b2460344d2fc53d2c8fcd4d031c2bca2ba860aef698793599d358faf14ac",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/secure-filesystem.js",
+      "sha256": "007947ab76be75d1eadf2382bcc0a7838134de7b6b37143d42635387e697d59a",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/session-transport.js",
+      "sha256": "3fe159a17684ddb19caf49de0e2ca0858ca0817a3ac1486e02bb3b5536bc0036",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/strict-json.js",
+      "sha256": "9e1f3b865f0f11a62e33592c333f617613a02309cc0d3357e95fc451d9ac736a",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/task-lease-manager.js",
+      "sha256": "ecc220dd6d0fc9b79a2287f0b051b61779187ee5e38b322616156b85240c9dbe",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/tmp-pressure.js",
+      "sha256": "8eba7e691961c913814d97d55164c46fafec403a60304dbd8750632ee2cb76b7",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow-state-port.js",
+      "sha256": "0dce6dc49009165a27c5be954366b7d2d9b8b483cbee1f5a661d096f6b17beeb",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow-state-predicates.js",
+      "sha256": "7125a1c1f946935d4cff71a649743666384ebe5d44fc01bb6adad773393edfd3",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/agent-contracts.js",
+      "sha256": "49b174d59da52e172e406aebe15b103e5fa7bd42e28b1d69b284fabec9a834a8",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/agent-skills.js",
+      "sha256": "4c75051962bdc62672e050f063fd8d95eb0a113e2217863279fe5eded7024e26",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/artifact-normalizer.js",
+      "sha256": "153516e7efe60fb0466cdec1817fc7efc8924207921fcc50c0725da2991b18c7",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/artifacts.js",
+      "sha256": "e2ce2d7bbd26bd2f00d263f8458c0c350412525cc4a22c16c2eb6bd1b7bbd204",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/case01-artifact-acceptance.js",
+      "sha256": "a760ede438b78627e2d4b0a70060c315181c6cd80694cbbb9240af1f28f9b9d2",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/case01-snapshot-store.js",
+      "sha256": "6187bd6797e56f4231c9db58c6651a9d8051e51c077eae1884f6ccb2e6e3ca0f",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/catalog/engineering.js",
+      "sha256": "006719d9a0618795833842a24bb17e42ce41b37433b698b81f5e5a9939aa8b8e",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/catalog/hybrid-engineering.js",
+      "sha256": "98f7657cdcbf4a14ac3a490d62dcaf5662d3c008bce6b7cf0042e7d6c868c873",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/catalog/production.js",
+      "sha256": "448e3eabc3f228cbd83b523de1152c19077415e7d5246ab89906e438d52252cb",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/catalog/standard-engineering.js",
+      "sha256": "e1746fca2ac50baf65af8570c182cb26ef687ddc71e29a77efd839c717ac09fb",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/compiler.js",
+      "sha256": "78657cea9ce19329d235b0f6105153d9a54700d84e18337b73ee2b84eba852c4",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/custom-roles.js",
+      "sha256": "a0f637e312c4f279f5266dcf2aeffef734bb2ec75671847df54b47785248f371",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/custom-workflows.js",
+      "sha256": "20ab13da940aa04ded42a2e9456ee08474bd88d9cf11a49a6575a70302583591",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/definitions/engineering.js",
+      "sha256": "c66cddb65c061bf228ef5f6d78cd8f12dbf635757ccae8cc0b347153bd89cdcf",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/definitions/hybrid-engineering.js",
+      "sha256": "3e4e4e9010f225e7b545e58aa30eadcc9d3ada3150ed100da7262ffc04a4d541",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/definitions/index.js",
+      "sha256": "448e0f155da422fc6e3edd13c51d62b65ba733bc40e5a748a2142cac1e7e1335",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/definitions/production.js",
+      "sha256": "708bf4403c30718dad7354c375c7843afcca779719b8b490ec6f5106c356de43",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/definitions/standard-engineering.js",
+      "sha256": "a789fbc07ae8f181445fc27265bde2aa368fd6f28116cefdffddddf571b5345c",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/evidence.js",
+      "sha256": "e4924e8c12a0e8d029189452e5cce5d6379be769d826ea380487e97bac24d7d8",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/governance.js",
+      "sha256": "05b2652d0a5a3121c4a0b43c1d27cba7deb85654fe751f0e4d3e0d5d27110880",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/phases.js",
+      "sha256": "445c688a3a3ae13b66d98ee84ee1345f8dd0e20dba538e5255f906e7b5672234",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/plan.js",
+      "sha256": "f1495d507093b02492c37afad7f29694619ca16063adc52b72dac1b752652e95",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/policy-contract.js",
+      "sha256": "025aea84c760ebc9bbe02f153a334b97011e83e2cf1df77522021206ebbbce92",
+      "recordEventCallsites": 2
+    },
+    {
+      "file": "src/runtime/workflow/recovery-compatibility.js",
+      "sha256": "27b421c97eba6fa954ae7aed81ab6326d86b58b025815de6cce96e4a17620638",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/resource-recommender.js",
+      "sha256": "a2a2f05df1c59e0e818a9d7416be57f082e8465cc0b0e9c8a5710db46d408782",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/role-profiles.js",
+      "sha256": "1843ae2f4ffec89e39d36d9eac10b4b9386bf6b048a0e1fd7780773c256f3bcf",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/roles.js",
+      "sha256": "c3f7bbeb6c921793e7ed009c0eebc1cb3488e866cd3100b01784511da5d9ae69",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/schema.js",
+      "sha256": "2d685e36cdba54a8509faf31e42f84809c5674c3c92511e139252fb7dfcec661",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/specialist-role-guidance.js",
+      "sha256": "669556f8083fcb9c7e5c508d2392c471755a2b24be2e40eb2b228c271558fc7b",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/success-contract.js",
+      "sha256": "08253ff8d31cc98b07bfa61346711e669ed07f91813975556b5292b30f585951",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/system-coordinator.js",
+      "sha256": "085993f60e6b310ad101434e992332ecf35daa0c4c59dbc0a7f15e321de4f6c7",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/tool-errors.js",
+      "sha256": "108fba252eae431c23c61a78dcdeb31ee24d52638be3fc9418aa4f3a4e23050e",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/verifier.js",
+      "sha256": "bab78826aeb70e89a730b74d59c6684046f74efd76a376d03c33679a164b7041",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workflow/workspace-write-contract.js",
+      "sha256": "082a69623128228372c28116ff3e999e0e80ba188222e50ce37a3d936a8f521a",
+      "recordEventCallsites": 0
+    },
+    {
+      "file": "src/runtime/workspace-write-receipt-store.js",
+      "sha256": "5bc8888288b0a741fdf587966c4090e6589146f61b949324fcde0ae6ba4f6e2f",
+      "recordEventCallsites": 0
+    }
+  ],
+  "counts": {
+    "callsiteCount": 114,
+    "literalCallsiteCount": 97,
+    "computedOrUnresolvedCallsiteCount": 17,
+    "distinctLiteralEventTypeCount": 71
+  },
+  "literalEventTypes": [
+    {
+      "eventType": "approval.approved",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "artifact.created",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "attempt.completed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "attempt.failed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "attempt.started",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "attempt.timeout",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "batch_execution.policy_denied",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "case01.snapshot_cleanup_failed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "case01.snapshot_consumption_acknowledged",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "delivery.claimed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.batch.cancelled",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.batch.created",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.batch.failed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.batch.item_recovered_from_terminal_task",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.batch.item_recovered_unstarted",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.batch.retry_started",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.batch.workspace_fingerprint",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.evidence_recovered",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.evidence_recovery_blocked",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.spawn_authorized",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.spawn_reconciliation_required",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "execution.started",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "job.failed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "job.proposal_requested",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "job.runtime_reconciled",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "m12.specialist.runtime_attached",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "manual_intervention.recorded",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "provider.waiting",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "report.created",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "result.evidence_repaired",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "result.evidence_replaced",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.access_revoked",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.attached",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.created",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.message_acked",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.message_delivered",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.message_delivery_started",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.message_delivery_uncertain",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.message_queued",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.message_receipt",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.runtime_reconciled",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.stale",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "session.takeover",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.created",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.dispatched",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.execution.quarantine_collection_failed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.execution.quarantine_observed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.execution.quarantine_status_failed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.lease.acquired",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.lease.completed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.lease.expired",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.lease.quarantined",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.local_started",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.provider.pre_send_recovery",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.result_reconciliation_blocked",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.retry_started",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.runtime_attached",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.runtime_rearmed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.runtime_reconciled",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "task.timeout_recoverable",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.artifacts.invalidated",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.failed",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.plan_compiled",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.policy.attached",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.policy.violation_detected",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.review_rework.prepared",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.reviewer.revision_requested",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.rework.prepared",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.synthesis_validation_blocked",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.terminal_phase_reconciled",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    },
+    {
+      "eventType": "workflow.workspace_file_written",
+      "projectionClassification": "pending-query-reader-writer-review",
+      "payloadSchema": "not-defined",
+      "note": "Observed literal producer only. No security projection or audit-only semantics inferred."
+    }
+  ],
+  "callsites": [
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 343,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'case01.snapshot_consumption_acknowledged'",
+      "classification": "literal",
+      "literalEventType": "case01.snapshot_consumption_acknowledged"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 1719,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'batch_execution.policy_denied'",
+      "classification": "literal",
+      "literalEventType": "batch_execution.policy_denied"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 2473,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'execution.batch.workspace_fingerprint'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.workspace_fingerprint"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 3204,
+      "jobIdArgument": "job.job_id",
+      "eventTypeArgument": "'job.proposal_requested'",
+      "classification": "literal",
+      "literalEventType": "job.proposal_requested"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 3415,
+      "jobIdArgument": "job.job_id",
+      "eventTypeArgument": "'job.proposal_requested'",
+      "classification": "literal",
+      "literalEventType": "job.proposal_requested"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 3562,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 3826,
+      "jobIdArgument": "job.job_id",
+      "eventTypeArgument": "'job.proposal_requested'",
+      "classification": "literal",
+      "literalEventType": "job.proposal_requested"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 3871,
+      "jobIdArgument": "job.job_id",
+      "eventTypeArgument": "'job.proposal_requested'",
+      "classification": "literal",
+      "literalEventType": "job.proposal_requested"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 4006,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.workspace_file_written'",
+      "classification": "literal",
+      "literalEventType": "workflow.workspace_file_written"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 4578,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'case01.snapshot_cleanup_failed'",
+      "classification": "literal",
+      "literalEventType": "case01.snapshot_cleanup_failed"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 4821,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'manual_intervention.recorded'",
+      "classification": "literal",
+      "literalEventType": "manual_intervention.recorded"
+    },
+    {
+      "file": "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js",
+      "line": 6968,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "type",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/distributed-scheduler.js",
+      "line": 123,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "run?.provider_run_id ? 'task.provider.dispatched' : 'task.provider.dispatch_pending'",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/distributed-scheduler.js",
+      "line": 336,
+      "jobIdArgument": "intent.job_id",
+      "eventTypeArgument": "'task.provider.pre_send_recovery'",
+      "classification": "literal",
+      "literalEventType": "task.provider.pre_send_recovery"
+    },
+    {
+      "file": "src/runtime/execution-manager.js",
+      "line": 274,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'batch_execution.policy_denied'",
+      "classification": "literal",
+      "literalEventType": "batch_execution.policy_denied"
+    },
+    {
+      "file": "src/runtime/execution-manager.js",
+      "line": 943,
+      "jobIdArgument": "task?.job_id",
+      "eventTypeArgument": "'execution.spawn_reconciliation_required'",
+      "classification": "literal",
+      "literalEventType": "execution.spawn_reconciliation_required"
+    },
+    {
+      "file": "src/runtime/execution-manager.js",
+      "line": 1239,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'execution.spawn_authorized'",
+      "classification": "literal",
+      "literalEventType": "execution.spawn_authorized"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 809,
+      "jobIdArgument": "artifact.job_id",
+      "eventTypeArgument": "'artifact.created'",
+      "classification": "literal",
+      "literalEventType": "artifact.created"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 889,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.artifacts.invalidated'",
+      "classification": "literal",
+      "literalEventType": "workflow.artifacts.invalidated"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 890,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.rework.prepared'",
+      "classification": "literal",
+      "literalEventType": "workflow.rework.prepared"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 988,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.artifacts.invalidated'",
+      "classification": "literal",
+      "literalEventType": "workflow.artifacts.invalidated"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 989,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.review_rework.prepared'",
+      "classification": "literal",
+      "literalEventType": "workflow.review_rework.prepared"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1091,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.reviewer.revision_requested'",
+      "classification": "literal",
+      "literalEventType": "workflow.reviewer.revision_requested"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1197,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.plan_compiled'",
+      "classification": "literal",
+      "literalEventType": "workflow.plan_compiled"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1234,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'provider.waiting'",
+      "classification": "literal",
+      "literalEventType": "provider.waiting"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1333,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "event",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1393,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.failed'",
+      "classification": "literal",
+      "literalEventType": "workflow.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1401,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.failed'",
+      "classification": "literal",
+      "literalEventType": "job.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1558,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'task.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "task.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1672,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'task.lease.acquired'",
+      "classification": "literal",
+      "literalEventType": "task.lease.acquired"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 1851,
+      "jobIdArgument": "lease.job_id",
+      "eventTypeArgument": "'task.lease.completed'",
+      "classification": "literal",
+      "literalEventType": "task.lease.completed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 2040,
+      "jobIdArgument": "lease.job_id",
+      "eventTypeArgument": "'task.lease.quarantined'",
+      "classification": "literal",
+      "literalEventType": "task.lease.quarantined"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 2076,
+      "jobIdArgument": "lease.job_id",
+      "eventTypeArgument": "'task.lease.expired'",
+      "classification": "literal",
+      "literalEventType": "task.lease.expired"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 2622,
+      "jobIdArgument": "result.job_id",
+      "eventTypeArgument": "completionType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 2636,
+      "jobIdArgument": "result.job_id",
+      "eventTypeArgument": "eventType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 2756,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'execution.batch.created'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.created"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 2819,
+      "jobIdArgument": "batch.job_id",
+      "eventTypeArgument": "'execution.batch.retry_started'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.retry_started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3047,
+      "jobIdArgument": "item.job_id",
+      "eventTypeArgument": "'execution.batch.item_recovered_unstarted'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.item_recovered_unstarted"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3056,
+      "jobIdArgument": "item.job_id",
+      "eventTypeArgument": "'execution.batch.failed'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3169,
+      "jobIdArgument": "item.job_id",
+      "eventTypeArgument": "'execution.batch.item_recovered_from_terminal_task'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.item_recovered_from_terminal_task"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3225,
+      "jobIdArgument": "item.job_id",
+      "eventTypeArgument": "'execution.batch.failed'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3294,
+      "jobIdArgument": "batch.job_id",
+      "eventTypeArgument": "terminalEventType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3354,
+      "jobIdArgument": "batch.job_id",
+      "eventTypeArgument": "'execution.batch.cancelled'",
+      "classification": "literal",
+      "literalEventType": "execution.batch.cancelled"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3585,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'execution.started'",
+      "classification": "literal",
+      "literalEventType": "execution.started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 3970,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "eventType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4043,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'session.created'",
+      "classification": "literal",
+      "literalEventType": "session.created"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4141,
+      "jobIdArgument": "existing.job_id",
+      "eventTypeArgument": "eventType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4234,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "eventType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4277,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.access_revoked'",
+      "classification": "literal",
+      "literalEventType": "session.access_revoked"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4331,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.attached'",
+      "classification": "literal",
+      "literalEventType": "session.attached"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4357,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.takeover'",
+      "classification": "literal",
+      "literalEventType": "session.takeover"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4439,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.message_queued'",
+      "classification": "literal",
+      "literalEventType": "session.message_queued"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4614,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.message_delivered'",
+      "classification": "literal",
+      "literalEventType": "session.message_delivered"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4787,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.message_acked'",
+      "classification": "literal",
+      "literalEventType": "session.message_acked"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4872,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.message_delivery_uncertain'",
+      "classification": "literal",
+      "literalEventType": "session.message_delivery_uncertain"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 4963,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "type",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5156,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.message_receipt'",
+      "classification": "literal",
+      "literalEventType": "session.message_receipt"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5203,
+      "jobIdArgument": "session.job_id",
+      "eventTypeArgument": "'session.message_delivery_started'",
+      "classification": "literal",
+      "literalEventType": "session.message_delivery_started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5358,
+      "jobIdArgument": "row.job_id",
+      "eventTypeArgument": "'session.stale'",
+      "classification": "literal",
+      "literalEventType": "session.stale"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5369,
+      "jobIdArgument": "updated.job_id",
+      "eventTypeArgument": "'session.stale'",
+      "classification": "literal",
+      "literalEventType": "session.stale"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5442,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'attempt.failed'",
+      "classification": "literal",
+      "literalEventType": "attempt.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5460,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'task.retry_started'",
+      "classification": "literal",
+      "literalEventType": "task.retry_started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5529,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'task.created'",
+      "classification": "literal",
+      "literalEventType": "task.created"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5559,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'task.local_started'",
+      "classification": "literal",
+      "literalEventType": "task.local_started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5704,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "eventType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 5829,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'m12.specialist.runtime_attached'",
+      "classification": "literal",
+      "literalEventType": "m12.specialist.runtime_attached"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6052,
+      "jobIdArgument": "lease.job_id",
+      "eventTypeArgument": "success ? 'm12.specialist.completed' : 'm12.specialist.failed'",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6130,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'attempt.started'",
+      "classification": "literal",
+      "literalEventType": "attempt.started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6153,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'task.runtime_attached'",
+      "classification": "literal",
+      "literalEventType": "task.runtime_attached"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6205,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'task.runtime_rearmed'",
+      "classification": "literal",
+      "literalEventType": "task.runtime_rearmed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6254,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'attempt.started'",
+      "classification": "literal",
+      "literalEventType": "attempt.started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6286,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'attempt.completed'",
+      "classification": "literal",
+      "literalEventType": "attempt.completed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6406,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.synthesis_validation_blocked'",
+      "classification": "literal",
+      "literalEventType": "workflow.synthesis_validation_blocked"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6721,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "outcome === 'success' ? 'task.completed' : 'task.failed'",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 6935,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.proposal_requested'",
+      "classification": "literal",
+      "literalEventType": "job.proposal_requested"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7028,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'approval.approved'",
+      "classification": "literal",
+      "literalEventType": "approval.approved"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7139,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'task.dispatched'",
+      "classification": "literal",
+      "literalEventType": "task.dispatched"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7156,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'attempt.started'",
+      "classification": "literal",
+      "literalEventType": "attempt.started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7193,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'attempt.started'",
+      "classification": "literal",
+      "literalEventType": "attempt.started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7232,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'task.runtime_attached'",
+      "classification": "literal",
+      "literalEventType": "task.runtime_attached"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7295,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'task.result_reconciliation_blocked'",
+      "classification": "literal",
+      "literalEventType": "task.result_reconciliation_blocked"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7374,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'attempt.started'",
+      "classification": "literal",
+      "literalEventType": "attempt.started"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7463,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.failed'",
+      "classification": "literal",
+      "literalEventType": "job.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7470,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.failed'",
+      "classification": "literal",
+      "literalEventType": "job.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7484,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.failed'",
+      "classification": "literal",
+      "literalEventType": "job.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7504,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.failed'",
+      "classification": "literal",
+      "literalEventType": "job.failed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7553,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "outcome === 'success' ? 'task.completed' : 'task.failed'",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7630,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'result.evidence_repaired'",
+      "classification": "literal",
+      "literalEventType": "result.evidence_repaired"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7746,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'task.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "task.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7776,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'result.evidence_replaced'",
+      "classification": "literal",
+      "literalEventType": "result.evidence_replaced"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7839,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'report.created'",
+      "classification": "literal",
+      "literalEventType": "report.created"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 7883,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.terminal_phase_reconciled'",
+      "classification": "literal",
+      "literalEventType": "workflow.terminal_phase_reconciled"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 8463,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "terminalType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 8546,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'delivery.claimed'",
+      "classification": "literal",
+      "literalEventType": "delivery.claimed"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 8615,
+      "jobIdArgument": "row.job_id",
+      "eventTypeArgument": "'attempt.timeout'",
+      "classification": "literal",
+      "literalEventType": "attempt.timeout"
+    },
+    {
+      "file": "src/runtime/job-store.js",
+      "line": 8635,
+      "jobIdArgument": "row.job_id",
+      "eventTypeArgument": "'task.timeout_recoverable'",
+      "classification": "literal",
+      "literalEventType": "task.timeout_recoverable"
+    },
+    {
+      "file": "src/runtime/langgraph-control-loop.js",
+      "line": 32,
+      "jobIdArgument": "run.job_id",
+      "eventTypeArgument": "'task.execution.quarantine_observed'",
+      "classification": "literal",
+      "literalEventType": "task.execution.quarantine_observed"
+    },
+    {
+      "file": "src/runtime/langgraph-control-loop.js",
+      "line": 51,
+      "jobIdArgument": "run.job_id",
+      "eventTypeArgument": "'task.execution.quarantine_collection_failed'",
+      "classification": "literal",
+      "literalEventType": "task.execution.quarantine_collection_failed"
+    },
+    {
+      "file": "src/runtime/langgraph-control-loop.js",
+      "line": 70,
+      "jobIdArgument": "run.job_id",
+      "eventTypeArgument": "'task.execution.quarantine_status_failed'",
+      "classification": "literal",
+      "literalEventType": "task.execution.quarantine_status_failed"
+    },
+    {
+      "file": "src/runtime/provider-admission.js",
+      "line": 260,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "eventType",
+      "classification": "computed-or-unresolved",
+      "literalEventType": null
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 272,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'session.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "session.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 302,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'session.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "session.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 340,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'execution.evidence_recovery_blocked'",
+      "classification": "literal",
+      "literalEventType": "execution.evidence_recovery_blocked"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 366,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'execution.evidence_recovery_blocked'",
+      "classification": "literal",
+      "literalEventType": "execution.evidence_recovery_blocked"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 375,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'execution.evidence_recovery_blocked'",
+      "classification": "literal",
+      "literalEventType": "execution.evidence_recovery_blocked"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 425,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'session.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "session.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 437,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'execution.evidence_recovered'",
+      "classification": "literal",
+      "literalEventType": "execution.evidence_recovered"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 476,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'provider.waiting'",
+      "classification": "literal",
+      "literalEventType": "provider.waiting"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 515,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "job.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 523,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "job.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 532,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'job.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "job.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/recovery-manager.js",
+      "line": 564,
+      "jobIdArgument": "task.job_id",
+      "eventTypeArgument": "'session.runtime_reconciled'",
+      "classification": "literal",
+      "literalEventType": "session.runtime_reconciled"
+    },
+    {
+      "file": "src/runtime/workflow/policy-contract.js",
+      "line": 449,
+      "jobIdArgument": "jobId",
+      "eventTypeArgument": "'workflow.policy.attached'",
+      "classification": "literal",
+      "literalEventType": "workflow.policy.attached"
+    },
+    {
+      "file": "src/runtime/workflow/policy-contract.js",
+      "line": 509,
+      "jobIdArgument": "payload.job_id",
+      "eventTypeArgument": "'workflow.policy.violation_detected'",
+      "classification": "literal",
+      "literalEventType": "workflow.policy.violation_detected"
+    }
+  ],
+  "computedProducerResolutions": {
+    "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js:3562": {
+      "status": "resolved-constant",
+      "eventTypes": [
+        "adaptive_goal.execution_plan_candidate_created"
+      ],
+      "note": "Constant declaration and candidate reader/writer use same literal in active entrypoint; see ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_EVENT."
+    },
+    "server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js:6968": {
+      "status": "resolved-bounded-caller",
+      "eventTypes": [
+        "adaptive_goal.sandbox_action_claimed",
+        "adaptive_goal.sandbox_action_completed",
+        "adaptive_goal.sandbox_action_failed"
+      ],
+      "note": "Helper receives only three executor-exported constants at its active callsites. Keep tool-specific experimental/test-only classification separate; no runtime allowlist is added."
+    },
+    "src/runtime/distributed-scheduler.js:123": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "task.provider.dispatched",
+        "task.provider.dispatch_pending"
+      ],
+      "note": "Ternary is determined by presence of run.provider_run_id; module is not imported by configured RC.71 entrypoint, so deployment/shared-DB reachability remains unknown."
+    },
+    "src/runtime/job-store.js:1333": {
+      "status": "unbounded-public-parameter",
+      "eventTypes": [
+        "workflow.transition",
+        "workflow.failed",
+        "workflow.approved",
+        "workflow.cto_spawn_required"
+      ],
+      "note": "transitionWorkflowPhase accepts caller-supplied event without allowlist. Listed values are observed internal callsites, not exhaustive; arbitrary caller input remains possible and V2-01 blocker."
+    },
+    "src/runtime/job-store.js:2622": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "task.completed",
+        "task.failed"
+      ],
+      "note": "completionType is success ? completed : failed in verified provider-result reconciliation."
+    },
+    "src/runtime/job-store.js:2636": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "task.execution.verified",
+        "task.execution.checkpointed",
+        "task.execution.rejected"
+      ],
+      "note": "eventType is success/checkpointed/rejected from verified provider-result outcome."
+    },
+    "src/runtime/job-store.js:3294": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "execution.batch.completed",
+        "execution.batch.failed"
+      ],
+      "note": "terminalEventType follows finalStatus COMPLETED versus FAILED."
+    },
+    "src/runtime/job-store.js:3970": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "execution.completed",
+        "execution.cancelled",
+        "execution.failed"
+      ],
+      "note": "eventType follows normalized terminal completed/cancelled/failed state."
+    },
+    "src/runtime/job-store.js:4141": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "session.state_changed",
+        "session.heartbeat",
+        "session.updated"
+      ],
+      "note": "updateAgentSession emits one of three event types according to state/heartbeat/field-change branches."
+    },
+    "src/runtime/job-store.js:4234": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "session.access_granted",
+        "session.access_updated"
+      ],
+      "note": "grantSessionAccess emits grant for a new row or update for renewal."
+    },
+    "src/runtime/job-store.js:4963": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "session.message_failed",
+        "session.message_retry"
+      ],
+      "note": "retrySessionMessage logicalEvent calls are limited to terminal failure and retry scheduling branches."
+    },
+    "src/runtime/job-store.js:5704": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "task.local_completed",
+        "task.local_failed"
+      ],
+      "note": "eventType follows local task outcome."
+    },
+    "src/runtime/job-store.js:6052": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "m12.specialist.completed",
+        "m12.specialist.failed"
+      ],
+      "note": "success selects completed; failure selects failed. Separate native specialist deployment reachability remains unverified."
+    },
+    "src/runtime/job-store.js:6721": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "task.completed",
+        "task.failed"
+      ],
+      "note": "runtime task outcome selects completed or failed."
+    },
+    "src/runtime/job-store.js:7553": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "task.completed",
+        "task.failed"
+      ],
+      "note": "legacy completeJobTransitionLocked outcome selects completed or failed; deployed caller reachability remains unverified."
+    },
+    "src/runtime/job-store.js:8463": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "job.completed",
+        "job.failed"
+      ],
+      "note": "terminalType follows validated success/failure outcome."
+    },
+    "src/runtime/provider-admission.js:260": {
+      "status": "resolved-branch",
+      "eventTypes": [
+        "provider.capacity_wait",
+        "provider.cooldown_wait"
+      ],
+      "note": "eventType follows admissionReason capacity/cooldown. Module is not imported by configured RC.71 entrypoint; deployment/shared-DB reachability remains unknown."
+    }
+  },
+  "limitations": [
+    "This register freezes the scanner-visible source callsite set and records manual resolution notes for computed event expressions; it is not a projection manifest, event allowlist, payload schema, authorization policy or runtime enforcement.",
+    "All literal event types remain unclassified pending query-by-query reader/writer analysis.",
+    "Unbounded public event parameters remain unresolved even where observed internal callers are listed.",
+    "Configured-entrypoint imports do not establish deployed process/worker/shared-database reachability.",
+    "The direct-SQL event-writer supplement currently records two confirmed INSERT callsites outside recordEvent(); it is not a complete scan of all possible direct INSERT/UPDATE/DELETE, aliases, generated SQL, wrappers or non-SQL event stores."
+  ],
+  "directSqlEventWriters": [
+    {
+      "file": "src/runtime/adaptive-goal-approval-subsystem.js",
+      "line": 436,
+      "api": "prepare",
+      "sqlVerb": "INSERT",
+      "table": "events",
+      "eventType": "adaptive_goal.approval_policy_version_observed",
+      "eventTypeConstant": "APPROVAL_POLICY_OBSERVED_EVENT",
+      "classification": "anti-replay-and-execution-authorization",
+      "reader": "src/runtime/adaptive-goal-approval-subsystem.js:340-391",
+      "writer": "src/runtime/adaptive-goal-approval-subsystem.js:402-438",
+      "note": "Direct SQL insert; not a recordEvent() callsite. Existing row is checked before insert and exact row is read back after insert. Enclosing transaction/caller contract must be traced separately.",
+      "constantDeclaration": "const APPROVAL_POLICY_OBSERVED_EVENT = 'adaptive_goal.approval_policy_version_observed';",
+      "writerBindingEvidence": "run(eventId, jobId, APPROVAL_POLICY_OBSERVED_EVENT, JSON.stringify(payload), new Date(now).toISOString())",
+      "readerEvidence": "existing.type !== APPROVAL_POLICY_OBSERVED_EVENT",
+      "readbackEvidence": "const persisted = workflowDb.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);",
+      "readerQueries": [
+        {
+          "purpose": "reconstruct policy high-water and reject malformed/reused versions",
+          "querySourceEvidence": "SELECT event_id,job_id,type,payload_json FROM events\n    WHERE type=? AND json_extract(payload_json,'$.policy_id')=? ORDER BY rowid ASC",
+          "bindingEvidence": ".all(APPROVAL_POLICY_OBSERVED_EVENT, policyId)",
+          "queryLine": 344,
+          "bindingLine": 346
+        }
+      ],
+      "constantDeclarationLine": 33,
+      "writerBindingLine": 437,
+      "readbackLine": 438
+    },
+    {
+      "file": "src/runtime/adaptive-goal-reviewer-identity.js",
+      "line": 326,
+      "api": "prepare",
+      "sqlVerb": "INSERT",
+      "table": "events",
+      "eventType": "adaptive_goal.action_intent_review_authorized",
+      "eventTypeConstant": "ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT",
+      "classification": "anti-replay-and-execution-authorization",
+      "reader": "src/runtime/adaptive-goal-reviewer-identity.js:133-184,217-343; active server reader/revalidation",
+      "writer": "src/runtime/adaptive-goal-reviewer-identity.js:217-352",
+      "note": "Direct SQL insert; not a recordEvent() callsite. Writer performs nonce precheck, inserts canonical serialized attestation, verifies/readbacks exact current source binding and execution-review readiness before caller transaction commits; invalid verification throws and rolls back caller transaction.",
+      "constantDeclaration": "export const ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT = 'adaptive_goal.action_intent_review_authorized';",
+      "writerBindingEvidence": "run(eventId, jobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, serialized, new Date(now).toISOString())",
+      "readerEvidence": "WHERE type=? AND json_extract(payload_json,'$.nonce')=?",
+      "readbackEvidence": "const verified = assertAdaptiveGoalReviewerAttestation(store, jobId, candidate, { now, trustConfigurationDb });",
+      "readerQueries": [
+        {
+          "purpose": "load exactly one reviewer attestation for the candidate job",
+          "querySourceEvidence": "SELECT event_id,job_id,type,payload_json FROM events\n    WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC",
+          "bindingEvidence": ".all(jobId, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT)",
+          "queryLine": 133,
+          "bindingLine": 135
+        },
+        {
+          "purpose": "require exactly one durable use of the reviewer attestation nonce",
+          "querySourceEvidence": "SELECT COUNT(*) AS count FROM events\n    WHERE type=? AND json_extract(payload_json,'$.nonce')=?",
+          "bindingEvidence": ".get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT, attestation.nonce)",
+          "queryLine": 175,
+          "bindingLine": 177
+        }
+      ],
+      "constantDeclarationLine": 8,
+      "writerBindingLine": 327,
+      "readbackLine": 332
+    }
+  ],
+  "predecessor": "agg-v2-record-event-caller-register-20261031-v0.5.5",
+  "generatedAt": "2026-10-31T07:32:28.525Z",
+  "sourceInventory": {
+    "path": "artifacts/adaptive-goal-graph/rc71-record-event-callers-20261031T073101Z-v6.json",
+    "sha256": "c2f43b517b970b34f6494f3b397080e65ac023f1079f3bea6275e1300ef48adb"
+  },
+  "predecessorRegister": "agg-v2-record-event-caller-register-20261031-v0.5.6",
+  "reviewNote": "Source hashes and callsite line numbers refreshed from current worktree. All 17 computed producer resolutions carried forward only where file+argument identity matched the reviewed predecessor; branch/constant notes and unresolved/public-parameter status retained. No projection semantics or authorization registry inferred. Literal event type inventory refreshed against live source; removed stale producer labels absent from current scan; all current literal types remain pending semantic review."
+}

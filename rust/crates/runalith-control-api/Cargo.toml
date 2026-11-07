@@ -1,0 +1,27 @@
+[package]
+name = "runalith-control-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+libc.workspace = true
+rustix.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+runalith-domain = { path = "../runalith-domain" }
+runalith-runtime = { path = "../runalith-runtime" }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[[bin]]
+name = "runalith-control"
+path = "src/main.rs"
+
+[lints]
+workspace = true

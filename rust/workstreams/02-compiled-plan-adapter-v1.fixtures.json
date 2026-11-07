@@ -1,0 +1,168 @@
+{
+  "fixture_set": "WS2-CompiledPlanV1-adapter-review",
+  "schema_status": "DRAFT_NOT_RATIFIED",
+  "schema_version": 1,
+  "source_workstream": "WS1",
+  "source_plan_fixture": "rust/crates/runalith-domain/tests/fixtures/node-compiled-plan-v1.json",
+  "source_plan_fixture_vector": "workflow-role-and-skill-definition-pinned-plan",
+  "source_plan_outer_sha256": "de11c97c8965f90532a9c516c572f2b830b6c973a2caaf71c1a99b7fc0ea50d8",
+  "source_plan_identity": {
+    "catalog_workflow_id": "skill-pinned-flow",
+    "workflow_version": 3,
+    "task_count": 1
+  },
+  "source_multi_task_plan": {
+    "vector": "multi-task-repeated-role-version-with-dependency",
+    "source_revision": "WS1 isolated worktree; uncommitted; base HEAD 6b7bc90a8b16e50be9c7331c0b2f6361cc40b8f3",
+    "canonical_json_sha256": "510798be6040ce079a93605b45a9ff89d998387b3793c5a009c80d92abaedbb9",
+    "canonical_bytes": 1209,
+    "workflow_definition_sha256": "7a1a592d9944fb9c365c1eebf0d1d36da14d9deffbd4b7d61a6857c4d8c3c181",
+    "role_definition_sha256": "6561fbebf6807bb85207feef38e328ca58bd33309e54c83418962970ee80147a",
+    "canonical_json": "{\"role_definition_pins\":[{\"definition_sha256\":\"6561fbebf6807bb85207feef38e328ca58bd33309e54c83418962970ee80147a\",\"role_id\":\"custom-owner\",\"role_version\":1}],\"schema_version\":1,\"skill_pins\":[{\"bundle_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"role_id\":\"custom-owner\",\"role_version\":1,\"skill_id\":\"research-helper\"}],\"workflow_definition_pin\":{\"definition_sha256\":\"7a1a592d9944fb9c365c1eebf0d1d36da14d9deffbd4b7d61a6857c4d8c3c181\",\"workflow_id\":\"multi-task-same-role-flow\",\"workflow_version\":2},\"workflow_plan\":{\"input_contract\":[\"job.request\"],\"name\":\"Multi Task Same Role Flow\",\"schema_version\":1,\"tasks\":[{\"depends_on\":[],\"deterministic\":false,\"execution_mode\":\"host-conversation\",\"input_contract\":[\"job.request\"],\"output_artifact_type\":\"requirements\",\"role_id\":\"custom-owner\",\"role_name\":\"Custom Owner\",\"role_version\":1,\"task_id\":\"requirements\"},{\"depends_on\":[\"requirements\"],\"deterministic\":false,\"execution_mode\":\"host-conversation\",\"input_contract\":[\"requirements\"],\"output_artifact_type\":\"requirements\",\"role_id\":\"custom-owner\",\"role_name\":\"Custom Owner\",\"role_version\":1,\"task_id\":\"requirements-review\"}],\"workflow_id\":\"multi-task-same-role-flow\",\"workflow_version\":2}}",
+    "semantics": {
+      "task_order": ["requirements", "requirements-review"],
+      "shared_role_pin": "custom-owner@1",
+      "second_task_depends_on": ["requirements"],
+      "control_task_id_is_control_owned": true
+    }
+  },
+  "valid_attachment": {
+    "schema_version": 1,
+    "workflow_id": "job_ws2_adapter_fixture_001",
+    "catalog_workflow_id": "skill-pinned-flow",
+    "workflow_version": 3,
+    "plan_sha256": "de11c97c8965f90532a9c516c572f2b830b6c973a2caaf71c1a99b7fc0ea50d8",
+    "task_bindings": [
+      {
+        "control_task_id": "requirements",
+        "workflow_plan_task_id": "requirements",
+        "role_id": "custom-owner",
+        "role_version": 1,
+        "depends_on": [],
+        "input_contract": ["job.request"],
+        "output_artifact_type": "requirements"
+      }
+    ]
+  },
+  "valid_multi_task_attachment": {
+    "schema_version": 1,
+    "workflow_id": "job_ws2_adapter_fixture_002",
+    "catalog_workflow_id": "multi-task-same-role-flow",
+    "workflow_version": 2,
+    "plan_sha256": "510798be6040ce079a93605b45a9ff89d998387b3793c5a009c80d92abaedbb9",
+    "task_bindings": [
+      {
+        "control_task_id": "control_task_001",
+        "workflow_plan_task_id": "requirements",
+        "role_id": "custom-owner",
+        "role_version": 1,
+        "depends_on": [],
+        "input_contract": ["job.request"],
+        "output_artifact_type": "requirements"
+      },
+      {
+        "control_task_id": "control_task_002",
+        "workflow_plan_task_id": "requirements-review",
+        "role_id": "custom-owner",
+        "role_version": 1,
+        "depends_on": ["requirements"],
+        "input_contract": ["requirements"],
+        "output_artifact_type": "requirements"
+      }
+    ]
+  },
+  "negative_cases": [
+    {
+      "id": "missing-workflow-plan-task-id",
+      "mutation": {"remove": "task_bindings[0].workflow_plan_task_id"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "duplicate-control-task-binding",
+      "mutation": {"append_copy_of": "task_bindings[0]", "copy_field": "control_task_id"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "duplicate-plan-task-binding",
+      "mutation": {"append_copy_of": "task_bindings[0]", "copy_field": "workflow_plan_task_id"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "unknown-plan-task-id",
+      "mutation": {"set": "task_bindings[0].workflow_plan_task_id", "value": "not-in-compiled-plan"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "role-id-mismatch",
+      "mutation": {"set": "task_bindings[0].role_id", "value": "researcher"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "role-version-mismatch",
+      "mutation": {"set": "task_bindings[0].role_version", "value": 2},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "dependency-mismatch",
+      "mutation": {"set": "task_bindings[0].depends_on", "value": ["missing-predecessor"]},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "typed-input-mismatch",
+      "mutation": {"set": "task_bindings[0].input_contract", "value": ["research"]},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "typed-output-mismatch",
+      "mutation": {"set": "task_bindings[0].output_artifact_type", "value": "research"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "outer-plan-digest-mismatch",
+      "mutation": {"set": "plan_sha256", "value": "0000000000000000000000000000000000000000000000000000000000000000"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "catalog-workflow-mismatch",
+      "mutation": {"set": "catalog_workflow_id", "value": "different-catalog-flow"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "workflow-version-mismatch",
+      "mutation": {"set": "workflow_version", "value": 4},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "positional-role-alias-is-not-identity",
+      "mutation": {"set": "task_bindings[0].workflow_plan_task_id", "value": "custom-task-1"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "incomplete-task-coverage",
+      "mutation": {"set": "task_bindings", "value": []},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "same-role-task-order-binding-mismatch",
+      "mutation": {"swap": ["task_bindings[0].workflow_plan_task_id", "task_bindings[1].workflow_plan_task_id"]},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "unmapped-extra-control-task",
+      "mutation": {"append": "control_task_without_plan_binding"},
+      "expected": "REJECT_ATTACHMENT"
+    },
+    {
+      "id": "deterministic-is-not-executor-authentication",
+      "mutation": {"policy_plan_context": {"deterministic": true, "executor": null}},
+      "expected": "DO_NOT_AUTHORIZE_EXECUTION_MANAGER_PREDICATE"
+    }
+  ],
+  "notes": [
+    "This fixture corpus defines candidate mapping and negative-case intent; it is not a JSON Schema or an executable test suite.",
+    "The source W1 one-task and multi-task canonical Node vectors are embedded with exact hashes and multi-task canonical bytes so this corpus can be tested without reading W1's uncommitted worktree.",
+    "The multi-task valid attachment deliberately uses control_task_id values distinct from W1 workflow_plan_task_id values; W2 owns this explicit mapping. Neither identity may be inferred by array position, role label or custom-task-N.",
+    "No stable W2 error-code strings are assigned. WS8 owns transport error serialization; WS2 owns semantic rejection.",
+    "No source, schema, manifest, database or deployment behavior is implemented by this fixture file."
+  ]
+}

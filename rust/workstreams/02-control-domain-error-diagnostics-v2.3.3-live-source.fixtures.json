@@ -1,0 +1,141 @@
+{
+  "fixture_set": "WS2-Control-Domain-Error-Diagnostics-v2.3.3-LiveSourceAndCryptoClassification",
+  "status": "DRAFT_NOT_RATIFIED",
+  "schema_version": 25,
+  "predecessors": {
+    "v2_3_1": {
+      "fixture_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.1.fixtures.json",
+      "fixture_sha256": "24e5d115604dfc066d25b056d27e9ef5cc7f4653477aced469d1ab8188e91832",
+      "validator_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.1-test.py",
+      "validator_sha256": "4abb6a47db775ed66f5e93022f37373adbf7715158acc789dd373c7fc294ee69",
+      "scope": "29-code static source-origin/mapping partition; immutable predecessor"
+    },
+    "v2_3_2": {
+      "fixture_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.2-live-source.fixtures.json",
+      "fixture_sha256": "4c38776fe84d4d4ad8868ab9257beebeb213d5338d45156d4af009dac0ee0a9d",
+      "validator_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.2-live-source-test.py",
+      "validator_sha256": "456dd51137a12a1d6b81a10e055559497639e4fa46a8e3be09591c79441e1ad5",
+      "note_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.2-live-source-note.md",
+      "note_sha256": "09ce1f57e871e1541907b33d273bac68c4aefe7defd1c04b1907c3c42b7b061a",
+      "scope": "seven whole-file hashes; immutable predecessor; current Trust source change is expected to make this live check fail closed"
+    }
+  },
+  "current_source_snapshot": [
+    {"path": "rust/crates/runalith-trust/src/governance_receipt.rs", "sha256": "7c51f6bde7e376206abd51113c65e6c72525043b18e288dae87069a792af0096", "changed_since_v2_3_2": true},
+    {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "sha256": "aa836df246e27809e806e600fbb5dfd8fd0d8ba3728e605ba4d56ea5e38cc1f1", "changed_since_v2_3_2": true},
+    {"path": "rust/crates/runalith-trust/src/approval_decision.rs", "sha256": "1ef7e3095f431a81e20d10e3a9974e38d860ef3d1c0e03692645113011e8181a", "changed_since_v2_3_2": false},
+    {"path": "rust/crates/runalith-trust/src/approval_policy.rs", "sha256": "13235b7af591435904c5f2ea7c981932fc90e87c585a4023e0ee23b14a839775", "changed_since_v2_3_2": false},
+    {"path": "rust/crates/runalith-trust/src/trust_ledger.rs", "sha256": "ffc6847c31c91cdfd65b5a8763762f6215a29f814cea05cefd572bfd9e008418", "changed_since_v2_3_2": false},
+    {"path": "rust/crates/runalith-trust/src/trust_config.rs", "sha256": "a86b6d1b82882522149188a87373c25e5e36f81b704faea8f1057f761b367d02", "changed_since_v2_3_2": false},
+    {"path": "rust/crates/runalith-trust/src/lib.rs", "sha256": "0b8f3bcf949e3f3eaa804aae6ccd9a3b45e60e2467cdbb48a9060c413f51218f", "changed_since_v2_3_2": true}
+  ],
+  "inherited_inventory": {
+    "source": "v2.3.1 exact fixture, pinned above",
+    "cause_code_count": 29,
+    "mapping_status": "DRAFT_PROPOSED_OR_REVIEW_REQUIRED_AS_IN_V2_3_1",
+    "inheritance_rule": "V2.3.3 does not silently revise the 29-code partition or domain_code proposals. It adds exact current source pins and a line-level map for the WS6 crypto error-classification correction. Any further semantic change requires a new review."
+  },
+  "crypto_error_classification_v1": {
+    "status": "SOURCE_IMPLEMENTED_TESTED_PEER_OWNED_NOT_RATIFIED",
+    "owner": "WS6",
+    "purpose": "Keep malformed signature input, a cryptographically false signature, and verifier-runtime unavailability as distinct outcomes.",
+    "shared_mapper": {
+      "path": "rust/crates/runalith-trust/src/signed_envelope.rs",
+      "function": "map_signature_verification_error",
+      "lines": "21-35",
+      "mapping": [
+        {"trust_crypto_errors": ["OpenSslUnavailable", "UntrustedOpenSslBinary", "TemporaryFile", "OpenSslOperation"], "result": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE", "meaning": "Verifier runtime could not perform the cryptographic operation; unavailable, not malformed evidence."},
+        {"trust_crypto_errors": ["InvalidBase64", "InvalidPublicKey", "InputLimit"], "result": "caller_supplied_invalid_code", "meaning": "Input/key/signature encoding or profile is invalid; preserve caller's existing domain-specific invalid code."}
+      ],
+      "no_new_public_cause_code": true
+    },
+    "caller_paths": [
+      {
+        "path": "rust/crates/runalith-trust/src/signed_envelope.rs",
+        "function": "verify_signed_envelope",
+        "lines": "200-215",
+        "callsite": "Ed25519PublicKey::verify_base64 result mapped through map_signature_verification_error",
+        "invalid_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID",
+        "validly_encoded_false_signature": "AGG_APPROVAL_SIGNATURE_INVALID",
+        "source_role": "caller-supplied signed envelope verification"
+      },
+      {
+        "path": "rust/crates/runalith-trust/src/governance_receipt.rs",
+        "function": "build_governance_receipt_authenticator_v1",
+        "lines": "231-245",
+        "callsite": "Governance signer-output self-verification mapped through map_signature_verification_error",
+        "invalid_code": "GOVERNANCE_RECEIPT_SIGNATURE_INVALID",
+        "validly_encoded_false_signature": "GOVERNANCE_RECEIPT_SIGNATURE_INVALID",
+        "source_role": "host signer-output self-verification; failure does not establish a bad signer when crypto runtime is unavailable"
+      }
+    ],
+    "public_error_projection": {
+      "path": "rust/crates/runalith-trust/src/lib.rs",
+      "function": "TrustError::code",
+      "lines": "96-107",
+      "mapping": {
+        "OpenSslUnavailable": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+        "UntrustedOpenSslBinary": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+        "TemporaryFile": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+        "OpenSslOperation": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+        "other TrustCryptoError variants": "AGG_TRUST_CONFIG_PUBLIC_KEY_INVALID",
+        "rusqlite::Error": "AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE"
+      }
+    },
+    "positive_negative_test_sites": [
+      {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "function": "signature_verification_runtime_errors_are_unavailable_not_invalid_envelopes", "lines": "270-298", "assertions": "four runtime error variants map to unavailable; InvalidBase64/InvalidPublicKey/InputLimit retain caller invalid code"},
+      {"path": "rust/crates/runalith-trust/src/governance_receipt.rs", "function": "signer_port_builder_reproduces_node_envelope_and_rejects_bad_signatures", "lines": "931-980", "assertions": "valid signer result reproduces fixture; validly encoded false signature remains GOVERNANCE_RECEIPT_SIGNATURE_INVALID"},
+      {"path": "rust/crates/runalith-trust/src/lib.rs", "function": "trust_error_codes_keep_crypto_runtime_faults_out_of_invalid_public_key", "lines": "300-345", "assertions": "TrustError::code runtime-vs-invalid code projection"}
+    ]
+  },
+  "bounded_line_origin_map": [
+    {"cause_code": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE", "origin_sites": [
+      {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "function": "map_signature_verification_error", "lines": "21-35", "role": "new shared runtime-error classification"},
+      {"path": "rust/crates/runalith-trust/src/lib.rs", "function": "TrustError::code", "lines": "96-107", "role": "public stable code projection"}
+    ], "propagation_or_call_sites": [
+      {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "function": "verify_signed_envelope", "lines": "200-209", "role": "caller-specific mapping for input signature verification"},
+      {"path": "rust/crates/runalith-trust/src/governance_receipt.rs", "function": "build_governance_receipt_authenticator_v1", "lines": "231-240", "role": "caller-specific mapping for signer-output self-verification"}
+    ]},
+    {"cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID", "origin_sites": [
+      {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "function": "verify_signed_envelope", "lines": "111-199", "role": "closed envelope/schema/scope/metadata/encoding/canonicalization validation"},
+      {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "function": "map_signature_verification_error", "lines": "21-35", "role": "caller invalid-code branch for malformed base64/key/input profile"},
+      {"path": "rust/crates/runalith-trust/src/approval_decision.rs", "function": "exact_keys", "lines": "990-1004", "role": "closed decision envelope shape"},
+      {"path": "rust/crates/runalith-trust/src/approval_policy.rs", "function": "exact_keys", "lines": "316-326", "role": "closed policy envelope shape"}
+    ], "propagation_or_call_sites": []},
+    {"cause_code": "AGG_APPROVAL_SIGNATURE_INVALID", "origin_sites": [
+      {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "function": "verify_signed_envelope", "lines": "210-215", "role": "validly encoded signature returns cryptographic false"}
+    ], "propagation_or_call_sites": [
+      {"path": "rust/crates/runalith-trust/src/governance_receipt.rs", "function": "tampered_subject_audience_snapshot_or_signature_fails_closed", "lines": "1047-1051", "role": "test assertion only; not an emitter"},
+      {"path": "rust/crates/runalith-trust/src/approval_decision.rs", "function": "rejects_bad_signature_scope_and_candidate_binding", "lines": "1801-1804", "role": "test assertion only; not an emitter"}
+    ]},
+    {"cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_INVALID", "origin_sites": [
+      {"path": "rust/crates/runalith-trust/src/governance_receipt.rs", "function": "build_governance_receipt_authenticator_v1", "lines": "231-245", "role": "signer output malformed signature code and validly encoded false signature result"},
+      {"path": "rust/crates/runalith-trust/src/signed_envelope.rs", "function": "map_signature_verification_error", "lines": "21-35", "role": "caller invalid-code branch selected by Governance builder"}
+    ], "propagation_or_call_sites": [
+      {"path": "rust/crates/runalith-trust/src/governance_receipt.rs", "function": "signer_port_builder_reproduces_node_envelope_and_rejects_bad_signatures", "lines": "962-980", "role": "test assertion only; not an emitter"}
+    ]},
+    {"cause_code": "AGG_TRUST_CONFIG_PUBLIC_KEY_INVALID", "origin_sites": [
+      {"path": "rust/crates/runalith-trust/src/trust_config.rs", "function": "TrustConfiguration::load_json", "lines": "218-222", "role": "invalid public-key PEM shape"},
+      {"path": "rust/crates/runalith-trust/src/trust_config.rs", "function": "TrustConfiguration::validate_integrity", "lines": "368-371", "role": "public-key fingerprint binding"},
+      {"path": "rust/crates/runalith-trust/src/lib.rs", "function": "TrustError::code", "lines": "96-107", "role": "fallback mapping of non-runtime TrustCryptoError variants"}
+    ], "propagation_or_call_sites": [
+      {"path": "rust/crates/runalith-trust/src/trust_config.rs", "function": "TrustConfiguration::load_json", "lines": "224-224", "role": "public key parser crypto error propagation"},
+      {"path": "rust/crates/runalith-trust/src/trust_config.rs", "function": "TrustConfiguration::validate_integrity", "lines": "362-362", "role": "public key parser crypto error propagation"}
+    ]}
+  ],
+  "verification_report": {
+    "workspace_test_command": "cargo test -p runalith-trust --locked --offline --jobs 1 -- --test-threads=1",
+    "workspace_test_result": "90 passed, 0 failed, 0 ignored; doc-tests 0 passed; exit 0",
+    "format_command": "cargo fmt -p runalith-trust -- --check",
+    "format_result": "PASS; exit 0",
+    "clippy_command": "cargo clippy -p runalith-trust --all-targets --locked --offline --jobs 1 -- -D warnings",
+    "clippy_result": "PASS; exit 0",
+    "source_hashes": "Independently recomputed immediately before fixture creation; all seven pins matched across two sequential reads.",
+    "limits": [
+      "V2.3.1 predecessor remains the 29-code static source-origin/mapping partition; V2.3.3 adds a bounded exact line map for the crypto error-classification correction, not a complete Trust crate inventory.",
+      "Line/function attribution is source inspection and static validation; test pass proves executable branches covered by listed tests, not external trust-root custody or production authority.",
+      "WS6 owns the Trust implementation; WS2 does not modify WS6 source or approve Trust domain/issuer/key policy.",
+      "No new cause code, wire DTO, schema, nonce persistence, database behavior, trust root, issuer or signer is introduced by the classification correction."
+    ]
+  }
+}

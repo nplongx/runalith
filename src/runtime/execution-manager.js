@@ -5,7 +5,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { validateExecutionBatch, validateExecutionResult, MAX_EXECUTION_COMMAND_CHARS, MAX_EXECUTION_TIMEOUT_MS } from '../../protocol/cos-ap-v1/index.js';
 import { parseStrictJson } from './strict-json.js';
-import { assertTaskDependenciesMatchPlan, resolveTaskBatchRoute } from './workflow/plan.js';
+import { resolveTaskBatchRoute } from './workflow-plan-public-api.js';
+import { createWorkflowStatePort } from './workflow-state-port.js';
+import { isVerifiedSuccessfulLocalExecution, isSuccessfulLocalExecutionSummary } from './execution-evidence.js';
+export { isVerifiedSuccessfulLocalExecution, isSuccessfulLocalExecutionSummary } from './execution-evidence.js';
 
 const TMUX_BIN = process.env.TMUX_BIN || 'tmux';
 const DEFAULT_TIMEOUT_MS = Math.max(1000, Number(process.env.EXECUTION_TIMEOUT_MS) || 120000);
@@ -18,37 +21,6 @@ const MAX_EXECUTION_OUTPUT_BYTES_PER_STREAM = 4 * 1024 * 1024;
 // pressure independently from the wire-level batch-size limit.
 const MAX_CONCURRENT_EXECUTION_BATCH_LANES = 8;
 
-// A zero OS exit code alone is not the durable success contract. In
-// particular, the bounded-output collector deliberately records execution as
-// failed when either captured stream is truncated, while retaining the real
-// process exit code for diagnostics. Every production caller that can create
-// accepted artifacts or advance a workflow must use this predicate rather
-// than re-deriving success from exitCode alone.
-export function isVerifiedSuccessfulLocalExecution(result, expectedTaskId) {
-  return Boolean(typeof expectedTaskId === 'string' && expectedTaskId.length > 0 &&
-    result && typeof result === 'object' && !Array.isArray(result) &&
-    result.task_id === expectedTaskId &&
-    result.status === 'completed' && result.execution_status === 'completed' &&
-    result.execution_exit_code === 0 && (result.exitCode === undefined || result.exitCode === 0) &&
-    typeof result.execution_session_id === 'string' && result.execution_session_id.length > 0 &&
-    Number.isSafeInteger(result.execution_attempt) && result.execution_attempt > 0 &&
-    (result.timedOut === undefined || result.timedOut === false) &&
-    (result.outputLimited === undefined || result.outputLimited === false));
-}
-
-// MCP tool responses intentionally project only the status and exit code, so
-// callers driving workflow loops must validate that exact response contract.
-export function isSuccessfulLocalExecutionSummary(result, expectedTaskId) {
-  return Boolean(typeof expectedTaskId === 'string' && expectedTaskId.length > 0 &&
-    result && typeof result === 'object' && !Array.isArray(result) &&
-    result.executed_locally === true && result.execution_status === 'completed' && result.exit_code === 0 &&
-    result.returned_task_id === expectedTaskId &&
-    typeof result.execution_session_id === 'string' && result.execution_session_id.length > 0 &&
-    result.task && typeof result.task === 'object' && result.task.task_id === expectedTaskId && result.task.status === 'completed' &&
-    result.task.execution_status === 'completed' && result.task.execution_exit_code === 0 &&
-    result.task.execution_session_id === result.execution_session_id &&
-    Number.isSafeInteger(result.task.execution_attempt) && result.task.execution_attempt > 0);
-}
 const EXECUTION_OUTPUT_SUPERVISOR_SOURCE = String.raw`
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -243,9 +215,9 @@ export function assertExecutionBatchRetryLineage({ batchId, creationEvents, retr
 }
 
 
-function assertSingleTaskAllowedByBatchPolicy(store, task, metadata, batchClaim) {
+function assertSingleTaskAllowedByBatchPolicy(state, task, metadata, batchClaim) {
   if (batchClaim) return;
-  const plan = store.getExecutionPlan(task.job_id);
+  const plan = state.getExecutionPlan(task.job_id);
   if (!plan || !Array.isArray(plan.children)) return;
   let plannedTask = null;
   if (typeof metadata?.workflow_plan_task_id === 'string' && metadata.workflow_plan_task_id) {
@@ -263,14 +235,14 @@ function assertSingleTaskAllowedByBatchPolicy(store, task, metadata, batchClaim)
     const policyVersion = Number.isSafeInteger(plan.batch_execution_policy?.schema_version) ? plan.batch_execution_policy.schema_version : null;
     const hasLegacyHistory = (plan.schema_version ?? 1) === 1 &&
       ((Number.isSafeInteger(task.execution_attempt) && task.execution_attempt > 0) || task.execution_session_id ||
-       task.execution_status || store.db.prepare('SELECT 1 FROM attempts WHERE task_id=? LIMIT 1').get(task.task_id)) &&
-      !store.db.prepare('SELECT 1 FROM execution_batch_items WHERE task_id=? LIMIT 1').get(task.task_id);
+       task.execution_status || state.hasExecutionAttemptHistory(task.task_id)) &&
+      !state.hasExecutionBatchItemHistory(task.task_id);
     const rejectedRoute = 'execution_manager_single_task';
     const reasonCode = hasLegacyHistory ? 'migration_required_legacy_attempt' : 'batch_route_required';
     const payload = { jobId: task.job_id, taskId: task.task_id, planHash, policyVersion, rejectedRoute, reasonCode };
     const dedupeKey = ['batch-policy-denied', task.task_id, planHash, rejectedRoute, reasonCode].join('|');
-    const eventIdValue = store.recordEvent(task.job_id, 'batch_execution.policy_denied', payload, dedupeKey);
-    const event = store.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventIdValue);
+    const eventIdValue = state.recordEvent(task.job_id, 'batch_execution.policy_denied', payload, dedupeKey);
+    const event = state.getEvent(eventIdValue);
     if (!event || event.job_id !== task.job_id || event.type !== 'batch_execution.policy_denied' || event.payload_json !== JSON.stringify(payload)) {
       throw new Error('mandatory batch policy denial audit could not be durably verified');
     }
@@ -649,69 +621,6 @@ function envAssignments(env) {
   return Object.entries(env).map(([key, value]) => `${key}=${value}`);
 }
 
-function assertImmutablePlannedExecution(store, task, { executable = null, args = null, command = null, cwd, timeoutMs, env = {} } = {}) {
-  const metadata = parseStrictJson(task.metadata_json || '{}');
-  const plan = store.getExecutionPlan(task.job_id);
-  const role = String(task.role || '').toLowerCase();
-  const plannedByRole = plan?.children?.find(item => String(item.role || '').toLowerCase() === role) || null;
-  const requiresPlanBinding = Boolean(metadata.workflow_plan_task_id) || Boolean(plan && task.parent_task_id) || Boolean(plannedByRole);
-  if (!requiresPlanBinding) return null;
-  if (!plan) throw new Error(`immutable execution plan is missing for planned task ${task.task_id}`);
-  const plannedById = metadata.workflow_plan_task_id
-    ? plan.children.find(item => item.id === metadata.workflow_plan_task_id)
-    : null;
-  if (!metadata.workflow_plan_task_id || !plannedById || !plannedByRole || plannedById.id !== plannedByRole.id) {
-    throw new Error(`immutable plan task identity/role binding is invalid for ${task.task_id}`);
-  }
-  assertTaskDependenciesMatchPlan(task, plannedById, `task ${task.task_id}`);
-  const specification = plannedById.execution;
-  if (!specification || specification.deterministic !== true || specification.executor !== 'ExecutionManager' ||
-      typeof specification.executable !== 'string' || !Array.isArray(specification.args) ||
-      typeof specification.cwd !== 'string' || !Number.isSafeInteger(Number(specification.timeout_ms)) || Number(specification.timeout_ms) < 1) {
-    throw new Error(`immutable plan does not authorize deterministic execution for ${task.task_id}`);
-  }
-  if (metadata.deterministic !== true || metadata.executor !== specification.executor ||
-      metadata.executable !== specification.executable || JSON.stringify(metadata.args) !== JSON.stringify(specification.args) ||
-      path.resolve(String(metadata.cwd || '')) !== path.resolve(specification.cwd) ||
-      Number(metadata.timeout_ms) !== Number(specification.timeout_ms)) {
-    throw new Error(`task metadata differs from the immutable approved execution plan for ${task.task_id}`);
-  }
-
-  // Recompile from the currently approved proposal workspace and built-in
-  // workflow definition. Comparing only the stored plan row and its adjacent
-  // hash/event would let a database writer rewrite all three together.
-  const proposal = store.getCurrentProposal(task.job_id);
-  if (!proposal?.payload || typeof proposal.payload.workspace !== 'string' || !proposal.payload.workspace) {
-    throw new Error(`approved proposal workspace is missing for immutable plan ${task.job_id}`);
-  }
-  store.assertApprovalCurrent(task.job_id);
-  const recompiled = store.compileExecutionPlan(task.job_id, { workspace: proposal.payload.workspace });
-  if (!recompiled || recompiled.plan_hash !== plan.plan_hash || recompiled.plan_hash !== store.getExecutionPlan(task.job_id)?.plan_hash) {
-    throw new Error(`immutable execution plan no longer matches the approved source plan for ${task.job_id}`);
-  }
-
-  if (executable !== null && executable !== specification.executable) {
-    throw new Error(`requested executable differs from the immutable approved plan for ${task.task_id}`);
-  }
-  if (args !== null && JSON.stringify(args) !== JSON.stringify(specification.args)) {
-    throw new Error(`requested arguments differ from the immutable approved plan for ${task.task_id}`);
-  }
-  const expectedCommand = structuredCommand(specification.executable, specification.args);
-  if (command !== null && command !== expectedCommand) {
-    throw new Error(`requested command differs from the immutable approved plan for ${task.task_id}`);
-  }
-  if (path.resolve(String(cwd || '')) !== path.resolve(specification.cwd)) {
-    throw new Error(`requested working directory differs from the immutable approved plan for ${task.task_id}`);
-  }
-  if (!Number.isFinite(Number(timeoutMs)) || Number(timeoutMs) < 1 || Number(timeoutMs) > Number(specification.timeout_ms)) {
-    throw new Error(`requested timeout exceeds or invalidates the immutable approved plan for ${task.task_id}`);
-  }
-  if (!env || typeof env !== 'object' || Array.isArray(env) || Object.keys(env).length !== 0) {
-    throw new Error(`environment overrides are not authorized by the immutable plan for ${task.task_id}`);
-  }
-  return specification;
-}
-
 function throwIfAborted(signal) {
   if (signal?.aborted) throw new Error('Request aborted by caller');
 }
@@ -894,8 +803,8 @@ async function runPinnedExecutionControlCommand(identity, args, options = {}) {
 }
 
 export class ExecutionManager {
-  constructor(store, { tmuxBin = TMUX_BIN, timeoutMs = DEFAULT_TIMEOUT_MS, executionTmpDir = process.env.EXECUTION_TMP_DIR || path.join(process.env.WORKFLOW_DATA_DIR || '/tmp', 'runtime') } = {}) {
-    this.store = store;
+  constructor(store, { statePort = null, tmuxBin = TMUX_BIN, timeoutMs = DEFAULT_TIMEOUT_MS, executionTmpDir = process.env.EXECUTION_TMP_DIR || path.join(process.env.WORKFLOW_DATA_DIR || '/tmp', 'runtime') } = {}) {
+    this.state = createWorkflowStatePort(statePort || store);
     this.tmuxBin = tmuxBin;
     this.timeoutMs = timeoutMs;
     this.executionTmpDir = path.resolve(executionTmpDir);
@@ -929,7 +838,7 @@ export class ExecutionManager {
       // Explicit cancellation plus verified absence of the exact tmux session
       // is the narrow case where the local execution can be terminalized as
       // cancelled. If cleanup cannot be verified, preserve the open attempt.
-      this.store.finishExecution(taskId, {
+      this.state.finishExecution(taskId, {
         executionSessionId, attempt, command,
         exitCode: null, stdout: '', stderr: error.message, status: 'cancelled', error: error.message
       });
@@ -937,7 +846,7 @@ export class ExecutionManager {
     }
     const task = this.getTask(taskId);
     try {
-      this.store.recordEvent(task?.job_id, 'execution.spawn_reconciliation_required', {
+      this.state.recordEvent(task?.job_id, 'execution.spawn_reconciliation_required', {
         taskId, executionSessionId, attempt, tmuxName, sessionAbsent,
         reason: String(error?.message || error),
         classification: 'post-spawn-control-failure; result is not verified; do not retry automatically'
@@ -986,9 +895,7 @@ export class ExecutionManager {
         !/^[a-f0-9]{64}$/.test(String(boundary.executable?.sha256 || '')) ||
         !/^[a-f0-9]{64}$/.test(String(boundary.tmux?.sha256 || ''))) return null;
 
-    const startRows = this.store.db.prepare(`SELECT event_id,job_id,type,payload_json FROM events
-      WHERE job_id=? AND type='execution.started' AND json_extract(payload_json,'$.taskId')=? AND json_extract(payload_json,'$.attempt')=?`)
-      .all(task.job_id, taskId, attempt);
+    const startRows = this.state.listExecutionStartedEventsForAttempt(task.job_id, taskId, attempt);
     if (startRows.length !== 1) return null;
     const startEvent = startRows[0];
     let payload;
@@ -1031,25 +938,25 @@ export class ExecutionManager {
     const task = this.getTask(taskId);
     if (!task) throw new Error(`task not found while binding OS execution boundary: ${taskId}`);
     const metadata = parseStrictJson(task.metadata_json || '{}');
-    const plan = this.store.getExecutionPlan(task.job_id);
-    const proposal = this.store.getCurrentProposal(task.job_id);
-    const approval = this.store.getLatestApproval(task.job_id);
+    const plan = this.state.getExecutionPlan(task.job_id);
+    const proposal = this.state.getCurrentProposal(task.job_id);
+    const approval = this.state.getLatestApproval(task.job_id);
     if (plan) {
-      this.store.assertApprovalCurrent(task.job_id);
+      this.state.assertApprovalCurrent(task.job_id);
       if (!approval || approval.decision !== 'approved' || !proposal || approval.proposal_hash !== proposal.proposalHash) {
         throw new Error(`current approval identity is unavailable for OS execution boundary: ${task.job_id}`);
       }
     }
     const requestedLeaseId = executionLease?.leaseId ?? task.lease_id ?? metadata.lease_id ?? metadata.task_lease_id ?? null;
     const requestedLeaseExpiry = task.lease_expires_at ?? metadata.lease_expires_at ?? metadata.lease_until ?? null;
-    const activeLease = this.store.db.prepare("SELECT * FROM task_leases WHERE task_id=? AND state='ACTIVE'").get(taskId) || null;
+    const activeLease = this.state.getActiveTaskLease(taskId);
     if (typeof attempt !== 'number' || !Number.isSafeInteger(attempt) || attempt < 1 ||
         typeof task.execution_attempt !== 'number' || !Number.isSafeInteger(task.execution_attempt) || task.execution_attempt < 0) {
       throw new Error(`task execution attempt is not an exact safe integer at OS boundary capture: ${taskId}`);
     }
     let leaseIdentity = { lease_id: null, state: null, attempt: null, worker_id: null, owner_epoch: null, expires_at: null };
     if (requestedLeaseId || requestedLeaseExpiry || activeLease || executionLease) {
-      const lease = requestedLeaseId ? this.store.getTaskLease(requestedLeaseId) : activeLease;
+      const lease = requestedLeaseId ? this.state.getTaskLease(requestedLeaseId) : activeLease;
       if (lease?.state === 'ACTIVE' && Date.parse(lease.expires_at) > Date.now() && !executionLease) {
         throw new Error(`active task lease is not bound to this OS execution owner; local spawn is refused: ${taskId}`);
       }
@@ -1140,8 +1047,7 @@ export class ExecutionManager {
       assertPinnedExecutableUnchanged(expected.tmux),
       assertPinnedExecutableUnchanged(expected.supervisor)
     ]);
-    const started = this.store.db.prepare("SELECT payload_json FROM events WHERE job_id=? AND type='execution.started' ORDER BY created_at DESC,rowid DESC LIMIT 1000")
-      .all(task.job_id);
+    const started = this.state.listExecutionStartedEventsForJob(task.job_id, { limit: 1000 });
     const payload = started.map(row => {
       try { return parseStrictJson(row.payload_json); } catch { return null; }
     }).find(value => value && value.taskId === taskId && value.attempt === attempt);
@@ -1149,8 +1055,8 @@ export class ExecutionManager {
     if (canonicalJson(payload.executionBoundaryIdentity) !== canonicalJson(expected)) {
       throw new Error(`durable execution.started boundary evidence does not match current attempt: ${taskId}`);
     }
-    // The caller will synchronously recheck approval/plan and lease under its
-    // own short writer reservation before emitting execution.spawn_authorized.
+    // WorkflowStatePort owns the final synchronous plan/approval/lease recheck
+    // and durable event write as one atomic command.
     return expected;
   }
 
@@ -1163,96 +1069,14 @@ export class ExecutionManager {
     // unrelated executions. The short durable spawn-authorization claim below
     // is the linearization point: revocation before it blocks launch, while a
     // later revocation is ordered after an already-authorized spawn intent.
-    const db = this.store.db;
     const currentBoundary = await this._assertExecutionBoundaryUnchanged(taskId, boundaryIdentity, {
       attempt, command, cwd, env, executable, executionLease
     });
     throwIfAborted(signal);
-    let authorizationCommitted = false;
-    try {
-      db.exec('BEGIN IMMEDIATE');
-      assertImmutablePlannedExecution(this.store, this.getTask(taskId), {
-        ...(args ? { executable, args, command } : { command }), cwd, timeoutMs, env: explicitEnv
-      });
-      const task = this.getTask(taskId);
-      const metadata = parseStrictJson(task?.metadata_json || '{}', 'durable task metadata before OS spawn');
-      if (!task || task.job_id !== boundaryIdentity.job_id || task.status !== 'running' || task.execution_status !== 'running' ||
-          typeof attempt !== 'number' || !Number.isSafeInteger(attempt) || attempt < 1 ||
-          typeof task.execution_attempt !== 'number' || !Number.isSafeInteger(task.execution_attempt) || task.execution_attempt !== attempt ||
-          metadata.command !== command || canonicalJson(metadata.execution_boundary_identity) !== canonicalJson(boundaryIdentity)) {
-        throw new Error(`execution task/session/attempt/boundary changed before spawn authorization: ${taskId}`);
-      }
-      if (metadata.execution_batch_claim) {
-        const claim = metadata.execution_batch_claim;
-        const durableClaim = db.prepare(`SELECT b.batch_id,b.job_id,b.status AS batch_status,b.attempt AS batch_attempt,
-            i.item_id,i.task_id,i.command,i.status AS item_status,i.attempt AS item_attempt,
-            j.state AS job_state,j.status AS job_status
-          FROM execution_batches b JOIN execution_batch_items i ON i.batch_id=b.batch_id
-          JOIN jobs j ON j.job_id=b.job_id
-          WHERE b.batch_id=? AND i.item_id=? AND i.task_id=?`).get(claim.batchId, claim.itemId, taskId);
-        if (!durableClaim || durableClaim.job_id !== task.job_id || durableClaim.batch_status !== 'WAITING' && durableClaim.batch_status !== 'RUNNING' ||
-            durableClaim.batch_attempt !== attempt || durableClaim.item_attempt !== attempt || durableClaim.item_status !== 'RUNNING' ||
-            durableClaim.command !== command || durableClaim.job_status !== 'active' || durableClaim.job_state !== 'EXECUTING' ||
-            claim.batchAttempt !== attempt || claim.itemAttempt !== attempt) {
-          throw new Error(`execution batch/job claim lost before OS spawn authorization: ${taskId}`);
-        }
-      }
-      const approval = this.store.getLatestApproval(task.job_id);
-      const proposal = this.store.getCurrentProposal(task.job_id);
-      const approvalIdentity = approval ? {
-        approval_id: approval.approval_id, decision: approval.decision,
-        proposal_hash: approval.proposal_hash || null, current_proposal_hash: proposal?.proposalHash || null
-      } : null;
-      if (canonicalJson(approvalIdentity) !== canonicalJson(boundaryIdentity.approval)) {
-        throw new Error(`execution approval/proposal identity changed before spawn authorization: ${taskId}`);
-      }
-      const activeLeases = db.prepare("SELECT * FROM task_leases WHERE task_id=? AND state='ACTIVE'").all(taskId);
-      const lease = boundaryIdentity.lease?.lease_id
-        ? activeLeases.find(candidate => candidate.lease_id === boundaryIdentity.lease.lease_id)
-        : null;
-      if (boundaryIdentity.lease?.lease_id) {
-        const expiry = Date.parse(lease?.expires_at || '');
-        if (!lease || activeLeases.length !== 1 || lease.job_id !== task.job_id || lease.task_id !== taskId ||
-            lease.worker_id !== boundaryIdentity.lease.worker_id || typeof lease.owner_epoch !== 'number' ||
-            lease.owner_epoch !== boundaryIdentity.lease.owner_epoch || typeof lease.attempt !== 'number' ||
-            lease.attempt !== attempt || !Number.isFinite(expiry) || expiry <= Date.now()) {
-          throw new Error(`execution lease owner/epoch/attempt expired or changed before spawn authorization: ${taskId}`);
-        }
-      } else if (activeLeases.some(candidate => Date.parse(candidate.expires_at || '') > Date.now())) {
-        throw new Error(`execution acquired an unbound active task lease before local spawn authorization: ${taskId}`);
-      }
-      const startedEvent = db.prepare("SELECT event_id,job_id,payload_json FROM events WHERE job_id=? AND type='execution.started' AND json_extract(payload_json,'$.taskId')=? AND json_extract(payload_json,'$.attempt')=?")
-        .all(task.job_id, taskId, attempt);
-      if (startedEvent.length !== 1) throw new Error(`exact durable execution.started event missing before spawn authorization: ${taskId}`);
-      const startedPayload = parseStrictJson(startedEvent[0].payload_json, 'durable execution.started payload');
-      if (startedEvent[0].job_id !== task.job_id || startedPayload.executionSessionId !== task.execution_session_id ||
-          canonicalJson(startedPayload.executionBoundaryIdentity) !== canonicalJson(boundaryIdentity)) {
-        throw new Error(`durable execution.started event does not bind the current spawn authorization: ${taskId}`);
-      }
-      const spawnAuthorization = {
-        taskId, executionSessionId: task.execution_session_id, attempt, command,
-        approvalId: boundaryIdentity.approval?.approval_id || null,
-        proposalHash: boundaryIdentity.approval?.proposal_hash || null,
-        environmentSha256: boundaryIdentity.environment_sha256,
-        executableSha256: boundaryIdentity.executable?.sha256,
-        tmuxSha256: boundaryIdentity.tmux?.sha256,
-        leaseId: lease?.lease_id || null,
-        ownerEpoch: lease ? lease.owner_epoch : null,
-        authorizedAt: new Date().toISOString()
-      };
-      const dedupeKey = `${taskId}|execution-spawn|${attempt}`;
-      const authorizedEventId = this.store.recordEvent(task.job_id, 'execution.spawn_authorized', spawnAuthorization, dedupeKey);
-      const authorizedEvent = db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(authorizedEventId);
-      if (!authorizedEvent || authorizedEvent.job_id !== task.job_id || authorizedEvent.type !== 'execution.spawn_authorized' ||
-          authorizedEvent.payload_json !== JSON.stringify(spawnAuthorization)) {
-        throw new Error(`durable execution spawn-authorization event readback mismatch: ${taskId}`);
-      }
-      db.exec('COMMIT');
-      authorizationCommitted = true;
-    } catch (error) {
-      if (!authorizationCommitted) { try { db.exec('ROLLBACK'); } catch {} }
-      throw error;
-    }
+    this.state.authorizeExecutionSpawn({
+      taskId, boundaryIdentity, attempt, command, cwd, timeoutMs,
+      explicitEnv, ...(executable ? { executable } : {}), ...(args ? { args } : {})
+    });
 
     const controlEnv = baseExecutionEnvironment({ homeDir: this.executionHomeDir, tmpDir: this.executionTmpDir });
     let spawnBoundaryEntered = false;
@@ -1308,13 +1132,11 @@ export class ExecutionManager {
     return args;
   }
 
-  getTask(taskId) { return this.store.getTask(taskId); }
+  getTask(taskId) { return this.state.getTask(taskId); }
 
   async cleanupOrphanedArtifacts() {
-    const active = new Set(
-      this.store.db.prepare("SELECT execution_session_id FROM tasks WHERE execution_status = 'running' AND execution_session_id IS NOT NULL")
-        .all().map(row => `cos-exec-${String(row.execution_session_id).replace(/[^A-Za-z0-9_-]/g, '_')}`)
-    );
+    const active = new Set(this.state.getRunningExecutionSessionIds()
+      .map(sessionId => `cos-exec-${String(sessionId).replace(/[^A-Za-z0-9_-]/g, '_')}`));
     await ensurePrivateExecutionDirectory(this.executionTmpDir, 'execution temporary directory');
     const entries = await fs.readdir(this.executionTmpDir).catch(() => []);
     // The output-limit marker is part of the same per-execution artifact set
@@ -1340,24 +1162,21 @@ export class ExecutionManager {
     // prepareExecution created a durable task attempt/session. This method is
     // in the shipped local MCP runtime; recovery-manager.js is not. The store
     // checks age and durable task/attempt state under SQLite writer locking.
-    if (typeof this.store.recoverUnstartedExecutionBatchClaims === 'function') {
-      this.store.recoverUnstartedExecutionBatchClaims({
-        staleBefore: new Date(Date.now() - Math.max(2 * 60 * 1000, timeoutMs)).toISOString()
-      });
-    }
-    let batch = this.store.getExecutionBatch(batchId);
+    this.state.recoverUnstartedExecutionBatchClaims({
+      staleBefore: new Date(Date.now() - Math.max(2 * 60 * 1000, timeoutMs)).toISOString()
+    });
+    let batch = this.state.getExecutionBatch(batchId);
     if (!batch) throw new Error(`execution batch not found: ${batchId}`);
     if (typeof batch.attempt !== 'number' || !Number.isSafeInteger(batch.attempt) || batch.attempt < 1) {
       throw new Error(`execution batch has a malformed durable attempt: ${batchId}`);
     }
     if (batch.status === 'COMPLETED') {
-      if (typeof this.store.verifyCompletedExecutionBatch === 'function') return this.store.verifyCompletedExecutionBatch(batchId);
-      return { ...batch, items: this.store.listExecutionBatchItems(batchId) };
+      return this.state.verifyCompletedExecutionBatch(batchId);
     }
-    if (batch.status === 'CANCELLED') return { ...batch, items: this.store.listExecutionBatchItems(batchId) };
-    const parentJob = this.store.getJob(batch.job_id);
+    if (batch.status === 'CANCELLED') return { ...batch, items: this.state.listExecutionBatchItems(batchId) };
+    const parentJob = this.state.getJob(batch.job_id);
     if (!parentJob || parentJob.status !== 'active' || parentJob.state !== 'EXECUTING') {
-      const parentItems = this.store.listExecutionBatchItems(batchId);
+      const parentItems = this.state.listExecutionBatchItems(batchId);
       if (parentItems.some(item => item.status === 'RUNNING')) {
         throw new Error(`execution batch has a live item claim but its parent Job is no longer active/EXECUTING; recovery required: ${batchId}`);
       }
@@ -1365,19 +1184,18 @@ export class ExecutionManager {
       if (parentItems.length && parentItems.every(item => ['COMPLETED', 'FAILED', 'TIMEOUT', 'CANCELLED'].includes(item.status))) {
         return this._finishExecutionBatchFromItems(batch, parentItems);
       }
-      return this.store.cancelExecutionBatch(batchId, 'parent Job terminalized before remaining batch items could start');
+      return this.state.cancelExecutionBatch(batchId, 'parent Job terminalized before remaining batch items could start');
     }
-    if (batch.status === 'FAILED') batch = this.store.prepareExecutionBatchRetry(batchId);
-    batch = this.store.getExecutionBatch(batchId);
+    if (batch.status === 'FAILED') batch = this.state.prepareExecutionBatchRetry(batchId);
+    batch = this.state.getExecutionBatch(batchId);
     if (!batch) return null;
     if (batch.status === 'COMPLETED') {
-      if (typeof this.store.verifyCompletedExecutionBatch === 'function') return this.store.verifyCompletedExecutionBatch(batchId);
-      return { ...batch, items: this.store.listExecutionBatchItems(batchId) };
+      return this.state.verifyCompletedExecutionBatch(batchId);
     }
     if (batch.status === 'CANCELLED') {
-      return { ...batch, items: this.store.listExecutionBatchItems(batchId) };
+      return { ...batch, items: this.state.listExecutionBatchItems(batchId) };
     }
-    let existingItems = this.store.listExecutionBatchItems(batchId);
+    let existingItems = this.state.listExecutionBatchItems(batchId);
     for (const item of existingItems) {
       if (typeof item.attempt !== 'number' || !Number.isSafeInteger(item.attempt) || item.attempt < 1 ||
           (item.status !== 'COMPLETED' && item.attempt !== batch.attempt) || item.attempt > batch.attempt) {
@@ -1392,8 +1210,7 @@ export class ExecutionManager {
     // before the batch-item terminal write. Reconcile only from the exact
     // execution.started batch-claim binding and the store's terminal-ledger
     // validator; a still-running/ambiguous task remains fenced as RUNNING.
-    if (typeof this.store.recoverTerminalExecutionBatchItemFromTask === 'function') {
-      for (const item of existingItems.filter(candidate => candidate.status === 'RUNNING')) {
+    for (const item of existingItems.filter(candidate => candidate.status === 'RUNNING')) {
         const task = this.getTask(item.task_id);
         if (task?.execution_status === 'running') {
           await this._collectExistingExecutionFromExitMarker(task, {
@@ -1406,13 +1223,12 @@ export class ExecutionManager {
             }
           });
         }
-        this.store.recoverTerminalExecutionBatchItemFromTask(batchId, item.item_id, {
+        this.state.recoverTerminalExecutionBatchItemFromTask(batchId, item.item_id, {
           expectedBatchAttempt: batch.attempt,
           expectedItemAttempt: item.attempt
         });
-      }
-      existingItems = this.store.listExecutionBatchItems(batchId);
     }
+    existingItems = this.state.listExecutionBatchItems(batchId);
     if (existingItems.some(item => item.status === 'RUNNING')) {
       throw new Error(`execution batch already has active item attempts; duplicate batch execution refused: ${batchId}`);
     }
@@ -1433,7 +1249,7 @@ export class ExecutionManager {
     });
 
     const runItem = async item => {
-      const claimed = this.store.markExecutionBatchItemRunning(batchId, item.item_id, {
+      const claimed = this.state.markExecutionBatchItemRunning(batchId, item.item_id, {
         expectedAttempt: item.attempt
       });
       // Another process can win after our item snapshot but before this CAS.
@@ -1508,7 +1324,7 @@ export class ExecutionManager {
         if (settledAttempt) {
           const terminalStatus = taskAfterFailure.execution_status === 'timeout' ? 'TIMEOUT'
             : taskAfterFailure.execution_status === 'cancelled' ? 'CANCELLED' : 'FAILED';
-          this.store.finishExecutionBatchItem(batchId, item.item_id, {
+          this.state.finishExecutionBatchItem(batchId, item.item_id, {
             expectedAttempt: item.attempt,
             executionSessionId: taskAfterFailure.execution_session_id || null,
             executionPid: taskAfterFailure.execution_pid || null,
@@ -1524,7 +1340,7 @@ export class ExecutionManager {
             stderr: taskAfterFailure.execution_stderr || '', execution_status: taskAfterFailure.execution_status,
             timedOut: taskAfterFailure.execution_status === 'timeout', failedToStart: true, error: error.message };
         }
-        this.store.finishExecutionBatchItem(batchId, item.item_id, {
+        this.state.finishExecutionBatchItem(batchId, item.item_id, {
           expectedAttempt: item.attempt,
           status: signal?.aborted ? 'CANCELLED' : 'FAILED', error: error.message
         });
@@ -1552,7 +1368,7 @@ export class ExecutionManager {
       // Persistence errors intentionally do not enter the execution-error
       // catch above: retrying a failed terminal write as FAILED would let a
       // stale/lost owner overwrite a legitimate COMPLETED attempt.
-      this.store.finishExecutionBatchItem(batchId, item.item_id, {
+      this.state.finishExecutionBatchItem(batchId, item.item_id, {
         expectedAttempt: item.attempt,
         executionSessionId: task?.execution_session_id || null,
         executionPid: task?.execution_pid || null,
@@ -1585,7 +1401,7 @@ export class ExecutionManager {
         }
       }
     });
-    this.store.markExecutionBatchWaiting(batchId);
+    this.state.markExecutionBatchWaiting(batchId);
     // Promise.all rejects on the first aborted lane, but sibling executeTask
     // calls may still be terminating tmux/process groups and committing their
     // task/attempt terminal ledgers. Cancelling the batch at that point marks
@@ -1597,14 +1413,14 @@ export class ExecutionManager {
     const settledRuns = await Promise.allSettled(runs);
     const rejectedRun = settledRuns.find(result => result.status === 'rejected');
     if (rejectedRun) {
-      if (signal?.aborted) this.store.cancelExecutionBatch(batchId, rejectedRun.reason?.message || 'execution request cancelled');
+      if (signal?.aborted) this.state.cancelExecutionBatch(batchId, rejectedRun.reason?.message || 'execution request cancelled');
       throw rejectedRun.reason;
     }
-    const finalItems = this.store.listExecutionBatchItems(batchId);
+    const finalItems = this.state.listExecutionBatchItems(batchId);
     if (finalItems.some(item => ['PENDING', 'RUNNING'].includes(item.status))) {
       throw new Error(`execution batch still has items owned by another attempt; aggregate/finalization deferred: ${batchId}`);
     }
-    return this._finishExecutionBatchFromItems(this.store.getExecutionBatch(batchId), finalItems);
+    return this._finishExecutionBatchFromItems(this.state.getExecutionBatch(batchId), finalItems);
   }
 
   _finishExecutionBatchFromItems(batch, finalItems) {
@@ -1649,7 +1465,7 @@ export class ExecutionManager {
         `stderr:\n${i.stderr || ''}`
       ].join('\n'))
     ].join('\n');
-    return this.store.finishExecutionBatch(batchId, {
+    return this.state.finishExecutionBatch(batchId, {
       status: resultPayload.status === 'completed' ? 'COMPLETED' : 'FAILED',
       aggregateContent,
       expectedAttempt: batch.attempt
@@ -1696,8 +1512,8 @@ export class ExecutionManager {
     const task = this.getTask(taskId);
     if (!task) throw new Error(`task not found: ${taskId}`);
     const taskMetadata = parseStrictJson(task.metadata_json || '{}', `task metadata for ${taskId}`);
-    assertImmutablePlannedExecution(this.store, task, { executable: exactExecutable, args, command, cwd, timeoutMs, env });
-    assertSingleTaskAllowedByBatchPolicy(this.store, task, taskMetadata, batchClaim);
+    this.state.assertImmutablePlannedExecution(task, { executable: exactExecutable, args, command, cwd, timeoutMs, env });
+    assertSingleTaskAllowedByBatchPolicy(this.state, task, taskMetadata, batchClaim);
     const priorAttempt = task.execution_attempt == null ? 0 : task.execution_attempt;
     if (typeof priorAttempt !== 'number' || !Number.isSafeInteger(priorAttempt) || priorAttempt < 0) {
       throw new Error(`task has a malformed durable execution attempt: ${taskId}`);
@@ -1714,7 +1530,7 @@ export class ExecutionManager {
           typeof task.execution_session_id !== 'string' || !task.execution_session_id || priorAttempt < 1) {
         throw new Error(`completed execution has contradictory durable task/session/attempt/exit state: ${taskId}`);
       }
-      return this.store.finishExecution(taskId, {
+      return this.state.finishExecution(taskId, {
         executionSessionId: task.execution_session_id, attempt: priorAttempt, command: task.metadata_json ? parseStrictJson(task.metadata_json).command : command,
         exitCode: task.execution_exit_code, stdout: task.execution_stdout || '', stderr: task.execution_stderr || '',
         status: 'completed', error: null
@@ -1746,12 +1562,9 @@ export class ExecutionManager {
       ['-e', EXECUTION_OUTPUT_SUPERVISOR_SOURCE, JSON.stringify(supervisorSpec)]);
     const preparedExecution = { executionSessionId, attempt: nextAttempt, command, cwd, startedAt, tmuxName, boundaryIdentity };
     if (batchClaim) {
-      if (typeof this.store.prepareExecutionForBatchClaim !== 'function') {
-        throw new Error('batch execution requires the atomic store claim/preparation fence');
-      }
-      this.store.prepareExecutionForBatchClaim(taskId, preparedExecution, batchClaim);
+      this.state.prepareExecutionForBatchClaim(taskId, preparedExecution, batchClaim);
     } else {
-      this.store.prepareExecution(taskId, preparedExecution);
+      this.state.prepareExecution(taskId, preparedExecution);
     }
     const script = `exec ${supervisorCommand}`;
     let spawnAccepted = false;
@@ -1771,7 +1584,7 @@ export class ExecutionManager {
       const controlEnv = baseExecutionEnvironment({ homeDir: this.executionHomeDir, tmpDir: this.executionTmpDir });
       throwIfAborted(signal);
       const pid = await runPinnedExecutionControlCommand(currentBoundary.tmux, ['display-message', '-p', '-t', `${tmuxName}:0`, '#{pane_pid}'], { timeoutMs: 5000, signal, env: controlEnv });
-      this.store.setExecutionPid(taskId, parseCanonicalExecutionPid(pid.stdout, taskId), { executionSessionId, attempt: nextAttempt });
+      this.state.setExecutionPid(taskId, parseCanonicalExecutionPid(pid.stdout, taskId), { executionSessionId, attempt: nextAttempt });
       const started = Date.now();
       let exitCode = null;
       while (Date.now() - started < timeoutMs) {
@@ -1803,10 +1616,10 @@ export class ExecutionManager {
         throw error;
       }
       if (signal?.aborted) {
-        this.store.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command, exitCode: null, stdout: '', stderr: error.message, status: 'cancelled', error: error.message });
+        this.state.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command, exitCode: null, stdout: '', stderr: error.message, status: 'cancelled', error: error.message });
         throw error;
       }
-      this.store.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command, exitCode: null, stdout: '', stderr: error.message, status: 'failed', error: error.message });
+      this.state.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command, exitCode: null, stdout: '', stderr: error.message, status: 'failed', error: error.message });
       throw error;
     }
   }
@@ -1834,8 +1647,8 @@ export class ExecutionManager {
     if (!namedExecutableAllowed && !exactCurrentRuntimeAllowed) {
       throw new Error('unsupported deterministic executable token: ' + commandArgs[0]);
     }
-    const planned = assertImmutablePlannedExecution(this.store, task, { command: exactCommand, cwd, timeoutMs, env });
-    assertSingleTaskAllowedByBatchPolicy(this.store, task, taskMetadata, batchClaim);
+    const planned = this.state.assertImmutablePlannedExecution(task, { command: exactCommand, cwd, timeoutMs, env });
+    assertSingleTaskAllowedByBatchPolicy(this.state, task, taskMetadata, batchClaim);
     if (!planned && ['bash', 'sh'].includes(commandArgs[0])) {
       throw new Error('unplanned shell execution is not permitted; use a structured immutable execution plan');
     }
@@ -1855,7 +1668,7 @@ export class ExecutionManager {
           typeof task.execution_session_id !== 'string' || !task.execution_session_id || priorAttempt < 1) {
         throw new Error(`completed execution has contradictory durable task/session/attempt/exit state: ${taskId}`);
       }
-      return this.store.finishExecution(taskId, {
+      return this.state.finishExecution(taskId, {
         executionSessionId: task.execution_session_id, attempt: priorAttempt, command: exactCommand,
         exitCode: task.execution_exit_code, stdout: task.execution_stdout || '', stderr: task.execution_stderr || '',
         status: 'completed', error: null
@@ -1891,12 +1704,9 @@ export class ExecutionManager {
       ['-e', EXECUTION_OUTPUT_SUPERVISOR_SOURCE, JSON.stringify(supervisorSpec)]);
     const preparedExecution = { executionSessionId, attempt: nextAttempt, command: exactCommand, cwd, startedAt, tmuxName, boundaryIdentity };
     if (batchClaim) {
-      if (typeof this.store.prepareExecutionForBatchClaim !== 'function') {
-        throw new Error('batch execution requires the atomic store claim/preparation fence');
-      }
-      this.store.prepareExecutionForBatchClaim(taskId, preparedExecution, batchClaim);
+      this.state.prepareExecutionForBatchClaim(taskId, preparedExecution, batchClaim);
     } else {
-      this.store.prepareExecution(taskId, preparedExecution);
+      this.state.prepareExecution(taskId, preparedExecution);
     }
     const script = `exec ${supervisorCommand}`;
     let spawnAccepted = false;
@@ -1911,7 +1721,7 @@ export class ExecutionManager {
       const controlEnv = baseExecutionEnvironment({ homeDir: this.executionHomeDir, tmpDir: this.executionTmpDir });
       throwIfAborted(signal);
       const pid = await runPinnedExecutionControlCommand(currentBoundary.tmux, ['display-message', '-p', '-t', `${tmuxName}:0`, '#{pane_pid}'], { timeoutMs: 5000, signal, env: controlEnv });
-      this.store.setExecutionPid(taskId, parseCanonicalExecutionPid(pid.stdout, taskId), { executionSessionId, attempt: nextAttempt });
+      this.state.setExecutionPid(taskId, parseCanonicalExecutionPid(pid.stdout, taskId), { executionSessionId, attempt: nextAttempt });
       const started = Date.now();
       let exitCode = null;
       while (Date.now() - started < timeoutMs) {
@@ -1939,10 +1749,10 @@ export class ExecutionManager {
         throw error;
       }
       if (signal?.aborted) {
-        this.store.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command: exactCommand, exitCode: null, stdout: '', stderr: error.message, status: 'cancelled', error: error.message });
+        this.state.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command: exactCommand, exitCode: null, stdout: '', stderr: error.message, status: 'cancelled', error: error.message });
         throw error;
       }
-      this.store.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command: exactCommand, exitCode: null, stdout: '', stderr: error.message, status: 'failed', error: error.message });
+      this.state.finishExecution(taskId, { executionSessionId, attempt: nextAttempt, command: exactCommand, exitCode: null, stdout: '', stderr: error.message, status: 'failed', error: error.message });
       throw error;
     }
   }
@@ -1965,7 +1775,7 @@ export class ExecutionManager {
     let result;
     let durableResultValidated = false;
     try {
-      result = this.store.finishExecution(taskId, {
+      result = this.state.finishExecution(taskId, {
         executionSessionId, attempt, command, exitCode,
         stdout: stdout.text, stderr: stderr.text,
         status,

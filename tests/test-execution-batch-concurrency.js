@@ -17,7 +17,7 @@ process.env.EXECUTION_TMP_DIR = runtimeDir;
 process.env.EXECUTION_TIMEOUT_MS = '10000';
 process.env.NODE_ENV = 'test';
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { ExecutionManager } = await import('../src/runtime/execution-manager.js');
 const store = new WorkflowStore();
 const manager = new ExecutionManager(store, { timeoutMs: 10000, executionTmpDir: runtimeDir });
@@ -26,7 +26,7 @@ let batch = null;
 
 function launchBatchOwner(label) {
   const childSource = `
-    const { WorkflowStore } = await import(${JSON.stringify(new URL('../src/runtime/job-store.js', import.meta.url).href)});
+    const { WorkflowStore } = await import(${JSON.stringify(new URL('../job-store.js', import.meta.url).href)});
     const { ExecutionManager } = await import(${JSON.stringify(new URL('../src/runtime/execution-manager.js', import.meta.url).href)});
     const store = new WorkflowStore();
     const manager = new ExecutionManager(store, { timeoutMs: 10000, executionTmpDir: ${JSON.stringify(runtimeDir)} });

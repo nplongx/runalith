@@ -1,0 +1,921 @@
+{
+  "schemaVersion": 1,
+  "recordType": "runalith-agg-v2-authority-dependency-register",
+  "generatedAt": "2026-10-30T13:41:35.218Z",
+  "evidenceClass": "local owner/authority handoff; not an authority attestation, approval, or issue acceptance",
+  "repository": "nplongx/runalith",
+  "branch": "main",
+  "observedHead": "6b7bc90a8b16e50be9c7331c2b6361cc40b8f3",
+  "candidate": {
+    "path": "dist/runalith-1.0.9-rc.71-three-graph-v2-migration-acceptance-20261030-v153.mcpb",
+    "version": "1.0.9-rc.71",
+    "sha256": "89f405d881c62e47d9ac016bd1e86f6adff62e297ef1f04a352b615fdde48bbd",
+    "sizeBytes": 991636,
+    "archiveEntryCount": 109,
+    "toolCount": 75,
+    "byteIdenticalTo": "dist/runalith-1.0.9-rc.71-trust-config-process-identity-revalidation-20261030-v152.mcpb",
+    "distinctCandidateBytes": false,
+    "installedVersion": "1.0.9-rc.71",
+    "activationAllowed": false,
+    "provenance": "Local packer output; source/archive byte alignment passes. No authenticated builder receipt, independent rebuild attestation, or release approval. The v153 filename is a byte-identical duplicate, not a new runtime candidate."
+  },
+  "currentGoalSnapshot": {
+    "goalId": "runalith-agg-e2e-20261026-clean",
+    "snapshotSha256": "8bacb9b1b6f6fc6c15b8e46544aa0a2494d84a8115563e7b6a880fb93498dd03",
+    "nodes": 16,
+    "edges": 7,
+    "memberships": 16,
+    "revisionHistoryEntries": 17,
+    "durableEvidenceReferences": 9,
+    "eligibleForAttestation": true,
+    "verified": false,
+    "verificationStatus": "verifier_unavailable",
+    "attestationId": null,
+    "planningAuthority": false,
+    "observation": "Read-only API snapshot re-observed at 2026-10-30T10:08:24Z and saved as a new artifact. Nine evidence refs have durable producer lineage; claim truth and independence remain unverified."
+  },
+  "currentOperationalObservation": {
+    "observedAt": "2026-10-30T10:08:34Z",
+    "workflowDatabase": "/home/long/.chat-on-steroids/agent-orchestrator/workflow.db",
+    "consideredJobs": 87,
+    "executingJobsRequiringReconciliation": 61,
+    "jobsWithRunningTasksButNoActiveLeases": 61,
+    "runningTasks": 62,
+    "runningTasksWithoutLease": 62,
+    "providerRunsTable": false,
+    "ownerOrProviderTerminalEvidence": false,
+    "disposition": "HOLD; missing leases do not prove worker death and do not authorize reset, terminalization, retry, drain or dispatch"
+  },
+  "projectObservation": {
+    "observedAt": "2026-10-30T13:19:15.426Z",
+    "source": "Read-only gh project field-list 2 and item-list 2; 13 V2 items include status, readiness, priority, track and Dependencies values",
+    "totalV2Items": 13,
+    "priority": "Untriaged for every item; preserved unchanged",
+    "assignees": "None assigned for all 13 V2 items",
+    "items": {
+      "32": {
+        "status": "In Progress",
+        "readiness": "Needs Evidence",
+        "priority": "Untriaged",
+        "track": "Inventory",
+        "dependencies": "None — discovery/qualification gate"
+      },
+      "33": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Foundation",
+        "dependencies": "None — discovery/qualification gate"
+      },
+      "34": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Foundation",
+        "dependencies": "None — discovery/qualification gate"
+      },
+      "35": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Foundation",
+        "dependencies": "None — discovery/qualification gate"
+      },
+      "36": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Foundation",
+        "dependencies": "#33 (V2-02 identity issuer/custody)"
+      },
+      "37": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Foundation",
+        "dependencies": "#33 (V2-02 identity semantics); #36 (V2-05 canonical DB)"
+      },
+      "38": {
+        "status": "In Progress",
+        "readiness": "Needs Evidence",
+        "priority": "Untriaged",
+        "track": "Protocol",
+        "dependencies": "None for protocol implementation; prerequisite for #39 and #40"
+      },
+      "39": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Protocol",
+        "dependencies": "#32 (V2-01 inventory); #36 (V2-05 canonical DB); #38 (V2-07 JCS)"
+      },
+      "40": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Integration",
+        "dependencies": "#34 (V2-03 authority contract); #38 (V2-07 JCS)"
+      },
+      "41": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Integration",
+        "dependencies": "#35 (V2-04 attestation/verifier); #39 (V2-08 projections)"
+      },
+      "42": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Integration",
+        "dependencies": "#37 (V2-06 gate); #39 (V2-08 projections); #40 (V2-09 authority adapter); #41 (V2-10 measurement adapter)"
+      },
+      "43": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Integration",
+        "dependencies": "#42 (V2-11 recoverable saga)"
+      },
+      "44": {
+        "status": "Todo",
+        "readiness": "Blocked",
+        "priority": "Untriaged",
+        "track": "Acceptance",
+        "dependencies": "#43 (V2-12 anchor lifecycle); #36 (V2-05 canonical DB)"
+      }
+    },
+    "issueState": "All issues #32–#44 were OPEN in read-only GitHub issue views",
+    "noTrackerMutation": true,
+    "nativeIssueDependencyEdges": "GitHub GraphQL blockedBy/blocking both empty for every issue #32–#44; Project Dependencies field retains textual dependency graph"
+  },
+  "releaseBlockers": [
+    {
+      "code": "PHASE2_FROZEN_71_PATH_CONTRACT_UNRESOLVED",
+      "issues": [
+        24
+      ]
+    },
+    {
+      "code": "INDEPENDENT_RELEASE_EVIDENCE_NOT_VERIFIED",
+      "issues": [
+        3,
+        25
+      ]
+    },
+    {
+      "code": "PRODUCTION_AGG_TRUST_CONFIGURATION_NOT_VERIFIED",
+      "issues": [
+        26
+      ]
+    },
+    {
+      "code": "PRODUCTION_AGG_TRUST_LEDGER_EXTERNAL_ANCHOR_NOT_VERIFIED",
+      "issues": [
+        27
+      ]
+    },
+    {
+      "code": "ACTIVE_EXECUTING_WORKFLOWS_MUST_DRAIN",
+      "issues": [
+        28
+      ]
+    },
+    {
+      "code": "RUNNING_TASKS_MUST_DRAIN",
+      "issues": [
+        29
+      ]
+    },
+    {
+      "code": "CANDIDATE_VERSION_ALREADY_INSTALLED",
+      "issues": [],
+      "disposition": "Requires a separately versioned, independently qualified candidate and owner-authorized host rollout; no version bump or activation is authorized here."
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "phase2-frozen-71-path-contract",
+      "issues": [
+        24
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Phase 2 contract owner and artifact-custody administrator",
+      "authority": "Owner authorized to freeze the exact Phase 2 path scope, plus independently administered custody/signing authority",
+      "decisionRequired": "Approve the exact 71-path manifest, path ordering/normalization, candidate/source binding and custody policy. No inferred or locally reconstructed path set is acceptable.",
+      "requiredArtifacts": [
+        "Owner-signed exact 71-path manifest",
+        "Versioned host custody policy with trusted verifier roots",
+        "Authenticated builder receipt bound to exact candidate and source snapshot"
+      ],
+      "evidenceMissing": [
+        "Owner signature over exact manifest bytes",
+        "Independent custody verification",
+        "Host-provisioned verifier policy and effective-loaded confirmation"
+      ],
+      "verificationProcedure": [
+        "Verify manifest signature and owner role against independently provisioned trust",
+        "Verify exact 71 paths and bytes against candidate/source snapshot",
+        "Run packaged custody verifier and preserve signed result"
+      ],
+      "localStatus": "BLOCKED; source/archive alignment is integrity evidence only and cannot freeze or approve the 71-path contract."
+    },
+    {
+      "id": "independent-release-provenance-and-approval",
+      "issues": [
+        3,
+        25
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Controlled builder operator, independent verifier operator, release approver",
+      "authority": "Protected hosted builder identity, separately administered independent verifier identity, and authorized release approver",
+      "decisionRequired": "Approve exact candidate bytes, exact source commit/materials, reproducible rebuild result, required test set and production release scope.",
+      "requiredArtifacts": [
+        "Signed DSSE/in-toto SLSA provenance",
+        "Independent verifier predicate and exact rebuild report",
+        "Candidate-bound signed release approval",
+        "Protected workflow/ruleset identity evidence"
+      ],
+      "evidenceMissing": [
+        "Authenticated builder receipt",
+        "Independent verifier signature/rebuild evidence",
+        "Independent candidate-bound approval",
+        "Exact-scope review certificate"
+      ],
+      "verificationProcedure": [
+        "Run hosted provenance verifier against exact candidate SHA-256 and repository/source materials",
+        "Verify independent rebuild byte identity and verifier signature",
+        "Verify release approval signer, scope, freshness, nonce and anti-replay",
+        "Cross-check all evidence with scripts/verify-agg-acceptance-consistency.mjs"
+      ],
+      "localStatus": "BLOCKED; local npm tests, package hashes and source alignment do not establish independent release provenance or approval."
+    },
+    {
+      "id": "production-agg-trust-configuration",
+      "issues": [
+        26
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Host security administrator and independent verifier/reviewer provider administrators",
+      "authority": "Host-managed configuration authority plus five separately scoped trust-domain administrators",
+      "decisionRequired": "Provision and attest exact production trust configs for goal_idea_verifier, action_intent_reviewer, approval_policy, action_intent_maker and execution_approval; preserve disjoint roots/providers and rotation/revocation policy.",
+      "requiredArtifacts": [
+        "Five authority-issued public-root trust configs",
+        "Host effective-process configuration readback",
+        "Trust-ledger history/high-water evidence",
+        "Key custody and rotation/revocation policy"
+      ],
+      "evidenceMissing": [
+        "A prior read-only environment observation found all five trust-config environment variables empty; the latest rollout preflight independently confirms trust configuration remains BLOCKED and goal_idea_verifier config is blank, but does not re-read all five variables individually",
+        "No independent provider/root custody proof",
+        "No effective production trust-ledger continuity evidence"
+      ],
+      "verificationProcedure": [
+        "Validate authority-issued files with scripts/validate-agg-trust-config.mjs --require-peer-config",
+        "Bind validation to exact live host PID and configured entrypoint",
+        "Read effective runtime status and verify all five domains, provider separation, canonical SPKI disjointness, versions and revocations"
+      ],
+      "localStatus": "BLOCKED; test-local Ed25519 keys and offline schema validation are not production trust."
+    },
+    {
+      "id": "external-monotonic-trust-checkpoint-anchor",
+      "issues": [
+        27
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Host security/platform administrator and independent checkpoint-store operator",
+      "authority": "Separately administered monotonic checkpoint authority/store with a host-pinned verifier root",
+      "decisionRequired": "Provision a non-local, non-restorable monotonic anchor and approve its operation, retention, recovery, nonce and continuity semantics.",
+      "requiredArtifacts": [
+        "Authority-issued endpoint/provider identity",
+        "Host-pinned checkpoint verifier trust root",
+        "Signed monotonic head/continuity receipts",
+        "Independent custody and outage/recovery policy"
+      ],
+      "evidenceMissing": [
+        "No external anchor configured",
+        "No signed authoritative head",
+        "No independent continuity proof or host-loaded verifier identity"
+      ],
+      "verificationProcedure": [
+        "Obtain fresh challenge-bound authenticated head and continuity proof",
+        "Verify sequence/digest chain, candidate/rollback binding, nonce freshness and signer custody",
+        "Exercise replay, rollback, outage and ambiguous-outcome rejection in a real non-production authority environment"
+      ],
+      "localStatus": "BLOCKED; local SQLite trust history and unit-test CAS do not provide an external monotonic anchor."
+    },
+    {
+      "id": "executing-workflow-reconciliation-and-drain",
+      "issues": [
+        28
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Each workflow owner plus host/provider/runtime operator",
+      "authority": "The actual workflow owner and provider/runtime operator with authoritative process/run identity",
+      "decisionRequired": "Provide an individual disposition for every executing workflow based on live owner, provider run, process identity and durable attempt/result/artifact/completion evidence.",
+      "requiredArtifacts": [
+        "Per-job owner disposition",
+        "Provider/runtime run identity and terminal evidence",
+        "Exact attempt/result/artifact/event lineage",
+        "Drain acknowledgement from runtime authority"
+      ],
+      "evidenceMissing": [
+        "61 executing/stale candidate jobs",
+        "61 jobs with running tasks but no active lease",
+        "No provider_runs table or authoritative provider terminality proof"
+      ],
+      "verificationProcedure": [
+        "Re-run scripts/reconcile-active-workflows.mjs read-only against the canonical DB",
+        "Join each job to provider/runtime identity and owner acknowledgement",
+        "Independently verify terminal outcome and durable event/result lineage before any separately authorized drain action"
+      ],
+      "localStatus": "HOLD; no reset, retry, terminalization, cancellation or drain is authorized by this register."
+    },
+    {
+      "id": "running-task-reconciliation-and-drain",
+      "issues": [
+        29
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Each task owner plus provider/runtime/lease authority",
+      "authority": "Task owner and authoritative execution provider/runtime capable of proving process/run state and disposition",
+      "decisionRequired": "Resolve each running task from owner identity, provider execution identity, attempt/result/artifact lineage and explicit terminal/recovery disposition.",
+      "requiredArtifacts": [
+        "Per-task owner disposition",
+        "Provider run/process identity",
+        "Lease/fencing history or authoritative terminal receipt",
+        "Durable attempt/result/completion event evidence"
+      ],
+      "evidenceMissing": [
+        "62 running tasks",
+        "62 running tasks without lease rows",
+        "No authoritative worker-death or provider-terminal evidence"
+      ],
+      "verificationProcedure": [
+        "Re-run scripts/reconcile-active-workflows-v2.mjs read-only",
+        "Resolve each task against provider/runtime state and owner confirmation",
+        "Verify exact attempt/result/artifact/completion chain and idempotent recovery disposition"
+      ],
+      "localStatus": "HOLD; missing lease is not proof of worker death and cannot authorize retry or terminalization."
+    },
+    {
+      "id": "security-projection-reader-writer-inventory",
+      "issues": [
+        32
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Repository/runtime owner, independent security reviewer, deployment/process inventory owner",
+      "authority": "Independent reviewer for authorization semantics and host/deployment operator for all shared-DB processes",
+      "decisionRequired": "Accept a complete query/column/row/event-level mapping of every security-relevant reader and writer, including migrations, maintenance/recovery paths, alternate processes and non-AGG inputs.",
+      "requiredArtifacts": [
+        "Reviewed query/normalization/reader/writer manifest",
+        "Complete event registry and drift guard",
+        "Deployment process/shared-database inventory",
+        "Disposable effective-schema and migration/failure snapshots"
+      ],
+      "evidenceMissing": [
+        "v0.11 remains lexical source discovery, not AST/call-graph or complete reader/writer proof",
+        "6 same-line raw candidates remain masked (4 regex-literal, 2 template-literal); 20 multiline candidates are line comments",
+        "62 accepted SQL calls retain computed/unresolved arguments; 14 multi-statement callsites expose per-statement classes but remain unresolved for manual review",
+        "Alias/wrapper/generated/non-SQL writer coverage remains incomplete",
+        "Deployment and alternate writer inventory not confirmed",
+        "Independent security review not assigned"
+      ],
+      "verificationProcedure": [
+        "Review v0.11 plus preserved v0.10/v0.9/v0.8/v0.7 and exact SQL/event artifacts",
+        "Manually resolve remaining 62 computed SQL calls and all 14 multi-statement aggregates; verify every contained statement and every authorization-relevant table/column",
+        "Trace each reader to all writers and stable ordering/normalization",
+        "Verify all deployed entrypoints/workers sharing the database",
+        "Obtain independent reviewer acceptance before V2-08"
+      ],
+      "localStatus": "PARTIAL; v0.11 closes reviewed regex/division false positives and false negatives for function/async-function, arrow, class and object expressions, function/class declarations, labelled blocks and optional-binding catch blocks. Optional chaining/comment trivia and multi-statement SQL remain covered. The scan has 156 files, 1,460 accepted calls, 62 computed/unresolved SQL arguments, 242 data-write candidates, 26 schema-write statement candidates, 458 transaction-control calls, 657 reads, 14 multi-statement aggregates and 97 referenced object names. The 116 recordEvent() callsites (99 literal, 17 computed/unresolved) remain separate. No AST/call graph, deployed-process inventory, independent review or projection manifest is established."
+    },
+    {
+      "id": "independent-database-identity-issuer-and-custody",
+      "issues": [
+        33
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Independent database identity issuer operator and custody/security administrator",
+      "authority": "Issuer and custody domain not writable solely by Runalith or the SQLite database being identified",
+      "decisionRequired": "Freeze the identity wire/data contract and lifecycle for logical_db_id, db_generation, restore_epoch, identity_issuer and authenticated identity_record; define restore, clone/copy, fork, promotion and failover.",
+      "requiredArtifacts": [
+        "Versioned identity record/wire contract",
+        "Issuer public trust root and custody evidence",
+        "Lifecycle transition/revocation/recovery policy",
+        "Independent issuance and rollback-resistance test evidence"
+      ],
+      "evidenceMissing": [
+        "No independent issuer implementation or provider identified",
+        "No identity-record schema/trust model accepted",
+        "No custody/recovery/rotation/revocation evidence"
+      ],
+      "verificationProcedure": [
+        "Verify a fresh issuer challenge and signed identity record independently of the target DB",
+        "Test restore/clone/fork/promotion epoch transitions and former-writer fencing",
+        "Demonstrate plugin/SQLite cannot rewrite identity or roll back issuer state"
+      ],
+      "localStatus": "BLOCKED; a SQLite row, path, inode or file hash cannot satisfy independent identity/custody."
+    },
+    {
+      "id": "external-checkpoint-authority-contract",
+      "issues": [
+        34
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "External checkpoint authority operator and protocol/security owner",
+      "authority": "Real independently operated checkpoint authority; not local SQLite or a unit-test fake",
+      "decisionRequired": "Freeze versioned canonical request/receipt schemas and authenticated prepare/reserve, finalize, abort, operation-status, head and complete paginated outstanding-operation semantics.",
+      "requiredArtifacts": [
+        "Versioned wire schemas",
+        "Linearization/idempotency/retention/expiry contract",
+        "Provider identity and trust roots",
+        "Real non-production qualification evidence"
+      ],
+      "evidenceMissing": [
+        "No qualified real provider",
+        "No signed schemas or operation semantics",
+        "No NOT_FOUND retention/pagination completeness evidence"
+      ],
+      "verificationProcedure": [
+        "Verify same operation_id plus exact request bytes is idempotent and conflicting reuse is rejected",
+        "Test PREPARED/COMMITTED/ABORTED/NOT_FOUND semantics, expiry and retention",
+        "Verify authenticated complete pagination and ambiguous-outcome reconciliation with the real provider"
+      ],
+      "localStatus": "BLOCKED; local transition helpers and fake adapters do not qualify external authority."
+    },
+    {
+      "id": "trusted-linux-measurement-and-verifier-qualification",
+      "issues": [
+        35
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Linux platform security owner, attestation provider and independent verifier operator",
+      "authority": "Qualified platform attester and separately administered independent verifier with protected appraisal roots",
+      "decisionRequired": "Select supported Linux attestation mechanism, evidence format, verifier roots, appraisal policy, challenge/audience, freshness, revocation and custody.",
+      "requiredArtifacts": [
+        "Attestation source/provider qualification",
+        "Independent verifier policy and trust roots",
+        "Challenge-bound evidence schema",
+        "Operational ownership and revocation procedure"
+      ],
+      "evidenceMissing": [
+        "No trusted measurement provider qualified",
+        "No independent verifier chain or appraisal policy",
+        "No evidence bound to DB identity, operation ID and projection/helper versions"
+      ],
+      "verificationProcedure": [
+        "Verify fresh 256-bit nonce, audience, relying party, operation ID and database identity binding",
+        "Appraise measured helper/projection digests under independent policy",
+        "Test replay, expiry, revocation, unsupported platform and identity mismatch"
+      ],
+      "localStatus": "BLOCKED; software hashes and test keys are not hardware-backed attestation."
+    },
+    {
+      "id": "canonical-workflow-database-migration",
+      "issues": [
+        36
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Workflow database owner, trust/security owner and migration approver",
+      "authority": "Owner-approved canonical DB migration with independently issued database identity/custody",
+      "decisionRequired": "Approve moving trust ledger state into canonical WORKFLOW_DB, migration identity/sequence, write ordering, separate connections, archive retention and no legacy authorization fallback.",
+      "requiredArtifacts": [
+        "Approved migration plan and cutover authorization",
+        "Identity-bound source/target logical digests and schema versions",
+        "Migration record with predecessor/successor DB identities and cutover sequence",
+        "Verified read-only legacy trust DB archive"
+      ],
+      "evidenceMissing": [
+        "Trust ledger remains in separate agg-trust-configuration.db",
+        "No independent DB identity issuer",
+        "No migration approval or cutover record",
+        "No trust-ledger migration/failure recovery tests"
+      ],
+      "verificationProcedure": [
+        "After #33 issuer acceptance, migrate disposable source/target DBs",
+        "Verify migration record and full logical readback",
+        "Test idempotent rerun, partial failure, SQLITE_BUSY and process restart",
+        "Verify legacy archive read-only and runtime has no authorization fallback"
+      ],
+      "localStatus": "BLOCKED; RC.23-to-RC.71 WorkflowStore compatibility test is not trust-ledger consolidation and does not close #36."
+    },
+    {
+      "id": "durable-cross-process-projection-transition-gate",
+      "issues": [
+        37
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Host platform/database security owner and storage/runtime maintainer",
+      "authority": "Host- or database-enforced durable gate bound to independently authenticated logical DB generation",
+      "decisionRequired": "Select and qualify a cross-process transition gate with fencing, crash recovery, timeout and bypass resistance.",
+      "requiredArtifacts": [
+        "Gate protocol and ownership/fencing policy",
+        "Host/database enforcement implementation",
+        "Cross-process/concurrency/crash/bypass test evidence"
+      ],
+      "evidenceMissing": [
+        "No durable cross-process gate",
+        "No stale-owner fencing",
+        "No direct-SQL/alternate-writer bypass proof"
+      ],
+      "verificationProcedure": [
+        "Run concurrent writers across independent processes/connections",
+        "Inject crash/restart and stale-fence writes",
+        "Verify every projection writer shares the same gate and no handler-level bypass exists"
+      ],
+      "localStatus": "BLOCKED; process-local mutex or SQLite transaction alone is not the required durable gate."
+    },
+    {
+      "id": "strict-jcs-digest-protocol",
+      "issues": [
+        38
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Protocol owner and independent cross-language verifier reviewer",
+      "authority": "Owner-approved RFC 8785 constrained I-JSON profile plus independently reproducible JS/Python vectors",
+      "decisionRequired": "Accept the strict JCS parser/canonicalizer, limits, domain-separated digest envelopes and cross-language golden vectors as the normative V2-07 implementation.",
+      "requiredArtifacts": [
+        "Normative JCS profile",
+        "Versioned digest/envelope contract",
+        "Cross-language golden vectors and verifier output",
+        "Independent review/acceptance"
+      ],
+      "evidenceMissing": [
+        "Current module is standalone and not integrated with frozen projection/authority contracts",
+        "Issue acceptance and independent review remain open"
+      ],
+      "verificationProcedure": [
+        "Run node --test tests/test-agg-checkpoint-jcs-v2.mjs",
+        "Run tests/verify-agg-checkpoint-v2-jcs-vectors.py with python3 and python3 -O",
+        "Independently review raw UTF-8 parser, duplicate-key rejection, number/Unicode/limits and domain separation"
+      ],
+      "localStatus": "LOCAL IMPLEMENTATION PASS; 14 JavaScript tests and 27 Python vectors pass. Not yet integrated into V2-08/V2-09 and issue remains OPEN."
+    },
+    {
+      "id": "versioned-security-projections",
+      "issues": [
+        39
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Security projection protocol owner, DB/schema owner and independent reviewer",
+      "authority": "Accepted V2-01 inventory, canonical DB identity/migration authority and normative JCS protocol",
+      "decisionRequired": "Freeze separate anti-replay and execution-authorization projections, query/schema versions, ordering, normalization, reader/writer manifest and coherent snapshot semantics.",
+      "requiredArtifacts": [
+        "Reviewed V2-08 projection manifest",
+        "Canonical DB transaction/snapshot implementation",
+        "Mutation-sensitivity and cross-version vectors"
+      ],
+      "evidenceMissing": [
+        "V2-01 inventory not accepted",
+        "Canonical DB migration/identity unresolved",
+        "JCS implementation not integrated",
+        "No coherent one-transaction projection snapshot"
+      ],
+      "verificationProcedure": [
+        "Derive manifest only from accepted #32/#36/#38 contracts",
+        "Test every included column/row/event mutation changes the correct digest",
+        "Test unknown schema/event fail-closed and WAL-visible coherent snapshots"
+      ],
+      "localStatus": "BLOCKED; do not freeze V2-08 queries or normalization from incomplete lexical inventories."
+    },
+    {
+      "id": "external-authority-adapter",
+      "issues": [
+        40
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "External checkpoint provider operator and adapter/runtime maintainer",
+      "authority": "Real provider qualified under #34 and JCS contract under #38",
+      "decisionRequired": "Implement authenticated adapter for prepare/reserve, finalize, abort, status, head and complete paginated outstanding operations.",
+      "requiredArtifacts": [
+        "Qualified provider contract",
+        "Adapter implementation and host-managed credentials/trust",
+        "Real non-production integration/fault tests"
+      ],
+      "evidenceMissing": [
+        "No real qualified authority provider or signed contract",
+        "No authenticated operation receipts or retention proof"
+      ],
+      "verificationProcedure": [
+        "Test exact-byte idempotency and conflicting operation reuse",
+        "Inject timeout/ambiguous outcome and reconcile by status/head",
+        "Verify incomplete pagination and unknown retention fail closed with the real provider"
+      ],
+      "localStatus": "BLOCKED; local SQLite helper is not a production authority adapter."
+    },
+    {
+      "id": "trusted-measurement-adapter",
+      "issues": [
+        41
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Qualified attestation provider and independent verifier integration owner",
+      "authority": "Real attestation/verifier chain qualified under #35",
+      "decisionRequired": "Measure exact committed logical DB snapshot and bind appraisal to operation, DB identity, projection manifest/helper versions and component digests.",
+      "requiredArtifacts": [
+        "Trusted measurement adapter",
+        "Independent verifier appraisal receipts",
+        "Replay/expiry/revocation/identity mismatch tests"
+      ],
+      "evidenceMissing": [
+        "No qualified trusted measurement source",
+        "No independent appraisal receipts",
+        "No exact snapshot binding"
+      ],
+      "verificationProcedure": [
+        "Verify fresh challenge/audience/operation/database binding",
+        "Compare measured projection/helper versions to committed target",
+        "Test replay, expiry, revocation and stale snapshot rejection"
+      ],
+      "localStatus": "BLOCKED; no software-only or test-local measurement may be presented as trusted attestation."
+    },
+    {
+      "id": "recoverable-external-anchor-saga",
+      "issues": [
+        42
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "Database/runtime owner, external authority operator and attestation/verifier operator",
+      "authority": "Accepted durable gate, versioned projections, qualified authority and trusted measurement",
+      "decisionRequired": "Implement INTENT_PENDING → REMOTE_RESERVED → ANCHOR_PENDING → ANCHORED with explicit ABORTED/QUARANTINED and exact same-operation recovery semantics.",
+      "requiredArtifacts": [
+        "Saga state machine and durable records",
+        "Operation/request/receipt binding",
+        "Crash-boundary fault-injection matrix and recovery runbook"
+      ],
+      "evidenceMissing": [
+        "Dependencies #37/#39/#40/#41 are unqualified",
+        "No durable saga or all-boundary recovery evidence"
+      ],
+      "verificationProcedure": [
+        "Inject crash/timeout at every local/remote boundary",
+        "Verify same operation ID and exact receipt reconciliation",
+        "Verify ANCHOR_PENDING cannot be released by remote abort alone and uncertainty quarantines"
+      ],
+      "localStatus": "BLOCKED; do not implement an aggregate protocol envelope before dependent contracts freeze."
+    },
+    {
+      "id": "anchor-lifecycle-enforcement-across-all-writers",
+      "issues": [
+        43
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "All security-relevant writer owners and WorkflowStore/runtime maintainer",
+      "authority": "Accepted #32 inventory and #42 saga with durable gate enforcement",
+      "decisionRequired": "Route every projected writer through anchor lifecycle and enforce low-level approval/preparation/dispatch rejection for unanchored or quarantined state.",
+      "requiredArtifacts": [
+        "All-writer transition mapping",
+        "Low-level store/dispatch guards",
+        "Direct SQL/alternate API/retry/concurrency bypass tests"
+      ],
+      "evidenceMissing": [
+        "Writer inventory incomplete",
+        "Saga/gate not implemented",
+        "No all-writer enforcement or ANCHORED-only authorization proof"
+      ],
+      "verificationProcedure": [
+        "Enumerate all accepted #32 writers and assert lifecycle entry",
+        "Test approval/preparation/dispatch across every saga state",
+        "Test direct SQL, alternate entrypoints, retries and concurrent writers"
+      ],
+      "localStatus": "BLOCKED; current fail-closed dispatch guard is useful defense-in-depth but does not implement V2 anchor lifecycle."
+    },
+    {
+      "id": "migration-recovery-and-durability-acceptance",
+      "issues": [
+        44
+      ],
+      "issueStatusAtObservation": "OPEN",
+      "assignedOwner": null,
+      "accountableOwnerRole": "DB operations owner, platform reliability owner and release authority",
+      "authority": "Approved #36 migration, #43 enforcement, external identity and authority/measurement operators",
+      "decisionRequired": "Approve canonical DB migration, startup/restore/failover reconciliation, PRAGMA policy and crash/power-loss acceptance under supported filesystem assumptions.",
+      "requiredArtifacts": [
+        "Migration/cutover record",
+        "Read-only legacy trust archive verification",
+        "Crash/power-loss test evidence",
+        "Operator recovery/rollback/escalation runbook"
+      ],
+      "evidenceMissing": [
+        "No trust DB consolidation",
+        "No interrupted migration/rollback or power-loss evidence",
+        "No authoritative head/outstanding-operation reconciliation procedure"
+      ],
+      "verificationProcedure": [
+        "Test disposable migration and repeated recovery",
+        "Inject process kill/power-loss at each durable boundary",
+        "Read back PRAGMAs on actual connections",
+        "Verify restore/clone/fork/promotion identity and authority reconciliation before dispatch"
+      ],
+      "localStatus": "PARTIAL COMPATIBILITY ONLY; RC.23-to-RC.71 WorkflowStore test passes, but it does not close #36/#44 or prove crash/power-loss durability."
+    }
+  ],
+  "evidence": {
+    "sourceInventoryV06": {
+      "path": "docs/agg-external-checkpoint-v2-projection-inventory-20261030-v0.6.md",
+      "sha256": "816464a24ba2c26d51fe275e1a48f7321c16069f6ad1e1083fa1301cb8087386",
+      "classification": "historical predecessor; exact hash reverified"
+    },
+    "sourceInventoryV07": {
+      "path": "docs/agg-external-checkpoint-v2-projection-inventory-20261030-v0.7.md",
+      "sha256": "d79cdfaea67347b0de1d42bde89401b750fc2d1cae14125762f946e71e2d07ad",
+      "classification": "preserved predecessor; not independent review"
+    },
+    "sourceInventoryV08": {
+      "path": "docs/agg-external-checkpoint-v2-projection-inventory-20261030-v0.8.md",
+      "sha256": "dd53bcd5379b7caaea21a90988a2d9425ecbc21f1fc7d93b15b46d905d3f4e77",
+      "classification": "local source-only successor; not AST/call-graph completeness or independent review"
+    },
+    "eventCallerInventory": {
+      "path": "artifacts/adaptive-goal-graph/rc71-record-event-callers-20261030T073526Z.json",
+      "sha256": "ea5b947035c1d57c43046e2365235cff6511dd75d05d942ad16806e217cad462",
+      "classification": "116 callsites; 99 literal; 17 computed/unresolved; source-only"
+    },
+    "directSqlInventory": {
+      "path": "artifacts/adaptive-goal-graph/rc71-direct-sql-mutation-callers-20261030T132800Z-multi-statement-aware-v2.json",
+      "sha256": "45da27f66702536f2ae903813060a56e75eb548e3d48cc482472eefac357b7e1",
+      "classification": "v0.11 multi-statement-aware lexical source discovery; 1460 accepted calls; 1398 literal, 62 computed/unresolved; 242 data-write and 26 schema-write statement candidates; 14 multi-statement aggregates unresolved; 458 transaction-control; 657 reads; 97 referenced objects"
+    },
+    "goalSnapshotArtifact": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-goal-snapshot-api-20261030T100824Z.json",
+      "sha256": "18a2912e4b7a132f54fc668d6541a6fccf790d6bb4874b60b5c882f027d47cc9",
+      "snapshotSha256": "8bacb9b1b6f6fc6c15b8e46544aa0a2494d84a8115563e7b6a880fb93498dd03",
+      "classification": "fresh read-only API response artifact; exact snapshot hash unchanged"
+    },
+    "trustConfigurationObservation": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-trust-observation-derived-20261030T100834Z.json",
+      "sha256": "f238e199ac3bfa37f3fab4ec7c9251d5cac3222799de18927c00474d92186599",
+      "classification": "fresh derived read-only preflight observation: goal_idea_verifier unavailable, external anchor NOT_CONFIGURED, other four domains NOT_OBSERVED; prior five-domain observation retained in source pointer"
+    },
+    "historicalMigrationTest": {
+      "path": "tests/test-agg-rc23-to-rc71-migration.mjs",
+      "sha256": "cf51e5baa6c7fe8b2fd175fdc2b80b723e504d19fe196fe2c1f6895488d1452c",
+      "command": "npm run test:agg-rc23-migration",
+      "exitCode": 0,
+      "classification": "one immutable RC.23-to-RC.71 WorkflowStore compatibility path; not trust-ledger migration"
+    },
+    "localV2Preflight": {
+      "path": "artifacts/adaptive-goal-graph/agg-v2-local-preflight-20261030T101326Z-release-handoff-final.json",
+      "sha256": "41b1207a6b5506bf99581cc6113e622aaf5f20d44024abe553c561242155f368",
+      "result": "PASS_LOCAL_CHECKS_WITH_EXTERNAL_GATES_OPEN",
+      "validatedRegisterSha256": "36642fb54b64fa7a8546fc2f3f95301d264361cbd7d5a48949b43fba0361fc75",
+      "classification": "predecessor preflight before actionable unmatched-SQL locations were added; final preflight revalidates current sources"
+    },
+    "currentSourceAlignment": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-source-alignment-20261030T100834Z.json",
+      "sha256": "5fb54c780129ff36282cc139a45fdd36d1502702826888e31981f261838a3981",
+      "result": "PASS_EXACT_ARCHIVE_ENTRY_BYTES",
+      "releaseEligibility": "BLOCKED_AUTHENTICATED_BUILD_RECEIPT_AND_INDEPENDENT_AUTHORITY_REQUIRED"
+    },
+    "currentRolloutPreflight": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-readonly-preflight-20261030T100834Z.json",
+      "sha256": "45d8515e3bdab0d23c268b6f91369ede40e051767f92b1ebc620babb99ce802c",
+      "result": "BLOCKED",
+      "readOnly": true
+    },
+    "currentGraphReconciliation": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-live-graph-reconciliation-20261030T100834Z.json",
+      "sha256": "1942a817bad49aa553bd64f79d2b4fca9ecc9d69212f83dd3fe58a2b7c3d8227",
+      "result": "PASS",
+      "readOnly": true
+    },
+    "currentLifecycleReconciliation": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-live-lifecycle-reconciliation-20261030T100834Z.json",
+      "sha256": "e48af9b91f6b23b73102923c16e8b6a26cd69c34f9369da253ebfcaecb8b32d5",
+      "result": "PASS",
+      "readOnly": true
+    },
+    "currentReadinessDossier": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-readiness-dossier-20261030T100834Z.json",
+      "sha256": "cfa2e4aed674934ff805cc4caaa437e51c3af8b4e2a6acefe252f9825f608de5",
+      "result": "BLOCKED",
+      "findings": 9
+    },
+    "currentRemediationPlan": {
+      "path": "artifacts/adaptive-goal-graph/rc71-current-live-remediation-plan-20261030T100834Z.json",
+      "sha256": "c5c55a018332c4be2568480b0b3d29ecb0b7662f03dc90a724a4c0cfa311fb7a",
+      "result": "BLOCKED_NEEDS_OWNER_AUTHORITY_RECONCILIATION"
+    },
+    "sourceInventoryV09": {
+      "path": "docs/agg-external-checkpoint-v2-projection-inventory-20261030-v0.9.md",
+      "sha256": "035b4acb07f88dcde5eb2ed5e711c26596f89d15c83b898467a945dd77765b10",
+      "classification": "local source-only successor; regex-literal-aware lexical scan; reveals executable calls hidden by v0.8; not AST/call-graph completeness or independent review"
+    },
+    "sourceInventoryV010": {
+      "path": "docs/agg-external-checkpoint-v2-projection-inventory-20261030-v0.10.md",
+      "sha256": "47e961707be1322eb0b6b3c0acda71fe83f7b23da12a9788c60e7ca9ce250bc5",
+      "classification": "local source-only successor to v0.9; lexical scanner includes optional chaining/comment trivia, regex-after-block handling and per-statement multi-SQL classification; not AST/call-graph completeness or independent review"
+    },
+    "sourceInventoryV011": {
+      "path": "docs/agg-external-checkpoint-v2-projection-inventory-20261030-v0.11.md",
+      "sha256": "85c5828ce07cac99e024ca958cf130d83477b385d06682bc9103d28b0ce5c2c7",
+      "classification": "local source-only successor to v0.10; lexical scanner fixes expression/block regex-divison boundaries; not AST/call-graph completeness or independent review"
+    },
+    "sourceAlignmentRuntimeCoverageV127": {
+      "verifier": "scripts/verify-mcpb-source-alignment.mjs",
+      "verifierSha256": "d2732b6f67d786e6dde3665d01377dbbb19555ac362f9e10337237b9ad8f2d8b",
+      "test": "tests/test-mcpb-source-alignment.mjs",
+      "testSha256": "9756babd0296f8979e2668446326c7a1bb2719e2ac3b2b8ffa282380122482bb",
+      "frozenBuildInputCount": 287,
+      "srcRuntimeJavaScriptModuleCount": 87,
+      "missingRuntimeModules": 0,
+      "duplicatePaths": 0,
+      "scope": "local source-snapshot completeness; no independent builder provenance or candidate approval"
+    },
+    "providerPreSendRaceV127": {
+      "provider": "src/runtime/github-actions-provider.js",
+      "providerSha256": "f12c0ad99b1e4d35f0a45a00c7d371fdd21ff54f19bc9b2257cbef2f48050e31",
+      "scheduler": "src/runtime/distributed-scheduler.js",
+      "schedulerSha256": "5d51ebae4b430873a6f9db77af0f0d0abfa051eb211df005aac34aa26108e3df",
+      "test": "tests/test-provider-pre-send-recovery.js",
+      "testSha256": "48c036f965a81593eb459dbf259c3feccf7a1f63ecd5f0fa7f4dd3b3a9ecc1c9",
+      "scope": "disposable SQLite race regression; per-invocation not_sent and lease-wide sibling-claim quarantine; not production workflow evidence"
+    },
+    "hostExecutableIdentityLimitation": {
+      "validator": "scripts/validate-agg-trust-config.mjs",
+      "validatorSha256": "8708d6fd0e1692ec5d1094dab0d2d7002da53868a7c1a5309efec98a3b17e12d",
+      "test": "tests/test-adaptive-goal-trust-configuration.mjs",
+      "testSha256": "eef32d8e2d9e1a55e859cfe17afd8bd96d1d6976e58401e959a9bb488344feb8",
+      "result": "BLOCKED_REQUIRES_EXTERNAL_HOST_IDENTITY_AUTHORITY",
+      "limitation": "basename/cmdline and /proc consistency are not authenticated executable provenance; requires host-admin signed executable identity manifest or signed launcher attestation binding PID/start time/executable digest/active entrypoint"
+    },
+    "reconciliationPartialAttribution": {
+      "script": "scripts/reconcile-active-workflows-v2.mjs",
+      "scriptSha256": "489d642edb3c61aec80b3ff6b7755a1ab8c821c440e375f74069fa6e11771549",
+      "test": "tests/test-reconcile-active-workflows-v2.mjs",
+      "testSha256": "26219d7f13e8e9f2d2971f292308eda3018f5461f2d4094f5089939727e216ea",
+      "result": "LOCAL_REGRESSION_PASS",
+      "scope": "job-level warning preserved for any truncated task-correlation event; partial task attribution remains task-scoped and unknown/unseen IDs are not assigned to unrelated tasks"
+    },
+    "sourceAlignmentRuntimeCoverageV131": {
+      "verifier": "scripts/verify-mcpb-source-alignment.mjs",
+      "verifierSha256": "c7b9728e7161294cad84ad09d61f693b088055add207413069d7570f2e013928",
+      "test": "tests/test-mcpb-source-alignment.mjs",
+      "testSha256": "9756babd0296f8979e2668446326c7a1bb2719e2ac3b2b8ffa282380122482bb",
+      "frozenBuildInputCount": 289,
+      "srcRuntimeJavaScriptModuleCount": 87,
+      "missingRuntimeModules": 0,
+      "duplicatePaths": 0,
+      "scope": "local source-snapshot completeness; includes current V2 preflight runner/tooling guide; no independent builder provenance or candidate approval"
+    },
+    "localPreflightRunnerV131": {
+      "path": "scripts/run-agg-v2-local-preflight.mjs",
+      "sha256": "d10079fbff235bf5776442e8bdf61cb503bb19ec9dde637374c614e83ed7c332",
+      "scope": "local-only source checks; latest inventory v0.11; external gates remain open"
+    }
+  },
+  "issueStatusObservation": {
+    "observedAt": "2026-10-30T13:19:15.426Z",
+    "openAndUnassignedIssues": [
+      3,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44
+    ],
+    "source": "Read-only GitHub issue views for #3, #24–#29 and #32–#44; all observed OPEN and unassigned; no issue/comment/project mutation performed",
+    "nativeDependencyEdges": "No blockedBy or blocking edges on GitHub issues #32–#44"
+  },
+  "decision": "BLOCKED",
+  "productionAuthorityGranted": false,
+  "productionMutationPerformed": false,
+  "externalCheckpointAdvanceAttempted": false,
+  "packageInstalledOrActivated": false,
+  "workflowOrTaskMutationPerformed": false,
+  "gitHistoryMutationPerformed": false,
+  "warning": "This register assigns accountable roles, not named owners. Every issue listed was OPEN and unassigned at observation. No missing authority, signature, identity, custody, approval or terminal disposition is inferred. Re-query before operational use."
+}

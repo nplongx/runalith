@@ -6,9 +6,9 @@ import { standardEngineeringTaskSpec, standardEngineeringTaskSpecs } from './cat
 import { hybridEngineeringTaskSpecs } from './catalog/hybrid-engineering.js';
 import { validateWorkflowDefinition } from './schema.js';
 import { canonicalJson, validateExecutionPlan } from './plan.js';
-import { artifactSchemaForType } from './artifacts.js';
+import { artifactSchemaForType } from '../workflow-contracts-public-api.js';
 import { getAgentArtifactType, getAgentContract, validateCompiledActionIntent } from './agent-contracts.js';
-import { normalizeSuccessContract } from './success-contract.js';
+import { normalizeSuccessContract } from '../workflow-contracts-public-api.js';
 import { composePolicySuccessContract, resolveValidationProfileSnapshot, materializeValidationProfileTasks } from './policy-contract.js';
 import { BUILTIN_ROLE_PROFILE_OVERLAY_ROLES, createRoleProfileOverlay } from './role-profiles.js';
 import { normalizeWorkspaceWriteContract, workspaceWriteScopeForRole } from './workspace-write-contract.js';

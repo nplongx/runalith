@@ -1,22 +1,23 @@
 import crypto from 'node:crypto';
 import { evaluateLangGraph, LangGraphActions } from './langgraph-orchestrator.js';
 import { WorkflowPhase } from './workflow/phases.js';
+import { createWorkflowStatePort } from './workflow-state-port.js';
+import { createWorkflowControlPort } from './workflow-control-port.js';
 
 export class LangGraphControlLoop {
-  constructor({ store, scheduler, provider, graph = evaluateLangGraph } = {}) {
-    if (!store || !scheduler || !provider) throw new Error('LangGraphControlLoop requires store, scheduler and provider');
-    this.store = store;
+  constructor({ store = null, statePort = null, workflowControlPort = null, scheduler, provider, graph = evaluateLangGraph } = {}) {
+    if (!(store || (statePort && workflowControlPort)) || !scheduler || !provider) {
+      throw new Error('LangGraphControlLoop requires WorkflowStatePort, WorkflowControlPort, scheduler and provider');
+    }
+    this.state = createWorkflowStatePort(statePort || store);
+    this.workflow = workflowControlPort || createWorkflowControlPort(store);
     this.scheduler = scheduler;
     this.provider = provider;
     this.graph = graph;
   }
 
   _activeProviderRuns(jobId) {
-    return this.store.db.prepare(`SELECT pr.*, l.lease_id, l.attempt AS lease_attempt
-        ,l.worker_id,l.state AS lease_state,l.last_error AS lease_last_error
-      FROM provider_runs pr JOIN task_leases l ON l.lease_id=pr.lease_id
-      WHERE pr.job_id=? AND (l.state='ACTIVE' OR
-        (l.state='FAILED' AND l.last_error LIKE 'REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION:%'))`).all(jobId);
+    return this.state.listActiveProviderRunsForJob(jobId);
   }
 
   _recordQuarantinedObservation(run, result) {
@@ -31,8 +32,8 @@ export class LangGraphControlLoop {
       applied: false, reconciliationRequired: true
     };
     const dedupeKey = `${run.lease_id}|${run.provider_run_id}|${resultSha256}`;
-    const eventId = this.store.recordEvent(run.job_id, 'task.execution.quarantine_observed', payload, dedupeKey);
-    const row = this.store.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+    const eventId = this.state.recordEvent(run.job_id, 'task.execution.quarantine_observed', payload, dedupeKey);
+    const row = this.state.getEvent(eventId);
     if (!row || row.job_id !== run.job_id || row.type !== 'task.execution.quarantine_observed' ||
         row.payload_json !== JSON.stringify(payload)) {
       throw new Error('quarantined provider result observation failed exact durable event readback');
@@ -50,8 +51,8 @@ export class LangGraphControlLoop {
       applied: false, reconciliationRequired: true
     };
     const dedupeKey = `${run.lease_id}|${run.provider_run_id}|collection-error|${errorSha256}`;
-    const eventId = this.store.recordEvent(run.job_id, 'task.execution.quarantine_collection_failed', payload, dedupeKey);
-    const row = this.store.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+    const eventId = this.state.recordEvent(run.job_id, 'task.execution.quarantine_collection_failed', payload, dedupeKey);
+    const row = this.state.getEvent(eventId);
     if (!row || row.job_id !== run.job_id || row.type !== 'task.execution.quarantine_collection_failed' ||
         row.payload_json !== JSON.stringify(payload)) {
       throw new Error('quarantined provider collection failure failed exact durable event readback');
@@ -69,8 +70,8 @@ export class LangGraphControlLoop {
       applied: false, reconciliationRequired: true
     };
     const dedupeKey = `${run.lease_id}|${run.provider_run_id}|status-error|${statusErrorSha256}`;
-    const eventId = this.store.recordEvent(run.job_id, 'task.execution.quarantine_status_failed', payload, dedupeKey);
-    const row = this.store.db.prepare('SELECT event_id,job_id,type,payload_json FROM events WHERE event_id=?').get(eventId);
+    const eventId = this.state.recordEvent(run.job_id, 'task.execution.quarantine_status_failed', payload, dedupeKey);
+    const row = this.state.getEvent(eventId);
     if (!row || row.job_id !== run.job_id || row.type !== 'task.execution.quarantine_status_failed' ||
         row.payload_json !== JSON.stringify(payload)) {
       throw new Error('quarantined provider status failure failed exact durable event readback');
@@ -84,7 +85,7 @@ export class LangGraphControlLoop {
     for (const run of active) {
       const quarantined = run.lease_state !== 'ACTIVE';
       if (!quarantined) {
-        const heartbeat = this.store.heartbeatTaskLease(run.lease_id, {
+        const heartbeat = this.state.heartbeatTaskLease(run.lease_id, {
           workerId: run.worker_id, ttlMs: this.scheduler.leaseTtlMs || 60_000
         });
         if (!heartbeat.ok) {
@@ -97,8 +98,8 @@ export class LangGraphControlLoop {
       try {
         status = await this.provider.getStatus(run.provider_run_id);
       } catch (error) {
-        if (!quarantined) this.store.expireTaskLease(run.lease_id, { reason: `provider_status_uncertain: ${error.message}` });
-        const latestLease = this.store.getTaskLease(run.lease_id);
+        if (!quarantined) this.state.expireTaskLease(run.lease_id, { reason: `provider_status_uncertain: ${error.message}` });
+        const latestLease = this.state.getTaskLease(run.lease_id);
         if (quarantined || latestLease?.state === 'FAILED') {
           const statusErrorSha256 = this._recordQuarantinedStatusFailure(run, error);
           reconciled.push({ taskId: run.task_id, leaseId: run.lease_id,
@@ -118,8 +119,8 @@ export class LangGraphControlLoop {
       try {
         result = await this.provider.collectResult(run.provider_run_id);
       } catch (error) {
-        if (!quarantined) this.store.expireTaskLease(run.lease_id, { reason: `provider_result_collection_uncertain: ${error.message}` });
-        if (quarantined || this.store.getTaskLease(run.lease_id)?.state === 'FAILED') {
+        if (!quarantined) this.state.expireTaskLease(run.lease_id, { reason: `provider_result_collection_uncertain: ${error.message}` });
+        if (quarantined || this.state.getTaskLease(run.lease_id)?.state === 'FAILED') {
           const errorSha256 = this._recordQuarantinedCollectionFailure(run, error);
           reconciled.push({ taskId: run.task_id, leaseId: run.lease_id,
             status: 'QUARANTINED_COLLECTION_REQUIRES_RECONCILIATION', errorSha256 });
@@ -129,19 +130,19 @@ export class LangGraphControlLoop {
         }
         continue;
       }
-      if (quarantined || this.store.getTaskLease(run.lease_id)?.state === 'FAILED') {
+      if (quarantined || this.state.getTaskLease(run.lease_id)?.state === 'FAILED') {
         const observation = this._recordQuarantinedObservation(run, result);
         reconciled.push({ taskId: run.task_id, leaseId: run.lease_id,
           status: 'QUARANTINED_RESULT_OBSERVED_NOT_APPLIED', ...observation });
         continue;
       }
-      const applied = this.store.applyVerifiedExecutionResult(result);
+      const applied = this.state.applyVerifiedExecutionResult(result);
       if (applied.status === 'REJECTED' && applied.reason === 'output_commit_attestation_required') {
         // The remote run is complete, but its output revision is still only a
         // worker claim. Stop renewing the lease and quarantine the observation;
         // leaving it ACTIVE would repeatedly collect the same result forever.
-        this.store.expireTaskLease(run.lease_id, { reason: 'output_commit_attestation_required' });
-        const latestLease = this.store.getTaskLease(run.lease_id);
+        this.state.expireTaskLease(run.lease_id, { reason: 'output_commit_attestation_required' });
+        const latestLease = this.state.getTaskLease(run.lease_id);
         if (latestLease?.state === 'FAILED' &&
             String(latestLease.last_error || '').startsWith('REMOTE_EFFECT_UNCERTAIN_REQUIRES_RECONCILIATION:')) {
           const observation = this._recordQuarantinedObservation(run, result);
@@ -159,29 +160,29 @@ export class LangGraphControlLoop {
   }
 
   async tick({ jobId, inputCommit, event = 'control.tick', hooks = {} } = {}) {
-    const job = this.store.getJob(jobId);
+    const job = this.workflow.getJob(jobId);
     if (!job) throw new Error(`job not found: ${jobId}`);
-    this.store.reapExpiredTaskLeases({ jobId });
+    this.state.reapExpiredTaskLeases({ jobId });
     const dispatchReconciliation = typeof this.scheduler.reconcileProviderDispatches === 'function'
       ? await this.scheduler.reconcileProviderDispatches()
       : [];
     const reconciled = await this.reconcile(jobId);
-    const refreshedJob = this.store.getJob(jobId);
-    const tasks = this.store.db.prepare('SELECT * FROM tasks WHERE job_id=? ORDER BY created_at ASC').all(jobId);
-    const results = this.store.db.prepare(`SELECT r.* FROM results r JOIN tasks t ON t.task_id=r.task_id WHERE t.job_id=? ORDER BY r.created_at DESC`).all(jobId);
-    const plan = this.store.getExecutionPlan(jobId);
+    const refreshedJob = this.workflow.getJob(jobId);
+    const tasks = this.state.listTasksForJob(jobId);
+    const results = this.state.listResultsForJob(jobId);
+    const plan = this.workflow.getExecutionPlan(jobId);
     const decision = await this.graph({
       job: refreshedJob, tasks, results, plan,
-      runtime: this.store.getWorkflowRuntimeState(jobId),
-      event, persist: true, store: this.store,
+      runtime: this.workflow.getWorkflowRuntimeState(jobId),
+      event, persist: true, workflowControlPort: this.workflow,
       executeTask: async task => this.scheduler.dispatchTask(task, { inputCommit }),
       ...hooks
     });
     if (decision.action === LangGraphActions.RUN_CHILDREN) {
       const dispatched = await this.scheduler.dispatchPending({ inputCommit });
-      return { job: this.store.getJob(jobId), decision, reconciled, dispatched, dispatchReconciliation };
+      return { job: this.workflow.getJob(jobId), decision, reconciled, dispatched, dispatchReconciliation };
     }
-    return { job: this.store.getJob(jobId), decision, reconciled, dispatched: [], dispatchReconciliation };
+    return { job: this.workflow.getJob(jobId), decision, reconciled, dispatched: [], dispatchReconciliation };
   }
 }
 

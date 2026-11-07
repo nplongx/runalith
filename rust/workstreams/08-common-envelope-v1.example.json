@@ -1,0 +1,29 @@
+{
+  "schema_version": {"major": 1, "minor": 0},
+  "message_kind": "command",
+  "message_type": "example.contract_review.request",
+  "message_id": "msg_example_01",
+  "producer_id": "example-gateway-client",
+  "created_at": "2026-11-03T03:00:00Z",
+  "correlation_id": "trace_example_01",
+  "effect_class": "mutating",
+  "idempotency_key": "idem_example_01",
+  "subject": {
+    "kind": "task",
+    "id": "task_example",
+    "bindings": {
+      "workflow_id": "workflow_example",
+      "attempt": 1,
+      "owner_epoch": 1
+    }
+  },
+  "payload_digest": {
+    "algorithm": "sha-256",
+    "canonicalization": "example-json-utf8-minified-v1",
+    "value": "9f412bb5d5ced553d187e23390fc21da9131832d60d16245cba0bb5214e79c9d"
+  },
+  "payload": {
+    "task_id": "task_example",
+    "attempt": 1
+  }
+}

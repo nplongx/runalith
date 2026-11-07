@@ -7,7 +7,7 @@ const dataDir = tempDir('openclaw-runtime-attach-atomicity-');
 process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_DB = path.join(dataDir, 'workflow.db');
 process.env.NODE_ENV = 'test';
-const modulePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/runtime/job-store.js');
+const modulePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../job-store.js');
 const { WorkflowStore } = await import(pathToFileURL(modulePath));
 const store = new WorkflowStore();
 
