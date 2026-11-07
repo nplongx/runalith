@@ -105,3 +105,6 @@ benchmarks/plugin-workflow-benchmark/phase2-strict-readiness-trace-lineage-20261
 # Python bytecode / generated interpreter caches
 __pycache__/
 *.py[cod]
+
+# Rust workspace build products (Cargo target contains compiler output only).
+/rust/target/

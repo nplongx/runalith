@@ -1,0 +1,60 @@
+name: COS-AP package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'protocol/cos-ap-v1/**'
+      - 'src/runtime/execution-contract.js'
+      - 'src/runtime/execution-manager.js'
+      - 'src/runtime/job-store.js'
+      - 'src/runtime/session-transport.js'
+      - 'server/index-*.js'
+      - 'server.js'
+      - '.github/workflows/cos-ap-package.yml'
+  pull_request:
+    paths:
+      - 'protocol/cos-ap-v1/**'
+      - 'src/runtime/execution-contract.js'
+      - 'src/runtime/execution-manager.js'
+      - 'src/runtime/job-store.js'
+      - 'src/runtime/session-transport.js'
+      - 'server/index-*.js'
+      - 'server.js'
+      - '.github/workflows/cos-ap-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cos-ap-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-contract:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Standalone package tests
+        working-directory: protocol/cos-ap-v1
+        run: npm test
+
+      - name: Packed artifact installed-consumer contract
+        run: node scripts/test-cos-ap-packed-consumer.mjs
+
+      - name: Host integration contract
+        run: npm run test:protocol

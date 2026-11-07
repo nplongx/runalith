@@ -1,0 +1,102 @@
+{
+  "artifact": "WS6-Trust-Source-Snapshot-v2.3.4",
+  "status": "DRAFT_NOT_RATIFIED",
+  "owner": "WS6",
+  "created_on": "2026-11-04",
+  "purpose": "Publish an exact, read-only successor source pin set for WS2 V2.3.4 consumption. This snapshot is not a trust-policy or authority ratification.",
+  "predecessor": {
+    "version": "WS2-V2.3.3",
+    "status": "DRAFT_NOT_RATIFIED",
+    "fixture_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.3-live-source.fixtures.json",
+    "fixture_sha256": "ee6e40c56bb0785d08c375bd3c6cae1dcbbd53499094845bf692960bc542f66b",
+    "validator_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.3-live-source-test.py",
+    "validator_sha256": "ff4d7aa07659f570a44d6c4d49e74edb496339b8da5bb7fc398bea7aa9f25267",
+    "note_path": "rust/workstreams/02-control-domain-error-diagnostics-v2.3.3-live-source-note.md",
+    "note_sha256": "9bfa4cc1175c7acf25d315315e82ffe895d8d9fd494a4d8f4ebcae1e1ee06668",
+    "rule": "V2.3.3 fixture, validator and note remain immutable. V2.3.4 consumes the exact predecessor hashes and does not repin or revise predecessor content."
+  },
+  "current_source_snapshot": [
+    {
+      "path": "rust/crates/runalith-trust/src/governance_receipt.rs",
+      "sha256": "7c51f6bde7e376206abd51113c65e6c72525043b18e288dae87069a792af0096",
+      "changed_since_v2_3_3": false
+    },
+    {
+      "path": "rust/crates/runalith-trust/src/signed_envelope.rs",
+      "sha256": "aa836df246e27809e806e600fbb5dfd8fd0d8ba3728e605ba4d56ea5e38cc1f1",
+      "changed_since_v2_3_3": false
+    },
+    {
+      "path": "rust/crates/runalith-trust/src/approval_decision.rs",
+      "sha256": "d6027c74b123680472f472dadad2d852c0a987da8504ef11286af324e14caac7",
+      "changed_since_v2_3_3": true
+    },
+    {
+      "path": "rust/crates/runalith-trust/src/approval_policy.rs",
+      "sha256": "13235b7af591435904c5f2ea7c981932fc90e87c585a4023e0ee23b14a839775",
+      "changed_since_v2_3_3": false
+    },
+    {
+      "path": "rust/crates/runalith-trust/src/trust_ledger.rs",
+      "sha256": "ffc6847c31c91cdfd65b5a8763762f6215a29f814cea05cefd572bfd9e008418",
+      "changed_since_v2_3_3": false
+    },
+    {
+      "path": "rust/crates/runalith-trust/src/trust_config.rs",
+      "sha256": "a86b6d1b82882522149188a87373c25e5e36f81b704faea8f1057f761b367d02",
+      "changed_since_v2_3_3": false
+    },
+    {
+      "path": "rust/crates/runalith-trust/src/lib.rs",
+      "sha256": "731b8ad9be33ec57ede34043849118f1ca68bbaeb4b38c6630ff19600aa31568",
+      "changed_since_v2_3_3": true
+    }
+  ],
+  "change_attribution": {
+    "rust/crates/runalith-trust/src/lib.rs": {
+      "classification": "SOURCE_CHANGED_AND_CURRENTLY_PINNED",
+      "current_anchors": [
+        "TrustError::code 94-108",
+        "map_public_key_parse_failure 227-243",
+        "classify_signature_verification_output 245-261",
+        "openssl_key_parse_and_signature_exit_codes_fail_closed_when_operationally_ambiguous test 428-466"
+      ],
+      "bounded_semantics": "Malformed PEM is InvalidPublicKey only for the observed OpenSSL malformed-key marker; other parser failures are OpenSslOperation. A false signature requires the exact exit-1 Signature Verification Failure output; ambiguous exit/status/stdout is OpenSslOperation. The prior intermediate 7dff... hash is superseded by the final package-formatted 731b... hash.",
+      "new_public_cause_code": false
+    },
+    "rust/crates/runalith-trust/src/approval_decision.rs": {
+      "classification": "WHOLE_FILE_HASH_DRIFT_SEMANTIC_DIFF_NOT_PROVEN",
+      "current_anchors": [
+        "verify_approval_evidence 151-166",
+        "verify_approval_evidence_envelope 173-227",
+        "verify_approval_evidence_with_mode 229-250",
+        "canonical 1059-1065"
+      ],
+      "limitation": "V2.3.3 pinned only the prior whole-file hash and did not preserve predecessor source bytes. This successor does not attribute the exact changed hunk or claim that the whole-file drift is semantic rather than formatting."
+    }
+  },
+  "contract_and_authority_boundaries": {
+    "public_error_vocabulary_changed": false,
+    "dto_or_wire_schema_changed": false,
+    "trust_domains_or_issuer_audience_changed": false,
+    "v2_01_subject_changed_or_mapped": false,
+    "nonce_or_database_semantics_changed": false,
+    "production_signer_verifier_trust_root_or_nonce_authority_created": false,
+    "ratification": "NOT REQUESTED FROM WS2; Project Owner/Host Security authority remains unassigned"
+  },
+  "verification_evidence": {
+    "trust_package_test_command": "CARGO_TARGET_DIR=/dev/shm/ws6-error-taxonomy-target-20261104 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test --manifest-path rust/Cargo.toml -p runalith-trust --locked --offline --jobs 1 -- --test-threads=1",
+    "trust_package_result": "91 passed, 0 failed, 0 ignored; doc-tests 0/0; exit 0 (executed on the exact 14-module snapshot whose current seven-file pins are listed above)",
+    "clippy_command": "CARGO_TARGET_DIR=/dev/shm/ws6-error-taxonomy-target-20261104 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo clippy --manifest-path rust/Cargo.toml -p runalith-trust --all-targets --locked --offline --jobs 1 -- -D warnings",
+    "clippy_result": "PASS; exit 0 on the same final formatted source snapshot",
+    "format_command": "cargo fmt --manifest-path rust/Cargo.toml -p runalith-trust -- --check",
+    "format_result": "PASS; exit 0 on the same final formatted source snapshot",
+    "independent_recheck_this_successor": "Seven current source pins and three predecessor artifact pins were recomputed/read during successor construction. No Cargo rerun was launched because other workstreams had active Cargo jobs on separate targets."
+  },
+  "limits": [
+    "Seven whole-file source pins are a bounded Trust source map, not a complete crate/workspace inventory.",
+    "The V2.3.3-to-V2.3.4 approval_decision.rs semantic diff is not proven without preserved predecessor bytes.",
+    "Local Trust tests do not establish production signer custody, reviewer identity, provider proof authority, cross-process production nonce authority, remote service boundaries, D-01 resolution or deployment.",
+    "This artifact is DRAFT_NOT_RATIFIED and only supplies immutable source identity evidence to the WS2 consumer."
+  ]
+}

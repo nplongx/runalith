@@ -2,14 +2,18 @@
 
 This index is the starting point for users, operators, and contributors. Visit the [Runalith project website](https://nplongx.github.io/runalith/) for an overview, then use the guides below for implementation details. Pages are grouped by the question they answer rather than by the order in which the implementation was built.
 
+## Current repository status
+
+- [Repository and integration status — 2026-11-07](STATUS_2026-11-07.md) — current working-tree identity, fresh Node/Rust/docs validation, release posture, cross-workstream ownership boundaries, and publication gates. This is the current cross-cutting status page; dated acceptance packets remain historical snapshots.
+
 ## Getting started
 
 - [Quickstart](quickstart.md) — build or connect the local MCP runtime and understand the first workflow steps.
-- [Production-readiness loop instructions](runalith-production-readiness-loop-instructions.md) — reusable, version-agnostic iteration prompt that discovers the current candidate/evidence on every run and preserves production safety boundaries.
+- [Runalith V2 issue-resolution loop](runalith-production-readiness-loop-instructions.md) — concise #32–#44 dependency-first workflow, evidence gates and production safety boundaries.
 - [Root README](../README.md) — project purpose, capabilities, security boundaries, commands, and navigation.
-- [Testing pre-release notes for 1.0.9-rc.11](release-notes-1.0.9-rc.11.md) — published package identity, validation scope, production blockers and the no-install boundary for the current candidate.
-- [RC.11 Goal/Idea → Plan → Execution Graph acceptance (2026-10-26)](goal-plan-execution-acceptance-rc11-20261026.md) — exact tag/source/package identity, release-time verification, current host observations and authority-owned blockers.
-- [RC.11 workflow recovery guidance](goal-plan-execution-recovery-guidance-rc11-followup.md) — read-only reconciliation procedure and safe owner/provider recovery boundary.
+- [Testing pre-release notes for 1.0.9-rc.11](release-notes-1.0.9-rc.11.md) — published RC.11 package identity, validation scope, production blockers and its no-install boundary; historical candidate-specific evidence, not the version or validation state of the current checkout.
+- [RC.11 Goal/Idea → Plan → Execution Graph acceptance (2026-10-26)](goal-plan-execution-acceptance-rc11-20261026.md) — exact RC.11 tag/source/package identity and the host observations recorded for that candidate; do not treat those dated observations as current host state.
+- [RC.11 workflow recovery guidance](goal-plan-execution-recovery-guidance-rc11-followup.md) — historical candidate-specific read-only reconciliation procedure and safe owner/provider recovery boundary.
 - [Historical RC.5 testing pre-release notes](release-notes-1.0.9-rc.5.md) — older package identity and testing boundaries; not the current release.
 - [Local RC.5 installation verification (2026-10-20)](installation-verification-1.0.9-rc.5-20261020.md) — evidence for a separate workspace-built candidate and installed file-content comparison; not the published release asset or release approval.
 - [RC.7 rollout readiness and rollback runbook](runalith-rollout-rc7.md) — versioned runtime identity, non-mutating preflight, installed-generation rollback snapshots, simulated switch/recovery, and explicit host-managed activation gates.
@@ -31,6 +35,7 @@ This index is the starting point for users, operators, and contributors. Visit t
 ## Understanding the implementation
 
 - [Architecture](architecture.md) — runtime components, durable state, execution, and recovery boundaries.
+- [Subsystem decomposition and HTTP/MCP composition boundary](subsystems/README.md) — public subsystem APIs, ownership, extraction gates and remaining composition-layer domain stores.
 - [Adaptive Goal Graph system guide](adaptive-goal-graph.md) — current AGG architecture end-to-end: bounded graph search, persistent Goal/Idea knowledge, evidence lineage, independent verifier/reviewer trust, Plan/Execution Graph integration, telemetry, experiments and hard execution boundaries.
 - [Runalith production readiness and workflow engineering decision record (2026-10-28)](runalith-production-readiness-workflow-engineering-20261028.md) — candidate-specific blocker evidence contracts, trust/approval architecture, read-only workflow reconciliation metrics, durability patterns, workflow-engine trade-offs, negative tests and phased go/no-go criteria. This record does not authorize release or close a production gate.
 - [RC.32 rollout dossier (2026-10-28)](runalith-rollout-rc32-20261028.md) and [Goal/Idea → Plan → Execution acceptance (RC.32)](goal-plan-execution-acceptance-rc32-20261028.md) — integrated cancellation hardening, versioned trust-preflight diagnostics, current read-only lifecycle findings and the remaining authority-owned release gates.
@@ -40,7 +45,11 @@ This index is the starting point for users, operators, and contributors. Visit t
 - [RC.40 rollout dossier (2026-10-28)](runalith-rollout-rc40-20261028.md) — adds a package contract for exact manifest MCP launch arguments and aligns `mcp_config.args`, `main`, `npm start` and the versioned runtime entry point.
 - [RC.41 rollout dossier (2026-10-29)](runalith-rollout-rc41-20261029.md) — lifecycle send-claim/reaper race fixes and packaged provider-pre-send regression coverage. Local candidate only; rollout remains blocked pending independent authority evidence and workflow drain.
 - [AGG production trust provisioning runbook](agg-production-trust-provisioning-runbook.md) — administrator-owned public roots, JSON configuration, independent providers, rotation/revocation and the missing external monotonic checkpoint gate.
-- [RC.11 Goal/Idea → Plan → Execution acceptance](goal-plan-execution-acceptance-rc11-20261026.md) — published candidate identity and current read-only host blockers; does not authorize installation/activation.
+- [Scripts inventory and classification](scripts-inventory-and-classification-20261030.md) — complete inventory of `scripts/` with purpose, input/output and operational-risk classification, including legacy and host-mutating helpers.
+- [AGG external checkpoint v2 projection inventory v0.12](agg-external-checkpoint-v2-projection-inventory-20261030-v0.12.md), [current RecordEvent caller register v0.5.10](agg-external-checkpoint-v2-record-event-caller-register-20261101-v0.5.10.json), [current event-query register v0.5.9](agg-external-checkpoint-v2-event-query-register-20261101-v0.5.9.json), [event query classification v0.3](agg-external-checkpoint-v2-event-query-classification-20261031-v0.3.md), and [local implementation tooling](agg-external-checkpoint-v2-implementation-tooling-20261030.md) — source-only reader/writer discovery, computed event producer notes, query/caller/transaction-shape classification and explicitly open projection/deployment gates; not a production manifest or release authority.
+- [AGG V2 source inventory successors 2026-11-01](agg-external-checkpoint-v2-record-event-callers-successor-20261101.md) — current RecordEvent caller register v0.5.14 and event-query register v0.5.12, with immutable predecessor hashes and source-drift review.
+- [RC.72 v10 source-inventory and MCPB alignment successor](goal-plan-execution-acceptance-rc72-v10-addendum-20261031.md) — local source/package-alignment evidence for the RC.72 worktree; not independent build, release approval, production authorization, or activation evidence.
+- [RC.11 Goal/Idea → Plan → Execution acceptance](goal-plan-execution-acceptance-rc11-20261026.md) — published RC.11 candidate identity and dated host observations; does not describe the current worktree or authorize installation/activation.
 - [RC.11 workflow recovery guidance](goal-plan-execution-recovery-guidance-rc11-followup.md) — per-job/task read-only reconciliation and owner/provider-authorized recovery procedure.
 - [AGG Phase 1 benchmark methodology](agg-phase1-benchmark-methodology.md) and [owner next steps (Vietnamese)](agg-phase1-owner-next-steps-vi.md) — benchmark evidence protocol, unclosed acceptance requirements and operator handoff.
 - [AGG empirical evaluation](research/agg-empirical-evaluation/README.md) — reproducible research artifacts, measured results, sample/corpus limits and claims not supported by current data.
@@ -51,6 +60,7 @@ This index is the starting point for users, operators, and contributors. Visit t
 ## Contributing and maintaining documentation
 
 - [Contributing guide](../CONTRIBUTING.md) — development environment, tests, safety, and pull request expectations.
+- [Agent instruction preflight](agents/agent-instructions-preflight.md) — instruction bootstrap and mandatory CodeGraph sync-before-source-query procedure.
 - [Documentation rewrite workflow](DOCUMENTATION_WORKFLOW.md) — how to inventory, classify, write, verify, review, and maintain docs.
 - [Security policy](../SECURITY.md) — reporting process and security boundaries.
 - [Changelog](../CHANGELOG.md) — user-visible changes by release/candidate.
@@ -63,6 +73,7 @@ The remaining milestone (`m*`), phase (`p*`), proposal, implementation-plan, ben
 
 | Record | Intended use | Reading caution |
 |---|---|---|
+| [Rust eight-workstream parallel plan](../rust/EIGHT_PART_PARALLEL_PLAN.md) and [individual workstream briefs](../rust/workstreams/README.md) | Current proposed ownership split for parallel implementation inside the three deployables accepted by ADR 0003 | Planning decomposition only. It does not create eight services, approve a database split, assign owners or authorize production work. |
 | [Agent architecture proposal](agent-architecture-proposal.md) | Historical design rationale and role/orchestration proposal | A proposal is not a contract for every current runtime path. |
 | [M0 architecture freeze](m0-architecture-freeze.md) | Baseline architecture and compatibility decisions | Freeze/milestone language describes its original scope; verify current invariants in code. |
 | [M1 agent contract layer](m1-agent-contract-layer.md) | Earlier agent contract design | Later milestones may change enforcement; inspect the current contract modules and tests. |
@@ -80,7 +91,7 @@ The remaining milestone (`m*`), phase (`p*`), proposal, implementation-plan, ben
 | Distributed provider integration | [GitHub Actions distributed-worker plan](github-actions-distributed-worker-implementation-plan.md), [GitHub Actions/OpenClaw contract matrix](github-actions-openclaw-contract-matrix.md) | The contract matrix explicitly records missing/unproven native Gateway requirements; do not infer a native provider from the presence of an adapter. |
 | Workflow benchmark | [Benchmark plan](plugin-workflow-benchmark-plan.md), [tracked benchmark repository README](../benchmarks/plugin-workflow-benchmark/README.md), [paired-host harness contract](../benchmarks/plugin-workflow-benchmark/paired-host-harness-contract.md) | Keep benchmark identity and authorization separate from general test results. Local, ignored phase-freeze/preflight copies are not links for GitHub readers. Consult [known issues](KNOWN_ISSUES.md) for current release blockers. |
 
-Use the [release policy](RELEASE_POLICY.md) to distinguish testing pre-releases from the production/frozen-release lane, [known issues](KNOWN_ISSUES.md) and the [RC.11 acceptance record](goal-plan-execution-acceptance-rc11-20261026.md) for current limitations, the [`1.0.9-rc.4` candidate record](review-candidate-1.0.9-rc.4.md) for historical RC.4 artifact evidence, and the [local RC.5 installation verification](installation-verification-1.0.9-rc.5-20261020.md) for that separately built local candidate. A testing pre-release or successful post-install smoke check does not satisfy or override formal production release gates.
+Use the [release policy](RELEASE_POLICY.md) to distinguish testing pre-releases from the production/frozen-release lane. [Known issues](KNOWN_ISSUES.md) and the [RC.11 acceptance record](goal-plan-execution-acceptance-rc11-20261026.md) contain older candidate/host evidence and must be read with their dates and scope. The [RC.72 v10 addendum](goal-plan-execution-acceptance-rc72-v10-addendum-20261031.md) records a local source-inventory/package-alignment successor, not independent release authority. The [`1.0.9-rc.4` candidate record](review-candidate-1.0.9-rc.4.md) and [local RC.5 installation verification](installation-verification-1.0.9-rc.5-20261020.md) are historical artifact evidence. A testing pre-release or successful post-install smoke check does not satisfy or override formal production release gates.
 
 ## Where facts come from
 

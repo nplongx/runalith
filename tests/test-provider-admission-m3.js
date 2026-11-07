@@ -10,8 +10,14 @@ process.env.WORKFLOW_DATA_DIR = path.dirname(dbPath);
 
 const { WorkflowStore } = await import('../job-store.js');
 const { ProviderAdmissionController, ProviderStates } = await import('../provider-admission.js');
+const { createWorkflowStatePort } = await import('../src/runtime/workflow-state-port.js');
 const store = new WorkflowStore();
-const admission = new ProviderAdmissionController(store, { hardBlockMs: 60_000, leaseMs: 30_000 });
+const workflowStatePort = createWorkflowStatePort(store);
+assert.throws(() => new ProviderAdmissionController(store.db, {
+  workflowStatePort: { getTask() {}, getLatestChildTaskForRole() {}, recordEvent() {} }
+}), /requires WorkflowStatePort v2/,
+'provider admission must reject unversioned/legacy broad-store adapters');
+const admission = new ProviderAdmissionController(store.db, { workflowStatePort, hardBlockMs: 60_000, leaseMs: 30_000 });
 const providers = ['chatgpt:account:1', 'chatgpt:account:2', 'chatgpt:account:3', 'chatgpt:account:4'];
 admission.syncProviders(providers);
 

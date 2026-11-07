@@ -1,84 +1,81 @@
-# Runalith production-readiness loop instructions (generic)
+# Runalith V2 — Issue resolution loop
 
-**Purpose:** reusable operating instructions for repeated readiness engineering. This file defines the loop, not a run's baseline. It must not be edited merely because a release candidate, date, blocker, report, branch, or task count changed. Discover current state afresh on each invocation and record that state in that run's evidence.
+**Scope:** issues [#32–#44](https://github.com/nplongx/runalith/issues) in milestone [#1](https://github.com/nplongx/runalith/milestone/1), tracked by project [#2](https://github.com/users/nplongx/projects/2). GitHub is the source of truth. The assistant runs the engineering loop as a single owner; the Project Owner retains project decisions, approval and release authority.
 
-**Safety boundary:** this loop authorizes local inspection, code/test changes, isolated candidate validation, and explicitly read-only host observation when available and authorized. It does not authorize production installation/activation, live job/task lifecycle operations, approval/dispatch, trust-ledger writes, or external checkpoint transitions.
+**Purpose:** resume the current issue, resolve one issue at a time, and continue only through accepted dependencies. Discover live state on every run; this prompt is not a status snapshot.
 
-## Copy-ready loop prompt
+## Operating loop
 
-> Continue improving Runalith toward production readiness using the current repository's authoritative engineering/runbook docs, the newest verified candidate and its bound acceptance evidence. Use CodeGraph CLI to navigate quickly, and `scripts/mcpb-tools.mjs` to inspect/test the exact candidate bundle. Do not ask me to update this prompt as the project evolves; dynamically discover and verify the current baseline each run.
->
-> ### 1. Discover the repo and current baseline
->
-> - Resolve the repository root dynamically (for example, `git rev-parse --show-toplevel`); do not assume a machine-specific absolute path.
-> - Read this loop instruction, the current production-readiness engineering decision record, relevant operational runbooks, and documentation describing the packaging/tool runner. Discover these via docs headings, internal links and repository search rather than depending on versioned filenames that may be superseded.
-> - Inspect `git status --short --branch`, current branch/base, uncommitted diff, and any running test/build processes before editing. Preserve all existing tracked/untracked work, prior candidate archives, source entrypoints, fixtures, evidence, logs and reports. Never clean or reset the worktree, rewrite history, or overwrite an existing artifact.
-> - Discover `.mcpb` archives and version metadata from repository locations/configuration. Rank candidates using parsed release/version identity and embedded package/manifest/entrypoint metadata—not modification time or filename alone. Cross-check archive hash, package version/main/runtime entrypoint/start script, lockfile root versions, manifest entrypoint/launch args and source-alignment/acceptance bindings. Choose the newest **coherent** candidate. If the newest candidate is inconsistent, preserve it, report the exact mismatch and treat it as a blocker; do not silently fall back to an older candidate as if the release were current.
-> - Discover candidate-specific acceptance indexes, source-alignment reports, preflight, dossier, remediation and live-observation reports using schemas, embedded candidate digests, generation timestamps and freshness policy. Do not select a report just because its filename sorts last. Reject stale, mismatched, missing or unverifiable evidence. If required evidence must be refreshed, use new non-overwriting output paths.
-> - Record the baseline at runtime: repository root/branch/worktree state, exact candidate path/version/size/SHA-256, runtime entrypoint digest, rollback artifact identity, evidence paths/hashes/timestamps, current gate set, observed runtime identity (if available), and actions explicitly not performed. Date-specific observations belong in run evidence—not in this reusable prompt.
->
-> ### 2. Use CodeGraph for fast, evidence-led navigation
->
-> - Run `codegraph status <repo-root>`. Sync the index if it is stale after source changes, then verify it is current.
-> - Search the current blocker, invariant, tool or symbol using `codegraph query`; follow with `codegraph explore`, `callers`, `callees` or `impact` as appropriate. Confirm results by reading current source and tests. Use the syntax advertised by `codegraph --help` if CLI options differ.
-> - Treat the graph as navigation/impact guidance, never as proof that a test passed, an attestation is authentic, a provider has stopped, or a release is authorized.
->
-> ### 3. Inspect and use candidate MCP tools safely
->
-> - Read the repository's direct-MCPB runner documentation and inspect its current implementation before first use or after it changes. Run `node scripts/mcpb-tools.mjs <exact-candidate.mcpb> list --json`; review tool descriptions, input schemas, implementation and side effects before calling anything.
-> - Prefer minimal, one-shot calls to tools that have been established to be read-only for the exact operation. Do not bypass a side-effect guard by adding override flags. If the required tool has uncertain or state-changing behavior, do not call it; explain the limitation and use an independently authorized read-only source where available.
-> - **Evidence scope:** determine the runner's current isolation behavior from its implementation/docs. If it uses a temporary database/workspace/HOME, its results describe that isolated candidate invocation only—not the production host, live production database or external provider. The runner is not automatically an OS sandbox; assume packaged code can cause effects outside temporary paths unless proven otherwise.
-> - Discover state-changing tools from the current tool catalog and source, not from a hard-coded list. Unless a task is separately and explicitly authorized, do not create/attest durable evidence, approve/dispatch workflows, prepare/recover/complete tasks, execute actions, mutate trust state, retry/terminalize/cancel jobs, or advance any external checkpoint. A tool's name or “diagnostic” label alone does not establish read-only behavior.
-> - Keep isolated MCPB test results, local filesystem evidence and host-connected live observations in separate categories. For every live observation record source, observation time, identity/scope, freshness, and whether it is independently authenticated. Never infer live state from an isolated process.
->
-> ### 4. Treat Approval Subsystem as a first-class security boundary
->
-> - Discover the current approval/reviewer/action-intent contracts, state transitions, persisted decision records, policy hooks, identity verifier, trust configuration, callers/callees, dispatcher checks and relevant tests from source and current docs. Use CodeGraph to map impact, but verify the implementation directly. Do not assume that existing reviewer attestations, workflow approval artifacts, a policy result, or a field such as `approved: true` together constitute a complete approval subsystem.
-> - Keep planning, approval, and execution as separate authority boundaries: Goal/Idea Graph supplies verified source/evidence; Plan Graph proposes an immutable plan; the Approval Subsystem evaluates the exact request and emits a verifiable decision; Execution Graph/dispatcher independently verify that decision before any permitted action. The approval component must not itself dispatch provider actions, and a maker must not approve their own request. Apply reviewer separation, quorum and trust-domain separation according to the current authoritative policy; do not invent principals, keys, thresholds or exceptions.
-> - Treat the Approval Subsystem as a logical subsystem with explicit, versioned contracts even if the current deployment remains in-process. Inspect whether a separate service is justified by the current architecture and threat model; do not introduce a second identity store, duplicate trust roots, or a network/service boundary merely for appearance. Separate policy evaluation from identity authentication, signature verification, trust-root/key lifecycle, immutable decision evidence and enforcement at execution time. OPA/Rego may evaluate policy but cannot establish signer identity, create trust authority, prove quorum or replace signed evidence.
-> - Verify that an approval decision is cryptographically and structurally bound to the exact approved subject and scope. Inspect the current contract for plan/execution or action-intent hashes, immutable-plan/input/source bindings, candidate digest where applicable, environment/action scope, policy identity/version/digest, requester/maker and reviewer identities, provider/trust-root identity, quorum evidence, issued/expiry times, nonce/replay protection, and decision/signature. Require only fields defined by the authoritative contract; when a field or invariant is absent, record a concrete gap and regression test rather than silently assuming it exists.
-> - Revalidate approval at the execution boundary against the exact current bytes and evidence, policy version, identity/key validity and revocation state, expiry/freshness, scope, quorum, nonce/replay state and any required external checkpoint. Any change to the approved plan, action intent, bound inputs/source, candidate, scope or policy must invalidate the old decision or require reapproval under the current contract. Avoid TOCTOU gaps between approval verification and dispatch; use the repository's established atomicity, fencing, idempotency and cancellation/revocation contracts.
-> - Preserve fail-closed behavior: missing, malformed, ambiguous, stale, expired, replayed, revoked, mismatched or insufficient approval evidence; insufficient quorum; duplicate/self-review identity; unavailable trust configuration; or Approval Subsystem timeout/unavailability must never degrade to implicit approval or a permissive fallback. A service error is not permission to dispatch. The loop may inspect, implement and test approval code using isolated fixtures, but must not approve real requests, create production attestations, exercise live approval tools, or dispatch actions without separate explicit authority.
-> - Derive negative tests from the actual contract and threat model. At minimum, assess unauthenticated/invalid signer, wrong or revoked key, maker-checker collision, duplicate reviewer/quorum failure, wrong scope or environment, altered plan/action/source/candidate digest after approval, stale policy or evidence, expiry, nonce replay, old/revoked decision, cross-request or cross-tenant binding where applicable, concurrent revoke/change versus dispatch, missing external checkpoint, malformed decision, and fail-closed behavior when the approval/identity/policy service is unavailable. Verify both approval creation/readback and final Execution Graph/dispatcher enforcement, including that denied requests create no unauthorized side effect.
-> - Keep implementation evidence separate from authority evidence. Test keys, fixture identities, a locally signed decision, an OPA `allow`, a green unit test or a local audit/hash chain is not a production approval, independent trust root, external monotonic anchor or release authorization. Record the exact missing contract, test, evidence or authority owner and hand off when closure requires one.
->
-> ### 5. Derive the current blockers and select one bounded improvement
->
-> - Derive the current required gate set from the latest valid preflight/dossier, the engineering decision record and applicable policy. Do not hard-code the number or names of gates in this prompt. If those sources disagree, report the inconsistency and resolve the authoritative source before making a readiness claim.
-> - For each blocker, classify whether it is (a) code/test-fixable, (b) evidence-generation/consistency work, (c) external authority/provisioning work, or (d) live operational reconciliation. Separate implemented verification code from proof that a real independent authority performed the operation.
-> - Refresh only permitted read-only observations before relying on historic state. Select the smallest actionable change with a concrete acceptance condition and regression test. Use CodeGraph to identify actual callers and impacted tests; read source before editing.
-> - Preserve all security invariants and contract owners identified in current authoritative docs: fail-closed verification, exact source/candidate binding, freshness and replay protections, independent trust domains, least-privilege access, lease/fencing/idempotency, and uncertainty quarantine. Never weaken schemas, timeouts, test oracles, provenance checks, negative tests or gate predicates to make a run green.
-> - Make one coherent, bounded patch at a time. Keep historical artifacts immutable; create a new versioned fixture/report/candidate if a new identity is needed. If a test initially fails, retain its command, exit status and logs; investigate the failure before rerunning and never hide the first failure.
->
-> ### 6. Validate source, package and evidence
->
-> - After changes, inspect the full diff and run `git diff --check`; run focused tests first, then the relevant security/regression suites. Derive applicable test/package commands from the current `package.json`, repository docs and affected code instead of assuming a fixed list is complete. At minimum, validate unit/integration tests for the changed behavior, packaging/extracted-bundle behavior, reproducibility/no-overwrite where supported, archive integrity, docs/link checks, and source-to-bundle alignment when producing a candidate.
-> - Sync CodeGraph after source changes and confirm index freshness. Record each command, actual exit code, log/report path and content hash. A skipped, timed-out, truncated or ambiguous command is not a pass.
-> - When building a release candidate is justified, mint a new unique version/path according to current versioning rules. Never overwrite existing candidate bytes. Ensure package, lockfile, manifest, entrypoint and launch identity are all coherent. Verify the exact archive SHA-256 before and after candidate-specific tests.
-> - Re-run the direct MCPB catalog and only approved read-only smoke calls against that exact bundle. Label their outputs as isolated package evidence according to the runner's actual implementation.
-> - Refresh candidate-bound acceptance/evidence index, source alignment, consistency report, read-only preflight/dossier/remediation and current-state reports where available. Use unique paths; verify each report cryptographically or structurally according to its contract, candidate digest, timestamps and freshness. Consistency `PASS`, local tests, byte identity, a clean worktree or current CodeGraph index do not by themselves grant release authority.
->
-> ### 7. Handle production gates and operational state without fabricating authority
->
-> - Use the **current** gate set and evidence contracts discovered in the authoritative docs/reports. For each gate, record: exact required evidence, issuing authority, verification method, candidate/runtime binding, freshness, current status and missing item. Never assume that gate definitions from a previous candidate remain complete or unchanged.
-> - Keep readiness blocked whenever any required gate is open, evidence is missing/stale/mismatched, an authority is unverified, or a live-state result is ambiguous. Set `canActivateNow=false` whenever that is what the current verified preflight requires. Do not force a successful verdict by editing a report or toggling a boolean.
-> - Treat absent leases, old timestamps, missing PIDs/telemetry, local hash chains, event names, and temporary sandbox output as insufficient proof of worker death or non-occurrence of an external side effect. Ambiguous lifecycle/provider outcomes remain `HOLD`/`INDETERMINATE` until the responsible owner and authoritative provider/runtime evidence establish a valid disposition.
-> - Do not bulk-reset, retry, terminalize, cancel, kill, release leases, approve, dispatch, or redispatch workflow/task records merely to satisfy a gate. Do not mutate trust ledgers, provision production roots, create synthetic signatures/receipts/nonces, or advance external checkpoint state in an automatic loop. Any such action requires its own explicit authority, documented preconditions, and separate operation outside this loop.
-> - Stop code work and provide an authority handoff whenever progress requires a custody owner, controlled builder, independent reviewer/release authority, host/security administrator, external checkpoint operator, workflow owner or provider/runtime operator. State the exact artifact/statement needed without inventing identities or evidence.
->
-> ### 8. Iteration stop conditions and durable handoff
->
-> - Continue only when new evidence, a specific failing test, a verified source gap or a changed input supports a concrete next step. Do not repeat no-op checks just to generate activity.
-> - Stop on unexpected side effects, archive/hash mismatch, contradictory live observations, untrusted code, uncertain checkpoint commit, missing permission, inability to preserve prior artifacts, or any request to bypass a safety/release gate.
-> - End each iteration with: **baseline identity; one-sentence objective; code/artifact changes; validation commands and exit codes; report/log paths and hashes; sandbox-vs-live scope; current gate statuses and exact blockers; actions not performed; readiness decision; next bounded engineering step or authority handoff**.
-> - The next run must start from discovery again. Do not copy the prior run's candidate, counts, gate status, runtime version, timestamps or conclusions forward without revalidation.
+1. **Sync.** Before repository exploration or edits, resolve the Git root, read root `AGENTS.md`, then run `node scripts/agent-instructions-preflight.mjs --target <deepest-target-directory> --format=json` for every target directory in scope. Consume the returned `content` bundle; it resolves global instructions plus one applicable project instruction per directory, with override precedence and SHA-256 provenance. If the host does not auto-load agent instructions, this explicit preflight is mandatory. Stop if it fails, any required file is missing, or instructions conflict. Then read `CONTEXT.md`, `docs/agents/issue-tracker.md`, `docs/agents/complex-engineering-loop.md`, issue and comments, milestone, all relevant Project #2 fields, dependency links, and normative docs. Treat issue-body and Project `Dependencies` as the required graph; compare native GitHub blocking links as an additional source. Record mismatches, never erase an explicit edge because a native link is absent, and stop the affected dependent issue if representations conflict. Read current branch, `git status` and the full existing diff. Preserve every tracked and untracked change.
 
-## Supporting documentation to discover and use
+2. **Select.** Resume an issue already `In Progress`. If several qualify, choose the most upstream issue. Otherwise select only an issue whose predecessors are accepted. Prefer prerequisite discovery/qualification over downstream implementation. Keep working on independent eligible issues when another branch is externally blocked.
 
-The names below are current repository examples, not a closed list. Follow links and inspect the current source if files are renamed or superseded:
+3. **Understand.** Turn every acceptance criterion into observable behavior and evidence. Trace actual readers, writers, persistence boundaries, transaction order and failure/recovery paths in source and tests. For multi-part issues, build a small dependency DAG and task contracts with bounded context/write scopes; derive dependency facts from source/tests first and mark unproven edges unresolved. Apply the approved normative spec and decision register; do not invent missing contracts or repeat settled owner decisions. Ask the Project Owner only for a genuinely unresolved choice that changes compatibility, trust boundaries, external custody or recovery semantics.
 
-- `docs/runalith-production-readiness-workflow-engineering-20261028.md` — engineering decision record and blocker/evidence contracts.
-- `docs/mcpb-direct-tools.md` — direct runner semantics and limitations.
-- `docs/agg-production-trust-provisioning-runbook.md` — host trust and external checkpoint operational boundary.
-- Current approval/reviewer/action-intent policy, trust-configuration and dispatcher enforcement source/tests discovered in this run (for example, `src/runtime/adaptive-goal-reviewer-identity.js`, `src/runtime/adaptive-goal-action-intent-policy.js`, and their actual callers). These paths are search starting points, not proof that a complete Approval Subsystem exists. Treat historical milestone records such as `docs/m6-reviewer.md` as context only; verify present behavior against current source and tests.
-- Latest coherent rollout/acceptance/preflight/dossier/remediation records for the exact candidate discovered in this run.
+4. **Implement.** Work on one issue at a time using `/implement`; use `/tdd` for vertical red → green slices at agreed public seams, one behavior at a time. The Lead owns integration; sub-agents receive explicit role, task, dependency, context, read/write scope and stop conditions. Parallelize independent read-only traces/reviews. Allow parallel code edits only in isolated worktrees with disjoint write sets and Lead-controlled integration; in a shared dirty worktree, use one writer at a time. Keep the patch within that issue. Run focused tests while developing and relevant regressions before completion. After the issue is closed out, `/clear` before the next self-contained ticket.
+
+5. **Review.** Use `/code-review` on the complete diff against both **Standards** (repo conventions, maintainability, correctness) and **Spec** (issue criteria and normative V2 requirements). Reviewer must independently inspect requirements, final diff, source evidence, exact test results and relevant invariants; do not substitute the Engineer's self-assessment. Run the six-level validation funnel in `docs/agents/complex-engineering-loop.md`. Resolve material findings and rerun affected tests. A passing test suite is not proof of external trust or production readiness.
+
+6. **Record.** Comment on the issue with changed files, implementation/evidence details, exact commands and exit results, review outcome, limitations and any external owner/action needed. Update Project #2 only to match evidence:
+   - `Status`: `Todo` / `In Progress` / `Done`.
+   - `Readiness`: `Unassessed` / `Ready` / `Blocked` / `Needs Evidence` / `Accepted`.
+   - Keep `Priority` as `Untriaged` unless the Project Owner changes it.
+   Mark `Done`, set `Accepted`, and close only when every acceptance criterion has objective evidence. Never remove or downgrade a dependency silently.
+
+7. **Continue.** Re-read the live graph and select the next eligible issue. For a blocked issue, record the missing evidence, responsible external authority/owner, and exact condition to resume.
+
+## Multi-agent execution rules
+
+- Hierarchical Lead/sub-agent coordination is the default. The Lead remains the sole owner of issue completion, integration, dependency interpretation and project-state updates.
+- Spawn only the specialists required by task risk. Research, tracing and review are read-only by default. The same sub-agent must not both implement and independently accept its own change.
+- Keep task context closed around the source, direct dependencies, contracts and tests needed for that task. Reuse accepted repository knowledge; do not regenerate inventories or add documents without a concrete decision need.
+- Use bounded replanning: preserve failure output, change the hypothesis or implementation before retrying, and stop repeated identical failures. Two materially different attempts with the same failure signature require escalation rather than another blind retry.
+- A blocked DAG branch stays paused; independent branches may continue only when their assumptions do not depend on the blocker. Human approval, production authority and external evidence cannot be synthesized by an agent.
+- Do not add a second Planner/Coordinator to Runalith's runtime. The engineering DAG coordinates repository work only; the existing runtime control plane and immutable workflow plan retain their authority.
+
+## Required dependency graph
+
+| Prerequisite | Enables |
+|---|---|
+| #32 | #39 |
+| #33 | #36 |
+| #33 + #36 | #37 |
+| #34 + #38 | #40 |
+| #35 + #39 | #41 |
+| #32 + #36 + #38 | #39 |
+| #37 + #39 + #40 + #41 | #42 |
+| #42 | #43 |
+| #43 + #36 | #44 |
+
+Do not bypass an edge. In particular, V2-08 / #39 requires an accepted source inventory (#32), canonical DB consolidation (#36), and normative JCS implementation (#38). A working inventory or standalone JCS component is not a substitute for issue acceptance or integration evidence.
+
+## External evidence gates
+
+Stop the affected issue at the evidence boundary; continue independent eligible work:
+
+- **#32:** deployed entrypoint/worker and shared-database inventory, plus complete authorization reader/writer coverage. Source-only scans cannot prove deployment completeness.
+- **#33:** independently issued database identity and custody, including generation/restore/fork lifecycle.
+- **#34:** a real external checkpoint authority and qualified protocol/provider contract.
+- **#35:** a genuine Linux trusted-measurement mechanism and independent verifier.
+
+Test doubles are for isolated protocol tests only. They cannot satisfy production identity, custody, authority, attestation or integration evidence. A project design decision or approved spec does not manufacture evidence from an external system.
+
+## Non-negotiable boundaries
+
+- Never provision or mutate production trust, checkpoint or ledger state; perform approval, dispatch, workflow/task/lease mutation; restart the host; invoke `--advance-external-checkpoint`; or activate/release a production package.
+- Never claim independent review, trusted hardware attestation, external authority or custody without evidence.
+- Local SQLite CAS, database/WAL hashes and `ATTACH` do not establish external authority or a coherent cross-database snapshot. Keep network calls outside SQLite writer transactions.
+- Use disposable databases for tests. Unknown, stale or ambiguous security state fails closed or enters quarantine. Do not weaken approval, authorization, recovery or fail-closed behavior.
+- Keep immutable snapshots, historical fixtures and benchmark evidence unchanged. Preserve existing worktree changes; do not run `git add`, `commit`, `push`, `rebase`, `reset`, `clean`, or discard/revert unrelated changes.
+
+## Completion
+
+An issue is complete only when its criteria, relevant tests and independent checks pass, review findings are resolved or documented, and GitHub evidence/status are accurate. The milestone is complete only when all 13 issues and required independent evidence are accepted. **Production remains `BLOCKED`** until V2 acceptance and all separate RC.71 release blockers are satisfied; this loop grants no provisioning, approval, dispatch or release authority.
+
+## Normative references
+
+- [V2 normative specification](agg-external-checkpoint-v2-normative-spec-20261030.md) — protocol and acceptance contract.
+- [V2 decision register](agg-external-checkpoint-v2-decision-register-20261030.md) — owner decisions and governance boundary.
+- [V2 design](agg-external-checkpoint-v2-design-20261030.md) — architecture and transition rationale.
+- [V2 projection inventory](agg-external-checkpoint-v2-projection-inventory-20261030-v0.12.md) — current working source evidence; verify #32 acceptance and external/deployed coverage before using it as an implementation contract.
+- [Issue tracker instructions](agents/issue-tracker.md) and root `CONTEXT.md` / `AGENTS.md` — tracker operations and repository conventions.

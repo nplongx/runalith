@@ -1,0 +1,6 @@
+{
+  "generator": "src/runtime/adaptive-goal-trust-configuration.js loadAdaptiveGoalTrustConfiguration",
+  "input_json": "{\"schema_version\":1,\"domain\":\"goal_idea_verifier\",\"provider_id\":\"source-provider\",\"config_version\":1,\"updated_at\":\"2026-11-01T00:00:00.000Z\",\"updated_by\":\"security-admin\",\"change_reference\":\"CHG-GOAL-ROOT-1\",\"keys\":[{\"key_id\":\"primary-root\",\"public_key_pem\":\"-----BEGIN PUBLIC KEY-----\\nMCowBQYDK2VwAyEAPUAXw+hDiVqStwqnTRt+vJyYLM8uxJaMwM1V8Sr0Zgw=\\n-----END PUBLIC KEY-----\\n\",\"scopes\":[\"agg.goal_idea_graph.verify\"],\"not_before\":\"2026-01-01T00:00:00.000Z\",\"not_after\":null,\"revoked_at\":null}]}",
+  "configuration_fingerprint": "b106f74257c4b548102d977966ab0d1bc53b13896f0df5fce2b10259c2559457",
+  "trust_root_sha256": "deb2ded39dc26fce0e6085b6fc34bf6b5941913bbfe2ea614113cff9e004c170"
+}

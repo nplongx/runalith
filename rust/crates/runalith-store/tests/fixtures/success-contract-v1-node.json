@@ -1,0 +1,36 @@
+{
+  "contract": {
+    "schema_version": 1,
+    "goal": "Verify persisted workflow control evidence",
+    "constraints": [
+      {
+        "id": "p-require-engineer-engineer-present",
+        "type": "task_role_present",
+        "role": "engineer"
+      }
+    ],
+    "success_criteria": [
+      {
+        "id": "p-require-engineer-all-complete",
+        "type": "all_tasks_completed"
+      },
+      {
+        "id": "p-require-engineer-task-status",
+        "type": "task_status_equals",
+        "task_id": "task-one",
+        "expected": "completed"
+      },
+      {
+        "id": "p-require-engineer-reviewer-absent",
+        "type": "task_role_absent",
+        "role": "reviewer"
+      }
+    ]
+  },
+  "predicates": [
+    {"id":"p-require-engineer-engineer-present","type":"task_role_present","passed":true,"actual":1},
+    {"id":"p-require-engineer-all-complete","type":"all_tasks_completed","passed":true,"actual":{"planned":1,"incomplete":[]}},
+    {"id":"p-require-engineer-task-status","type":"task_status_equals","passed":true,"actual":"completed"},
+    {"id":"p-require-engineer-reviewer-absent","type":"task_role_absent","passed":true,"actual":0}
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "principals": [
+    {
+      "token_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "subject": "operator-example",
+      "issuer": "local-runalith-control-auth-v1",
+      "capabilities": [
+        "control.health.read",
+        "catalog.read",
+        "catalog.role.write",
+        "catalog.workflow.write",
+        "catalog.workflow.compile",
+        "policy.read",
+        "policy.write",
+        "workflow.read",
+        "workflow.create",
+        "workflow.events.read",
+        "workflow.recovery.read"
+      ]
+    }
+  ]
+}

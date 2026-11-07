@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './test-temp-dir.js';
 import { compileWorkflowPlan } from '../src/runtime/workflow/compiler.js';
 import { canonicalJson, validateExecutionPlan } from '../src/runtime/workflow/plan.js';
@@ -65,8 +66,30 @@ process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_WORKSPACE = workspace;
 process.env.NODE_ENV = 'test';
 process.on('exit', () => { try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch {} });
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const store = new WorkflowStore();
+const interruptedJob = store.createJob({ conversationKey: `plan-structure-interrupted-${process.pid}`, title: 'Software Development interrupted plan persistence' });
+store.recordEvent(interruptedJob.job_id, 'job.proposal_requested', {
+  task: interruptedJob.title,
+  success_contract: { goal: interruptedJob.title },
+  workspace
+}, 'interrupted-plan-persistence');
+store.db.exec(`CREATE TRIGGER test_fail_plan_compiled_event BEFORE INSERT ON events
+  WHEN NEW.job_id='${interruptedJob.job_id}' AND NEW.type='workflow.plan_compiled'
+  BEGIN SELECT RAISE(ABORT, 'injected plan compiled event failure'); END`);
+assert.throws(() => store.compileExecutionPlan(interruptedJob.job_id, { workspace }), /injected plan compiled event failure/);
+assert.equal(store.db.prepare('SELECT COUNT(*) n FROM workflow_plans WHERE job_id=?').get(interruptedJob.job_id).n, 0,
+  'a failed compiled-event write must not leave an immutable plan row without its canonical event');
+assert.equal(store.db.prepare("SELECT COUNT(*) n FROM events WHERE job_id=? AND type='workflow.plan_compiled'").get(interruptedJob.job_id).n, 0,
+  'a failed plan pin must not leave a partial compiled-event row');
+store.db.exec('DROP TRIGGER test_fail_plan_compiled_event');
+const recoveredPlan = store.compileExecutionPlan(interruptedJob.job_id, { workspace });
+assert.ok(recoveredPlan?.plan_hash, 'a retry after the failed atomic write must persist the plan and event together');
+const reopenedStore = new WorkflowStore(new DatabaseSync(path.join(dataDir, 'workflow.db')));
+assert.equal(reopenedStore.getExecutionPlan(interruptedJob.job_id).plan_hash, recoveredPlan.plan_hash,
+  'a separate SQLite connection must reconstruct the same immutable plan after restart');
+assert.equal(reopenedStore.db.prepare("SELECT COUNT(*) n FROM events WHERE job_id=? AND type='workflow.plan_compiled'").get(interruptedJob.job_id).n, 1);
+reopenedStore.db.close();
 const job = store.createJob({ conversationKey: `plan-structure-durable-${process.pid}`, title: 'Engineering M4 durable structural contract' });
 store.approve(job.job_id, 'isolated structural plan contract approval', 'test-actor', { workspace });
 const originalPlan = store.getExecutionPlan(job.job_id);

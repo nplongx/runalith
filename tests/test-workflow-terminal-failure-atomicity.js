@@ -14,7 +14,7 @@ process.env.WORKFLOW_DB = dbPath;
 process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
-const modulePath = path.resolve(process.env.PHASE2_TEST_WORKFLOW_STORE_MODULE || fileURLToPath(new URL('../src/runtime/job-store.js', import.meta.url)));
+const modulePath = path.resolve(process.env.PHASE2_TEST_WORKFLOW_STORE_MODULE || fileURLToPath(new URL('../job-store.js', import.meta.url)));
 const moduleUrl = pathToFileURL(modulePath).href;
 const { WorkflowStore } = await import(moduleUrl);
 let db = new DatabaseSync(dbPath, { timeout: 5000 });
@@ -116,7 +116,7 @@ assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM events WHERE job_id=? A
 
 // Provider-backed work can outlive its parent Job. Empty OpenClaw inventory
 // must not cancel the local task while the durable provider run remains active.
-store.db.exec(`CREATE TABLE provider_runs (
+store.db.exec(`CREATE TABLE IF NOT EXISTS provider_runs (
   provider_run_id TEXT PRIMARY KEY, job_id TEXT NOT NULL, state TEXT NOT NULL
 );`);
 const providerRunningJob = store.createJob({ conversationKey: `workflow-terminal-provider-running-${process.pid}`, title: 'Unresolved provider recovery guard' });
@@ -127,8 +127,10 @@ const providerRunningTask = store.createChildTask(providerRunningJob.job_id, {
 });
 store.attachTaskRuntime(providerRunningTask.task_id, { runId: 'provider-running-fixture', sessionKey: 'agent:architect:provider-running-fixture' });
 store.failWorkflowVerification(providerRunningJob.job_id, { reason: 'provider recovery fixture terminal job', errors: ['synthetic'] });
-store.db.prepare('INSERT INTO provider_runs(provider_run_id,job_id,state) VALUES(?,?,?)')
-  .run('provider-run-unresolved-fixture', providerRunningJob.job_id, 'IN_PROGRESS');
+store.db.prepare(`INSERT INTO provider_runs(provider_run_id,provider,job_id,task_id,lease_id,attempt,input_commit,workflow,ref,state,created_at,updated_at)
+  VALUES(?,?,?,?,?,?,'input-commit','workflow.yml','main',?,?,?)`)
+  .run('provider-run-unresolved-fixture', 'github-actions', providerRunningJob.job_id, providerRunningTask.task_id,
+    'provider-running-lease-fixture', 1, 'IN_PROGRESS', new Date().toISOString(), new Date().toISOString());
 assert.equal(store.reconcileRunningTaskForTerminalJob(providerRunningTask.task_id).status, 'running',
   'terminal-job recovery must defer while a durable provider run is nonterminal');
 store.db.prepare('UPDATE provider_runs SET state=? WHERE provider_run_id=?').run('COMPLETED', 'provider-run-unresolved-fixture');

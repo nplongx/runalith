@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createAdaptiveGoalKnowledgeStore } from '../src/runtime/adaptive-goal-knowledge-store.js';
 import { searchAdaptiveGoalGraph } from '../src/runtime/adaptive-goal-graph.js';
 import { isAuthenticatedAdaptiveGoalPlanDraft, projectAdaptiveGoalCandidateToPlanGraph } from '../src/runtime/adaptive-goal-plan-adapter.js';
@@ -13,6 +17,7 @@ import {
   ADAPTIVE_GOAL_KNOWLEDGE_TRUST_CONFIG_ENV,
   canonicalAdaptiveGoalKnowledgeJson,
   createAdaptiveGoalKnowledgeVerifier,
+  isAuthenticatedAdaptiveGoalKnowledgeDecision,
   isAuthenticatedAdaptiveGoalKnowledgeVerificationReport
 } from '../src/runtime/adaptive-goal-knowledge-verifier.js';
 
@@ -42,10 +47,10 @@ function withVerifierEnvironment(t, { configured = true, trustRootPem = publicKe
   });
 }
 
-function fixture({ evidenceValid = true, now = () => Date.now() } = {}) {
-  const db = new DatabaseSync(':memory:');
+function fixture({ evidenceValid = true, now = () => Date.now(), workflowPath = ':memory:', trustPath = ':memory:' } = {}) {
+  const db = new DatabaseSync(workflowPath);
   const store = createAdaptiveGoalKnowledgeStore(db);
-  const trustDb = new DatabaseSync(':memory:');
+  const trustDb = new DatabaseSync(trustPath);
   const artifactRefs = new Map();
   function evidenceResolver(input) {
     return input.steps.flatMap(step => step.supportingEvidenceRefs).map(ref => {
@@ -74,10 +79,10 @@ function fixture({ evidenceValid = true, now = () => Date.now() } = {}) {
   const goal = createNode('finish-goal', 'goal', { title: 'Verified evidence graph reaches its goal' });
   store.addEdge({ goalId, fromId: start.id, toId: action.id, type: 'enables', provenance, evidenceRefs: ['artifact://artifact-001'] });
   store.addEdge({ goalId, fromId: action.id, toId: goal.id, type: 'enables', provenance, evidenceRefs: ['artifact://artifact-001'] });
-  return { db, trustDb, store, verifier, start, action, goal, now };
+  return { db, trustDb, store, verifier, start, action, goal, now, evidenceResolver, resolveSourceRecords: () => [] };
 }
 
-function signedAttestation(request, { signingKey = keyPair.privateKey, rootPem = publicKeyPem, trustRootSha256 = sha(rootPem), provider = providerId, nonce = cryptoUuid(), issuedAt, expiresAt } = {}) {
+function signedAttestation(request, { signingKey = keyPair.privateKey, rootPem = publicKeyPem, trustRootSha256 = sha(rootPem), provider = providerId, nonce = cryptoUuid(), issuedAt, expiresAt, claimStatus = 'verified' } = {}) {
   const snapshot = request.snapshot;
   const unsigned = {
     schema_version: 1,
@@ -94,7 +99,7 @@ function signedAttestation(request, { signingKey = keyPair.privateKey, rootPem =
     edge_ids: snapshot.edge_ids,
     membership_ids: snapshot.membership_ids,
     evidence_manifest_hash: request.evidenceManifestHash,
-    claim_status: 'verified',
+    claim_status: claimStatus,
     independence_status: 'verified',
     signature_algorithm: 'Ed25519'
   };
@@ -169,6 +174,7 @@ test('requires configured verifier and verifies exact snapshot, revisions, membe
   const committed = f.verifier.attest(attestation);
   assert.equal(committed.created, true);
   assert.equal(committed.verified, true);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(committed), true);
   assert.equal(committed.verifiedNodeCount, 3);
   assert.equal(committed.verifiedEdgeCount, 2);
   assert.equal(committed.verifiedMembershipCount, 3);
@@ -201,6 +207,81 @@ test('requires configured verifier and verifies exact snapshot, revisions, membe
     'a failed mutation attempt must not alter the content bound to the authenticated identity');
   assert.throws(() => f.verifier.buildVerifiedGraph(goalId, f.start.id, f.goal.id, sha('stale snapshot')),
     error => error.code === 'KNOWLEDGE_GRAPH_SNAPSHOT_STALE');
+});
+
+test('signed rejected evidence decision is durable and authenticated but never authorizes graph use', t => {
+  const f = fixture(); t.after(() => { f.db.close(); f.trustDb.close(); });
+  withVerifierEnvironment(t);
+  const request = f.verifier.getAttestationRequest(goalId);
+  f.verifier.getVerifierConfigurationStatus();
+
+  const rejectedReceipt = signedAttestation(request, { claimStatus: 'rejected' });
+  const rejected = f.verifier.attest(rejectedReceipt);
+  assert.equal(rejected.receiptVerified, true);
+  assert.equal(rejected.verified, false);
+  assert.equal(rejected.status, 'rejected');
+  assert.equal(rejected.claimVerified, false);
+  assert.equal(rejected.claimRejected, true);
+  assert.equal(rejected.independenceVerified, true);
+  assert.equal(rejected.verifierId, `${providerId}/${rejected.trustKeyId}`);
+  assert.equal(rejected.verificationReceiptSha256, sha(canonicalAdaptiveGoalKnowledgeJson(rejectedReceipt)));
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeDecision(rejected), true);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(rejected), false,
+    'a signed rejection is an authenticated decision but never an authenticated verified report');
+
+  const current = f.verifier.getCurrentVerification(goalId);
+  assert.equal(current.receiptVerified, true);
+  assert.equal(current.verified, false);
+  assert.equal(current.status, 'rejected');
+  assert.equal(current.claimVerified, false);
+  assert.equal(current.claimRejected, true);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeDecision(current), true);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(current), false);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeDecision(current, { now: Date.parse(current.expiresAt) }), false,
+    'an authenticated rejection stops being current after receipt expiry');
+  assert.throws(() => f.verifier.buildVerifiedGraph(goalId, f.start.id, f.goal.id, request.snapshot.snapshot_hash),
+    error => error.code === 'KNOWLEDGE_GRAPH_NOT_VERIFIED');
+
+  const identicalRetry = f.verifier.attest(rejectedReceipt);
+  assert.equal(identicalRetry.status, 'rejected');
+  assert.equal(identicalRetry.idempotent, true);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeDecision(identicalRetry), true,
+    'an exact retry preserves the verifier-owned receipt identity and freshness capability');
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(identicalRetry), false);
+  assert.throws(() => f.verifier.attest(signedAttestation(request, { nonce: '123e4567-e89b-42d3-a456-426614174001' })),
+    error => error.code === 'KNOWLEDGE_SNAPSHOT_ALREADY_ATTESTED');
+});
+
+test('persisted task nodes require producer-bound evidence and project through the authenticated Plan Graph path', t => {
+  const f = fixture(); t.after(() => { f.db.close(); f.trustDb.close(); }); withVerifierEnvironment(t);
+  const taskGoalId = 'goal-persisted-task-evidence';
+  const start = f.store.saveNode({ goalId: taskGoalId, stableKey: 'task-flow-start', type: 'idea',
+    content: { title: 'Task flow starts from a verified idea' }, provenance, evidenceRefs: [], expectedRevision: 0 });
+  const task = f.store.saveNode({ goalId: taskGoalId, stableKey: 'task-flow-action', type: 'task',
+    content: { title: 'Task has independently resolved producer evidence' }, provenance,
+    evidenceRefs: ['artifact://task-producer-artifact'], expectedRevision: 0 });
+  const goal = f.store.saveNode({ goalId: taskGoalId, stableKey: 'task-flow-goal', type: 'goal',
+    content: { title: 'Task evidence reaches verified goal' }, provenance, evidenceRefs: [], expectedRevision: 0 });
+  f.store.addEdge({ goalId: taskGoalId, fromId: start.id, toId: task.id, type: 'enables', provenance, evidenceRefs: [] });
+  f.store.addEdge({ goalId: taskGoalId, fromId: task.id, toId: goal.id, type: 'enables', provenance, evidenceRefs: [] });
+
+  const request = f.verifier.getAttestationRequest(taskGoalId);
+  assert.equal(request.eligibleForAttestation, true);
+  assert.equal(request.evidenceManifest.length, 1);
+  assert.equal(request.evidenceManifest[0].producerTaskId, 'task-task-producer-artifact');
+  const accepted = f.verifier.attest(signedAttestation(request));
+  assert.equal(accepted.verified, true);
+  const graph = f.verifier.buildVerifiedGraph(taskGoalId, start.id, goal.id, request.snapshot.snapshot_hash);
+  assert.throws(() => f.verifier.buildVerifiedGraph(taskGoalId, task.id, goal.id, request.snapshot.snapshot_hash),
+    error => error.code === 'KNOWLEDGE_GRAPH_START_TYPE_INVALID');
+  const searchOptions = { beamWidth: 4, maxDepth: 8, maxExpansions: 64 };
+  const search = searchAdaptiveGoalGraph(graph.graph, searchOptions);
+  assert.ok(search.candidates.length > 0);
+  const draft = projectAdaptiveGoalCandidateToPlanGraph(graph.graph, search.candidates[0], searchOptions, {}, graph.verificationReport);
+  assert.equal(isAuthenticatedAdaptiveGoalPlanDraft(draft), true);
+  assert.equal(draft.steps.length, 1);
+  assert.equal(draft.steps[0].sourceNodeId, task.id);
+  assert.deepEqual(draft.steps[0].supportingEvidenceRefs, ['artifact://task-producer-artifact']);
 });
 
 test('snapshot request and current-verification getters never write trust-ledger observations', t => {
@@ -303,9 +384,38 @@ test('empty evidence remains diagnosable but can never be externally attested or
   f.store.addEdge({ goalId: missingActionEvidenceGoalId, fromId: actionStart.id, toId: action.id, type: 'enables', provenance, evidenceRefs: [] });
   const malformedRequest = f.verifier.getAttestationRequest(missingActionEvidenceGoalId);
   assert.equal(malformedRequest.snapshot.integrity_valid, true);
+  assert.deepEqual(malformedRequest.snapshot.nodes.find(node => node.id === action.id).evidence_refs, []);
   assert.equal(malformedRequest.eligibleForAttestation, false);
   assert.ok(malformedRequest.attestationBlockers.some(item => item.code === 'KNOWLEDGE_ACTION_EVIDENCE_MISSING'));
   assert.equal(f.verifier.getCurrentVerification(missingActionEvidenceGoalId).verified, false);
+
+  const missingTaskEvidenceGoalId = 'goal-task-node-missing-evidence';
+  const taskStart = f.store.saveNode({
+    goalId: missingTaskEvidenceGoalId, stableKey: 'task-empty-start', type: 'idea',
+    content: { title: 'Task source starts without evidence' }, provenance, evidenceRefs: [], expectedRevision: 0
+  });
+  const task = f.store.saveNode({
+    goalId: missingTaskEvidenceGoalId, stableKey: 'task-empty-action', type: 'task',
+    content: { title: 'Task action has no producer artifact' }, provenance, evidenceRefs: [], expectedRevision: 0
+  });
+  f.store.saveNode({
+    goalId: missingTaskEvidenceGoalId, stableKey: 'unrelated-evidence-node', type: 'evidence',
+    content: { title: 'Unrelated graph evidence must not cover the task' }, provenance,
+    evidenceRefs: ['artifact://unrelated-graph-artifact'], expectedRevision: 0
+  });
+  const taskGoal = f.store.saveNode({
+    goalId: missingTaskEvidenceGoalId, stableKey: 'task-empty-goal', type: 'goal',
+    content: { title: 'Task evidence must be complete' }, provenance, evidenceRefs: [], expectedRevision: 0
+  });
+  f.store.addEdge({ goalId: missingTaskEvidenceGoalId, fromId: taskStart.id, toId: task.id, type: 'enables', provenance, evidenceRefs: [] });
+  f.store.addEdge({ goalId: missingTaskEvidenceGoalId, fromId: task.id, toId: taskGoal.id, type: 'enables', provenance, evidenceRefs: [] });
+  const missingTaskRequest = f.verifier.getAttestationRequest(missingTaskEvidenceGoalId);
+  assert.ok(missingTaskRequest.snapshot.evidence_refs.includes('artifact://unrelated-graph-artifact'));
+  assert.deepEqual(missingTaskRequest.snapshot.nodes.find(node => node.id === task.id).evidence_refs, []);
+  assert.equal(missingTaskRequest.eligibleForAttestation, false,
+    'a task node is projected into an execution step and must not inherit evidence completeness from unrelated graph nodes');
+  assert.ok(missingTaskRequest.attestationBlockers.some(item => item.code === 'KNOWLEDGE_ACTION_EVIDENCE_MISSING'));
+  assert.equal(f.verifier.getCurrentVerification(missingTaskEvidenceGoalId).verified, false);
 });
 
 test('attestation ingestion rejects accessor-backed signed fields before invoking them or persisting anything', t => {
@@ -382,6 +492,17 @@ test('administered multi-key trust config is used for signatures and key revocat
   assert.equal(accepted.verified, true);
   assert.equal(accepted.providerId, provider);
   assert.equal(accepted.trustKeyId, 'source-rotate-in');
+  const previouslyAuthenticatedReport = f.verifier.getCurrentVerification(goalId);
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(previouslyAuthenticatedReport), true);
+  const previouslyVerifiedGraph = f.verifier.buildVerifiedGraph(
+    goalId, f.start.id, f.goal.id, request.snapshot.snapshot_hash
+  );
+  const previouslyVerifiedSearch = searchAdaptiveGoalGraph(previouslyVerifiedGraph.graph);
+  const previouslyVerifiedCandidate = previouslyVerifiedSearch.candidates[0];
+  assert.ok(previouslyVerifiedCandidate, 'the verified snapshot must produce a candidate before revocation');
+  assert.equal(projectAdaptiveGoalCandidateToPlanGraph(
+    previouslyVerifiedGraph.graph, previouslyVerifiedCandidate, undefined, {}, previouslyAuthenticatedReport
+  ).source.verification.verified, true);
   const auditRow = f.db.prepare(`SELECT configuration_fingerprint,trust_key_id,trust_config_version,configuration_source,config_change_reference
     FROM adaptive_goal_knowledge_verifications WHERE attestation_id=?`).get(accepted.attestationId);
   assert.equal(auditRow.configuration_fingerprint.length, 64);
@@ -397,6 +518,12 @@ test('administered multi-key trust config is used for signatures and key revocat
   const afterRevocation = f.verifier.getCurrentVerification(goalId);
   assert.equal(afterRevocation.verified, false);
   assert.ok(afterRevocation.blockers.some(item => item.code === 'AGG_TRUST_ROOT_REVOKED'), JSON.stringify(afterRevocation));
+  assert.equal(isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(previouslyAuthenticatedReport), false,
+    'a previously minted in-process capability must be invalidated immediately when its signer root is revoked');
+  assert.throws(() => projectAdaptiveGoalCandidateToPlanGraph(
+    previouslyVerifiedGraph.graph, previouslyVerifiedCandidate, undefined, {}, previouslyAuthenticatedReport
+  ), /source verification must be an in-process report from the configured verifier for the exact current snapshot/,
+  'Plan Graph projection must not consume a report minted before trust-root revocation');
   // A read-only verification must not advance the trust ledger merely because
   // it observed version 2. Make the authority-style observation explicit
   // before simulating a rollback to version 1.
@@ -518,6 +645,178 @@ test('verifier persistence failure rolls back the attestation row and an identic
   assert.equal(committed.verified, true);
   assert.equal(committed.created, true);
   assert.equal(f.verifier.attest(attestation).idempotent, true);
+});
+
+test('D-01 private-file fault injection proves trust commit survives workflow rollback and retry recovers after reopen', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-d01-cross-db-'));
+  const workflowPath = path.join(directory, 'workflow.db');
+  const trustPath = path.join(directory, 'agg-trust-configuration.db');
+  let f = fixture({ workflowPath, trustPath });
+  let workflowDb = f.db;
+  let trustDb = f.trustDb;
+  let lockDb = null;
+  t.after(() => {
+    try { lockDb?.close(); } catch {}
+    try { workflowDb.close(); } catch {}
+    try { trustDb.close(); } catch {}
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  withVerifierEnvironment(t);
+  assert.notEqual(workflowPath, trustPath);
+  const request = f.verifier.getAttestationRequest(goalId);
+  const attestation = signedAttestation(request);
+  workflowDb.exec(`CREATE TRIGGER fail_d01_workflow_verification BEFORE INSERT ON adaptive_goal_knowledge_verifications
+    BEGIN SELECT RAISE(ABORT, 'injected D-01 workflow persistence failure'); END`);
+  assert.throws(() => f.verifier.attest(attestation), /injected D-01 workflow persistence failure/);
+  assert.equal(workflowDb.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications').get().n, 0);
+  assert.equal(trustDb.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_trust_configuration_history').get().n, 1,
+    'trust configuration observation commits in its separate DB before the workflow transaction');
+
+  workflowDb.close();
+  trustDb.close();
+  workflowDb = new DatabaseSync(workflowPath);
+  trustDb = new DatabaseSync(trustPath);
+  const reopenedStore = createAdaptiveGoalKnowledgeStore(workflowDb);
+  const reopenedVerifier = createAdaptiveGoalKnowledgeVerifier({
+    store: reopenedStore,
+    trustConfigurationDb: trustDb,
+    resolveEvidenceRecords: f.evidenceResolver,
+    resolveSourceRecords: f.resolveSourceRecords,
+    now: f.now
+  });
+
+  lockDb = new DatabaseSync(trustPath);
+  lockDb.exec('BEGIN IMMEDIATE');
+  assert.throws(() => reopenedVerifier.attest(attestation), /database is locked/);
+  assert.equal(workflowDb.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications').get().n, 0,
+    'trust-ledger writer contention fails closed before any workflow attestation write');
+  assert.equal(trustDb.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_trust_configuration_history').get().n, 1);
+  lockDb.exec('ROLLBACK');
+  lockDb.close();
+  lockDb = null;
+
+  workflowDb.exec('DROP TRIGGER fail_d01_workflow_verification');
+  const recovered = reopenedVerifier.attest(attestation);
+  assert.equal(recovered.verified, true);
+  assert.equal(recovered.created, true);
+  assert.equal(reopenedVerifier.attest(attestation).idempotent, true);
+  assert.equal(workflowDb.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications').get().n, 1);
+  assert.equal(trustDb.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_trust_configuration_history').get().n, 1,
+    'exact retry reuses the already-committed trust observation instead of duplicating it');
+});
+
+test('D-01 SIGKILL recovery preserves committed trust observation, rolls back workflow write, and retries without duplicates', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-d01-sigkill-'));
+  const workflowPath = path.join(directory, 'workflow.db');
+  const trustPath = path.join(directory, 'agg-trust-configuration.db');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  const workflowInit = new DatabaseSync(workflowPath);
+  workflowInit.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
+    CREATE TABLE workflow_attestations (attestation_id TEXT PRIMARY KEY, payload TEXT NOT NULL);`);
+  workflowInit.close();
+  const trustInit = new DatabaseSync(trustPath);
+  trustInit.exec(`PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA busy_timeout=0;
+    CREATE TABLE trust_observations (observation_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL);`);
+  trustInit.close();
+
+  const workflowIdentity = fs.statSync(workflowPath);
+  const trustIdentity = fs.statSync(trustPath);
+  assert.ok(workflowIdentity.dev !== trustIdentity.dev || workflowIdentity.ino !== trustIdentity.ino,
+    'the test fixture must use two distinct physical SQLite files');
+
+  const crashSource = `
+    import { DatabaseSync } from 'node:sqlite';
+    const trust = new DatabaseSync(process.env.AGG_D01_TRUST_DB);
+    trust.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE');
+    trust.prepare('INSERT INTO trust_observations VALUES(?,?)').run('obs-1', 'config-fingerprint-1');
+    trust.exec('COMMIT');
+    const workflow = new DatabaseSync(process.env.AGG_D01_WORKFLOW_DB);
+    workflow.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; BEGIN IMMEDIATE');
+    workflow.prepare('INSERT INTO workflow_attestations VALUES(?,?)').run('attestation-1', 'signed-payload');
+    process.kill(process.pid, 'SIGKILL');
+  `;
+  const crashed = spawnSync(process.execPath, ['--input-type=module', '-e', crashSource], {
+    cwd: process.cwd(), encoding: 'utf8', env: { ...process.env,
+      AGG_D01_TRUST_DB: trustPath, AGG_D01_WORKFLOW_DB: workflowPath }
+  });
+  assert.equal(crashed.signal, 'SIGKILL', `child must die after trust COMMIT and before workflow COMMIT: ${crashed.stderr}`);
+
+  let trustDb = new DatabaseSync(trustPath);
+  let workflowDb = new DatabaseSync(workflowPath);
+  assert.equal(trustDb.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  assert.equal(workflowDb.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  assert.equal(trustDb.prepare('SELECT COUNT(*) AS n FROM trust_observations').get().n, 1,
+    'the independently committed trust observation survives process termination');
+  assert.equal(workflowDb.prepare('SELECT COUNT(*) AS n FROM workflow_attestations').get().n, 0,
+    'SQLite recovery rolls back the uncommitted workflow attestation');
+
+  trustDb.close();
+  workflowDb.close();
+  const trustCrashSource = `
+    import { DatabaseSync } from 'node:sqlite';
+    const db = new DatabaseSync(process.env.AGG_D01_TRUST_DB);
+    db.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE');
+    db.prepare('INSERT INTO trust_observations VALUES(?,?)').run('obs-uncommitted', 'never-committed');
+    process.kill(process.pid, 'SIGKILL');
+  `;
+  const trustCrashed = spawnSync(process.execPath, ['--input-type=module', '-e', trustCrashSource], {
+    cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, AGG_D01_TRUST_DB: trustPath }
+  });
+  assert.equal(trustCrashed.signal, 'SIGKILL', `child must die before trust DELETE-journal COMMIT: ${trustCrashed.stderr}`);
+  trustDb = new DatabaseSync(trustPath);
+  workflowDb = new DatabaseSync(workflowPath);
+  assert.equal(trustDb.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  assert.equal(trustDb.prepare('SELECT COUNT(*) AS n FROM trust_observations').get().n, 1,
+    'DELETE-journal recovery must roll back the uncommitted trust observation while retaining prior commit');
+
+  // Current trust-ledger connection defaults to busy_timeout=0. A competing
+  // process must fail closed immediately while the independent writer holds
+  // the trust database; it must not reach the workflow write.
+  trustDb.exec('BEGIN IMMEDIATE');
+  const contentionSource = `
+    import { DatabaseSync } from 'node:sqlite';
+    const db = new DatabaseSync(process.env.AGG_D01_TRUST_DB);
+    try { db.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE'); process.stdout.write('UNEXPECTED_LOCK_SUCCESS'); }
+    catch (error) { process.stdout.write(String(error.message)); process.exitCode = 0; }
+    finally { try { db.close(); } catch {} }
+  `;
+  const contended = spawnSync(process.execPath, ['--input-type=module', '-e', contentionSource], {
+    cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, AGG_D01_TRUST_DB: trustPath }
+  });
+  assert.equal(contended.status, 0, contended.stderr);
+  assert.match(contended.stdout, /database is locked/i);
+  trustDb.exec('ROLLBACK');
+  trustDb.close();
+  workflowDb.close();
+
+  // Exact retry: trust insert is idempotent; workflow attestation commits once.
+  trustDb = new DatabaseSync(trustPath);
+  workflowDb = new DatabaseSync(workflowPath);
+  trustDb.exec('BEGIN IMMEDIATE');
+  const trustRetry = trustDb.prepare(`INSERT INTO trust_observations VALUES(?,?)
+    ON CONFLICT(observation_id) DO NOTHING`).run('obs-1', 'config-fingerprint-1');
+  trustDb.exec('COMMIT');
+  workflowDb.exec('BEGIN IMMEDIATE');
+  workflowDb.prepare(`INSERT INTO workflow_attestations VALUES(?,?)
+    ON CONFLICT(attestation_id) DO NOTHING`).run('attestation-1', 'signed-payload');
+  workflowDb.exec('COMMIT');
+  assert.equal(trustRetry.changes, 0, 'retry must not duplicate the already committed trust observation');
+  assert.equal(trustDb.prepare('SELECT COUNT(*) AS n FROM trust_observations').get().n, 1);
+  assert.equal(workflowDb.prepare('SELECT COUNT(*) AS n FROM workflow_attestations').get().n, 1);
+  trustDb.close();
+  workflowDb.close();
+
+  trustDb = new DatabaseSync(trustPath);
+  workflowDb = new DatabaseSync(workflowPath);
+  assert.equal(trustDb.prepare('SELECT COUNT(*) AS n FROM trust_observations').get().n, 1,
+    'trust state remains durable after a second independent restart');
+  assert.equal(workflowDb.prepare('SELECT COUNT(*) AS n FROM workflow_attestations').get().n, 1,
+    'recovered workflow state remains durable after a second independent restart');
+  assert.equal(trustDb.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  assert.equal(workflowDb.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  trustDb.close();
+  workflowDb.close();
 });
 
 test('expired signed attestations do not authorize and can be refreshed with a new trusted nonce', t => {

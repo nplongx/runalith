@@ -7,7 +7,7 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm12-phase3-store-'));
 process.env.WORKFLOW_DATA_DIR = dir;
 process.env.WORKFLOW_DB = path.join(dir, 'workflow.db');
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const store = new WorkflowStore();
 const job = store.createJob({ conversationKey: 'm12-phase3-test', title: 'M12 Phase 3' });
 const task = store.ensureTask(job.job_id, { role: 'researcher', description: 'native specialist' });
@@ -242,7 +242,7 @@ if (recoveredAttach.state !== 'ACTIVE' || store.getTask(attachFailureTask.task_i
 // Exercise real process reopen and concurrent duplicate attachment against the
 // same SQLite database. Both processes must observe the same committed lineage
 // rather than creating duplicate attempts/sessions or leaking partial state.
-const childSource = `import { WorkflowStore } from './src/runtime/job-store.js';
+const childSource = `import { WorkflowStore } from './job-store.js';
 const store = new WorkflowStore();
 const row = store.attachM12NativeSpecialistRuntime(${JSON.stringify(attachFailureTask.task_id)}, { attempt: 1, sessionKey: 'agent:m12-test:attach-failure:1', nativeSessionId: 'native-session-attach-failure', runId: 'native-run-attach-failure', environmentId: 'worker:test', nodeId: 'node-test', leaseId: 'lease-m12-attach-failure', ownerEpoch: 1 });
 if (row.state !== 'ACTIVE') throw new Error('reopened runtime is not active');

@@ -8,7 +8,7 @@ process.env.WORKFLOW_DB = path.join(root, 'workflow.db');
 process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { createExecutionRequest } = await import('../src/runtime/execution-contract.js');
 const { DistributedScheduler } = await import('../src/runtime/distributed-scheduler.js');
 const {

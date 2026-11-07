@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { DistributedScheduler } from '../src/runtime/distributed-scheduler.js';
 
-const leases = new Map([['lease-1', { lease_id: 'lease-1', task_id: 'task-1', job_id: 'job-1', attempt: 1, state: 'ACTIVE', worker_id: 'worker-1' }]]);
-const providerRuns = new Map([['lease-1', { provider_run_id: 'run-1', lease_id: 'lease-1', task_id: 'task-1', job_id: 'job-1', attempt: 1, state: 'RUNNING' }]]);
+const leases = new Map([['lease-1', { lease_id: 'lease-1', task_id: 'task-1', job_id: 'job-1', attempt: 1, owner_epoch: 1, state: 'ACTIVE', worker_id: 'worker-1' }]]);
+const providerRuns = new Map([['lease-1', { provider_run_id: 'run-1', lease_id: 'lease-1', task_id: 'task-1', job_id: 'job-1', attempt: 1, owner_epoch: 1, state: 'RUNNING' }]]);
+const dispatchIntents = new Map([['lease-1', { dispatch_key: 'dispatch-1', provider_run_id: 'run-1', lease_id: 'lease-1', task_id: 'task-1', job_id: 'job-1', attempt: 1, owner_epoch: 1, state: 'DISPATCHED' }]]);
 const store = {
-  db: { prepare(sql) { return { get: (...args) => sql.includes('provider_runs') ? providerRuns.get(args[0]) || null : [...leases.values()].find(x => x.task_id === args[0] && x.state === 'ACTIVE') || null, run() {} }; } },
+  db: { prepare(sql) { return {
+    get: (...args) => sql.includes('provider_runs') ? providerRuns.get(args[0]) || null
+      : [...leases.values()].find(x => x.task_id === args[0] && x.state === 'ACTIVE') || null,
+    all: (...args) => sql.includes('sqlite_master') ? [{ name: 'provider_runs' }, { name: 'provider_dispatch_intents' }]
+      : sql.includes('provider_runs') ? [...providerRuns.values()].filter(x => x.lease_id === args[0])
+        : sql.includes('provider_dispatch_intents') ? [...dispatchIntents.values()].filter(x => x.lease_id === args[0]) : [],
+    run() {}
+  }; } },
   acquireTaskLease() { throw new Error('must not acquire a second lease'); },
   recordEvent() {},
   expireTaskLease() {}

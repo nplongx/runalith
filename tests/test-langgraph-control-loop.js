@@ -12,6 +12,13 @@ const store = {
   getJob: () => ({ job_id: 'job-p7', state: 'RUNNING' }),
   getExecutionPlan: () => null,
   getWorkflowRuntimeState: () => ({ phase: 'WAIT', attempt: 1 }),
+  getLatestArtifact: () => null,
+  prepareStandardEngineeringRework: () => {},
+  hasEvent: () => false,
+  getJobTrace: () => null,
+  setWorkflowRuntimeState: () => {},
+  setProviderWaiting: () => {},
+  transitionWorkflowPhase: () => {},
   reapExpiredTaskLeases: () => 0,
   recordEvent: (...args) => events.push(args),
 };

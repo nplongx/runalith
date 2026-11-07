@@ -2,6 +2,8 @@
 
 This policy separates a public, explicitly experimental GitHub pre-release from an official frozen or production release. A strict readiness audit is scoped to the deployment/production gate; its `BLOCKED_NOT_READY` result must remain visible, but it is not by itself a veto on publishing a clearly labeled testing pre-release.
 
+> **Current candidate checkpoint — 2026-11-07:** the local Runalith checkout is an integration candidate, not an approved release. `npm test` currently fails in V2 AGG inventory/SQL-audit regressions; full Rust workspace tests and all-target Clippy currently fail in the artifact read-port integration-test build. Documentation checks, Rust workspace `cargo check`, and Rust formatting pass. No exact-commit package archive and checksum were produced in this validation pass. Therefore the current candidate does **not** meet this policy's minimum testing-pre-release checks; keep publication as a draft until the failures are resolved or an explicitly narrowed scope is independently reviewed. See [the current repository status](STATUS_2026-11-07.md).
+
 ## Tier 1 — Testing pre-release (`-rc.N`)
 
 A pre-release lets users install and evaluate a candidate and report defects. It is **not** a production-readiness statement, formal deployment authorization, or claim that all integration work is complete. A maintainer may publish one with known non-production gates still open when all minimum pre-release checks below pass and the unresolved limitations are prominent in the release notes.

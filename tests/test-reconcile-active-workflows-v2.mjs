@@ -56,6 +56,7 @@ function writeFixture(dbPath) {
   const activeStale = 'job-stale';
   insertJob.run(activeStale, 'conversation:stale', 'stale job with running task but no worker identity', 'EXECUTING', 'active', 'task-stale', 0, OLD, OLD);
   insertTask.run('task-stale', activeStale, 'researcher', 'running', null, null, null, '[]', '{}', OLD, OLD, null, null, 0, null, null, null);
+  insertTask.run('task-stale-second', activeStale, 'engineer', 'pending', null, null, null, '[]', '{}', OLD, OLD, null, null, 0, null, null, null);
   insertProviderRun.run('provider-run-stale', 'github-actions', activeStale, 'task-stale', 'lease-missing', 1, 1,
     'a'.repeat(40), 'workflow.yml', 'main', 'in_progress', 'running', null, 'dispatch-stale', 'b'.repeat(64), 2, OLD, OLD);
   insertEvent.run('event-stale', activeStale, 'task.dispatched', JSON.stringify({ taskId: 'task-stale', role: 'researcher',
@@ -76,6 +77,18 @@ function writeFixture(dbPath) {
   // represented as a complete task/event graph when a payload exceeds it.
   insertEvent.run('event-task-correlation-scan-cap', activeStale, 'task.batch_reconciled', JSON.stringify({
     entries: [...Array.from({ length: 10_000 }, () => ({ note: 'bounded scan fixture' })), { taskId: 'task-stale-after-scan-cap' }]
+  }), OLD);
+  // A partial scan that finds task A before its array bound must still mark
+  // the job graph incomplete because task B appears after the bound.
+  insertEvent.run('event-task-correlation-partial-before-cap', activeStale, 'task.batch_reconciled', JSON.stringify({
+    entries: [{ taskId: 'task-stale' }, ...Array.from({ length: 10_000 }, () => ({ note: 'partial attribution bound fixture' })),
+      { taskId: 'task-stale-second' }]
+  }), OLD);
+  // An unknown task ID discovered before truncation also cannot suppress the
+  // job-level warning: it has no local task row to receive a task-scoped flag.
+  insertEvent.run('event-task-correlation-unknown-before-cap', activeStale, 'task.batch_reconciled', JSON.stringify({
+    entries: [{ taskId: 'task-not-in-this-job' }, ...Array.from({ length: 10_000 }, () => ({ note: 'unknown attribution bound fixture' })),
+      { taskId: 'task-stale-second' }]
   }), OLD);
   insertArtifact.run('artifact-stale-mismatch', 'other-job', 'task-stale', 'architecture', 'artifact://mismatch', '{}', OLD, 1, 'architect',
     '{"components":[]}', '[]', 'active', null, sha('mismatched-artifact'));
@@ -168,14 +181,14 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   assert.equal(report.operabilityMetrics.status, 'DIAGNOSTIC_ONLY_NOT_RELEASE_EVIDENCE');
   assert.equal(report.operabilityMetrics.jobsWithUnverifiedOwnerIdentity, 6);
   assert.equal(report.operabilityMetrics.jobsWithProviderIdentityNotPersisted, 6);
-  assert.equal(report.operabilityMetrics.tasksObserved, 7);
+  assert.equal(report.operabilityMetrics.tasksObserved, 8);
   assert.equal(report.operabilityMetrics.runningTasksObserved, 5);
   assert.equal(report.operabilityMetrics.runningTasksWithoutActiveLeaseRows, 3);
   assert.equal(report.operabilityMetrics.runningTasksMissingExecutionMetadata, 1);
   assert.equal(report.operabilityMetrics.tasksWithReconciliationFlags, 6,
     'a nonterminal provider run whose lease binding is missing must be counted as a reconciliation finding');
   assert.equal(report.operabilityMetrics.tasksWithConflictingEventReferences, 1);
-  assert.equal(report.operabilityMetrics.tasksWithUnverifiedOwnerOrProvider, 7);
+  assert.equal(report.operabilityMetrics.tasksWithUnverifiedOwnerOrProvider, 8);
   assert.equal(report.operabilityMetrics.terminalDispositionProof.status, 'NOT_ASSESSED_BY_LOCAL_SQLITE_DIAGNOSTIC');
   assert.equal(report.operabilityMetrics.terminalDispositionProof.verifiedTerminalDispositions, 0);
   assert.equal(report.operabilityMetrics.automaticLifecycleActionsAuthorized, false);
@@ -183,6 +196,8 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   const jobs = new Map(report.diagnostics.map(job => [job.jobId, job]));
 
   const stale = jobs.get('job-stale');
+  const staleTaskA = stale.tasks.find(task => task.task?.taskId === 'task-stale');
+  const staleTaskB = stale.tasks.find(task => task.task?.taskId === 'task-stale-second');
   assert.equal(stale.classification, 'stale_candidate_reconciliation_required');
   assert.ok(stale.flags.includes('RUNNING_TASK_WITHOUT_EXECUTION_METADATA'));
   assert.ok(stale.flags.includes('RUNNING_TASKS_WITHOUT_ACTIVE_LEASES'));
@@ -212,14 +227,21 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
     'attempt references in the sixth nested array item must not be omitted');
   assert.ok(stale.tasks[0].lifecycleEvidence.eventReferences.unresolvedAttemptIds.includes('attempt-bulk-150'),
     'lineage reference scans must include more than 100 array elements when within the explicit scan bound');
-  assert.equal(stale.tasks[0].lifecycleEvidence.eventReferences.scan.truncated, false);
-  assert.equal(stale.tasks[0].eventLineage.truncated, false,
-    'an unattributed truncated event must not be represented as if this task payload was truncated');
+  assert.equal(staleTaskA.lifecycleEvidence.eventReferences.scan.truncated, true);
+  assert.equal(staleTaskA.eventLineage.truncated, true,
+    'task A is correlated to a truncated event and must retain task-scoped incomplete evidence');
+  assert.ok(staleTaskA.eventLineage.eventIds.includes('event-task-correlation-partial-before-cap'));
+  assert.ok(staleTaskB, 'second task must exist to verify job-level truncation is not attributed to every task');
+  assert.equal(staleTaskB.eventLineage.truncated, false,
+    'task B appears only after the scan cap and must not be falsely attributed');
   assert.ok(stale.flags.includes('EVENT_TASK_CORRELATION_SCAN_TRUNCATED'),
-    'an unattributed truncated event must be visible at job scope');
-  assert.ok(!stale.tasks[0].flags.includes('EVENT_TASK_CORRELATION_SCAN_TRUNCATED'),
-    'an unattributed event scan failure must not be falsely attributed to every task');
-  assert.ok(stale.tasks[0].eventLineage.unattributedTruncatedEventIds.includes('event-task-correlation-scan-cap'));
+    'any truncated task-correlation event must be visible at job scope, even when some task IDs were discovered');
+  assert.ok(staleTaskA.flags.includes('EVENT_TASK_CORRELATION_SCAN_TRUNCATED'));
+  assert.ok(!staleTaskB.flags.includes('EVENT_TASK_CORRELATION_SCAN_TRUNCATED'),
+    'partial/unknown attribution must not falsely assign the job-level warning to every task');
+  assert.ok(staleTaskB.eventLineage.unattributedTruncatedEventIds.includes('event-task-correlation-scan-cap'));
+  assert.ok(staleTaskB.eventLineage.unattributedTruncatedEventIds.includes('event-task-correlation-partial-before-cap'));
+  assert.ok(staleTaskB.eventLineage.unattributedTruncatedEventIds.includes('event-task-correlation-unknown-before-cap'));
   assert.match(stale.ownerAction, /responsible owner/);
 
   const mismatched = jobs.get('job-stuck-terminal');
@@ -311,6 +333,55 @@ test('read-only reconciliation correlates job/task/attempt/result/artifact/event
   assert.notEqual(eventChangedReport.recoveryPlan.find(item => item.jobId === 'job-stale').idempotencyKey,
     changedReport.recoveryPlan.find(item => item.jobId === 'job-stale').idempotencyKey,
     'changing payload bytes under a stable, incompletely correlated event ID must invalidate the recovery identity');
+});
+
+test('provider-run reconciliation binds owner epochs to the exact lease and preserves NULL task bindings', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'active-workflow-provider-run-binding-'));
+  fs.chmodSync(dir, 0o700);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const dbPath = path.join(dir, 'workflow.db');
+  writeFixture(dbPath);
+  const db = new DatabaseSync(dbPath);
+  const insertLease = db.prepare(`INSERT INTO task_leases(lease_id,task_id,job_id,attempt,worker_id,state,issued_at,heartbeat_at,expires_at,released_at,last_error,owner_epoch)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`);
+  insertLease.run('lease-exact-epoch', 'task-stale', 'job-stale', 1, 'worker-exact', 'ACTIVE', NOW, NOW,
+    '2099-10-26T06:10:00.000Z', null, null, 7);
+  insertLease.run('lease-unrelated-epoch', 'task-stale', 'job-stale', 1, 'worker-unrelated', 'ACTIVE', NOW, NOW,
+    '2099-10-26T06:10:00.000Z', null, null, 9);
+  const insertRun = db.prepare(`INSERT INTO provider_runs(provider_run_id,provider,job_id,task_id,lease_id,attempt,run_attempt,
+    input_commit,workflow,ref,state,status,conclusion,dispatch_key,request_sha256,owner_epoch,created_at,updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  insertRun.run('provider-run-epoch-match', 'github-actions', 'job-stale', 'task-stale', 'lease-exact-epoch', 1, 1,
+    'e'.repeat(40), 'workflow.yml', 'main', 'in_progress', 'running', null, 'dispatch-epoch-match', 'f'.repeat(64), 7, NOW, NOW);
+  insertRun.run('provider-run-null-task', 'github-actions', 'job-stale', null, null, 1, 1,
+    '1'.repeat(40), 'workflow.yml', 'main', 'in_progress', 'running', null, 'dispatch-null-task', '2'.repeat(64), null, NOW, NOW);
+  db.close();
+
+  const readReport = () => {
+    const readOnly = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      return buildActiveWorkflowReconciliationReport(readOnly, { now: NOW, staleAfterMs: 900_000, limit: 20, procRoot: path.join(dir, 'proc') });
+    } finally { readOnly.close(); }
+  };
+  const first = readReport();
+  const firstJob = first.diagnostics.find(job => job.jobId === 'job-stale');
+  const firstTask = firstJob.tasks.find(task => task.task?.taskId === 'task-stale');
+  assert.ok(firstTask, `the exact task must remain in the diagnostic report: ${JSON.stringify(first.diagnostics.map(job => ({ jobId: job.jobId, taskIds: job.tasks?.map(task => task.task?.taskId) })))}`);
+  assert.ok(!firstTask.flags.includes('PROVIDER_RUN_OWNER_EPOCH_MISMATCH'),
+    `an unrelated active lease epoch must not conflict with the provider run bound to lease-exact-epoch: ${JSON.stringify({ flags: firstTask.flags, mismatches: firstTask.lineageAssessment.providerRunOwnerEpochMismatchIds, runs: firstTask.providerRuns, leases: firstTask.leases })}`);
+  const unbound = firstTask.providerRuns.find(run => run.providerRunId === 'provider-run-null-task');
+  assert.equal(unbound.taskBindingStatus, 'UNBOUND_NULL_TASK_ID');
+  assert.ok(firstTask.flags.includes('NONTERMINAL_PROVIDER_RUN_WITHOUT_TASK_BINDING'));
+  assert.equal(firstTask.lifecycleEvidence.disposition, 'HOLD_CONFLICTING_EVIDENCE');
+
+  const writer = new DatabaseSync(dbPath);
+  writer.prepare('UPDATE task_leases SET owner_epoch=? WHERE lease_id=?').run(8, 'lease-exact-epoch');
+  writer.close();
+  const changed = readReport();
+  const changedTask = changed.diagnostics.find(job => job.jobId === 'job-stale').tasks
+    .find(task => task.task?.taskId === 'task-stale');
+  assert.ok(changedTask.flags.includes('PROVIDER_RUN_OWNER_EPOCH_MISMATCH'),
+    'a mismatch on the exact provider-run lease must be surfaced');
 });
 
 test('legacy provider runs without task binding remain visible and block inferred disposition', t => {

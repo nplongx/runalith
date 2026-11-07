@@ -1,0 +1,38 @@
+{
+  "fixture_set":"WS2-Control-Domain-Error-Diagnostics-v1",
+  "status":"DRAFT_NOT_RATIFIED",
+  "schema_version":1,
+  "purpose":"Keep WS6 verifier-specific causes distinct inside WS2 producer errors; AUTHORITY_UNAVAILABLE must not erase diagnostic cause.",
+  "source_review_message":"f6326687-8123-4a19-bea1-dc81f2120ca9",
+  "cases":[
+    {"cause_code":"GOVERNANCE_RECEIPT_SIGNATURE_ENVELOPE_INVALID","domain_code":"AUTHENTICATION_FAILED","resolution":"REJECTED","automatic_retry":false},
+    {"cause_code":"AGG_APPROVAL_SIGNATURE_INVALID","domain_code":"AUTHENTICATION_FAILED","resolution":"REJECTED","automatic_retry":false},
+    {"cause_code":"GOVERNANCE_RECEIPT_IDENTITY_UNAUTHORIZED","domain_code":"AUTHENTICATION_FAILED","resolution":"REJECTED","automatic_retry":false},
+    {"cause_code":"GOVERNANCE_RECEIPT_BINDING_INVALID","domain_code":"SUBJECT_MISMATCH","resolution":"REJECTED","automatic_retry":false},
+    {"cause_code":"PAYLOAD_MISMATCH","domain_code":"SUBJECT_MISMATCH","resolution":"REJECTED","automatic_retry":false},
+    {"cause_code":"DIGEST_MISMATCH","domain_code":"SUBJECT_MISMATCH","resolution":"REJECTED","automatic_retry":false},
+    {"cause_code":"TRUST_SNAPSHOT_MISMATCH","domain_code":"SUBJECT_MISMATCH","resolution":"REJECTED","automatic_retry":false},
+    {"cause_code":"AGG_TRUST_CONFIG_NOT_OBSERVED","domain_code":"AUTHORITY_UNAVAILABLE","resolution":"UNKNOWN","automatic_retry":false},
+    {"cause_code":"AGG_TRUST_CONFIG_ROLLBACK","domain_code":"AUTHORITY_UNAVAILABLE","resolution":"UNRESOLVED","automatic_retry":false},
+    {"cause_code":"AGG_TRUST_ROOT_REVOKED","domain_code":"AUTHORITY_UNAVAILABLE","resolution":"UNRESOLVED","automatic_retry":false},
+    {"cause_code":"AGG_TRUST_ROOT_OUTSIDE_VALIDITY","domain_code":"AUTHORITY_UNAVAILABLE","resolution":"UNRESOLVED","automatic_retry":false},
+    {"cause_code":"GOVERNANCE_RECEIPT_NONCE_CONFLICT","domain_code":"IDEMPOTENCY_CONFLICT","resolution":"CONFLICT","automatic_retry":false},
+    {"cause_code":"GOVERNANCE_RECEIPT_NONCE_LEDGER_UNAVAILABLE","domain_code":"AUTHORITY_UNAVAILABLE","resolution":"UNKNOWN","automatic_retry":false}
+  ],
+  "valid_rejected_receipt": {
+    "verification":"signature_and_subject_valid",
+    "decision":"Rejected",
+    "domain_code":null,
+    "cause_code":null,
+    "resolution":"REJECTED",
+    "admission_authorized":false,
+    "transport_error":false
+  },
+  "preservation_rules": [
+    "Always retain cause_code verbatim when present.",
+    "AUTHORITY_UNAVAILABLE is a broad domain category, never a replacement for the verifier cause.",
+    "Invalid signature/issuer is not trust unavailable.",
+    "Nonce rebinding is IDEMPOTENCY_CONFLICT and never retryable.",
+    "Valid signed Rejected is a domain decision, not an authentication or transport error."
+  ]
+}

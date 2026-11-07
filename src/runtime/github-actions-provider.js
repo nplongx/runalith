@@ -10,11 +10,11 @@ import {
   assertProviderDispatchIntent,
   canonicalProviderDispatchRequest,
   createProviderDispatchIdentity,
-  ensureProviderDispatchIntentColumns,
   normalizeProviderApiBase,
   providerDispatchConfig,
   providerDispatchIdentityFromIntent
 } from './provider-dispatch-identity.js';
+import { createWorkflowStatePort } from './workflow-state-port.js';
 
 const API_VERSION = '2026-03-10';
 const DEFAULT_API = 'https://api.github.com';
@@ -379,6 +379,7 @@ export class GitHubActionsProvider {
     ref = DEFAULT_REF,
     fetchImpl = globalThis.fetch,
     store = null,
+    statePort = null,
     artifactDownloader = null,
     taskPayloadSourceReader = readTaskPayloadAtCommit,
     allowUnverifiedLegacyResults = false,
@@ -393,7 +394,7 @@ export class GitHubActionsProvider {
     this.workflow = workflow;
     this.ref = ref;
     this.fetch = fetchImpl;
-    this.store = store;
+    this.state = (statePort || store) ? createWorkflowStatePort(statePort || store) : null;
     this.artifactDownloader = artifactDownloader;
     if (typeof taskPayloadSourceReader !== 'function') throw new Error('GitHubActionsProvider: taskPayloadSourceReader must be a function');
     this.taskPayloadSourceReader = taskPayloadSourceReader;
@@ -411,69 +412,7 @@ export class GitHubActionsProvider {
   }
 
   ensureSchema() {
-    this.store?.db?.exec(`
-      CREATE TABLE IF NOT EXISTS provider_runs (
-        provider_run_id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL,
-        job_id TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        attempt INTEGER NOT NULL,
-        owner_epoch INTEGER,
-        input_commit TEXT NOT NULL,
-        dispatch_key TEXT,
-        request_sha256 TEXT,
-        workflow TEXT NOT NULL,
-        ref TEXT NOT NULL,
-        state TEXT NOT NULL,
-        conclusion TEXT,
-        html_url TEXT,
-        artifact_id TEXT,
-        output_commit TEXT,
-        run_attempt INTEGER,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_provider_runs_task ON provider_runs(task_id, attempt);
-      CREATE TABLE IF NOT EXISTS provider_dispatch_intents (
-        dispatch_key TEXT PRIMARY KEY,
-        job_id TEXT NOT NULL,
-        task_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        attempt INTEGER NOT NULL,
-        owner_epoch INTEGER,
-        provider TEXT NOT NULL,
-        input_commit TEXT NOT NULL,
-        request_sha256 TEXT,
-        request_json TEXT,
-        api_base TEXT,
-        workflow TEXT,
-        repository TEXT,
-        event TEXT,
-        ref TEXT,
-        state TEXT NOT NULL,
-        provider_run_id TEXT,
-        dispatch_claim_id TEXT,
-        dispatch_claimed_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_provider_dispatch_intents_state ON provider_dispatch_intents(state, created_at);
-    `);
-    ensureProviderDispatchIntentColumns(this.store?.db);
-    // Existing local databases predate provider-run-attempt binding. Adding a
-    // nullable column is safe, but P3 result collection below fails closed for
-    // legacy rows that have no trustworthy run_attempt recorded at dispatch.
-    try { this.store?.db?.exec('ALTER TABLE provider_runs ADD COLUMN run_attempt INTEGER'); }
-    catch (error) {
-      if (!/duplicate column name:\s*run_attempt/i.test(String(error?.message || error))) throw error;
-    }
-    for (const column of ['dispatch_key', 'request_sha256', 'owner_epoch']) {
-      try { this.store?.db?.exec(`ALTER TABLE provider_runs ADD COLUMN ${column} ${column === 'owner_epoch' ? 'INTEGER' : 'TEXT'}`); }
-      catch (error) {
-        if (!new RegExp(`duplicate column name:\\s*${column}`, 'i').test(String(error?.message || error))) throw error;
-      }
-    }
+    this.state?.ensureProviderExecutionSchema();
   }
 
   headers() {
@@ -539,139 +478,19 @@ export class GitHubActionsProvider {
   }
 
   _persist(run) {
-    if (!this.store?.db) return;
-    const ts = new Date(this.now()).toISOString();
-    // The identity preflight, upsert, and readback must be one SQLite write
-    // transition. Otherwise a concurrent insert can win between SELECT and
-    // UPSERT, letting a conflicting run attempt mutate terminal metadata before
-    // the post-write identity check throws. A savepoint composes with callers
-    // that already hold a larger dispatch-binding transaction.
-    this.store.db.exec('SAVEPOINT provider_run_persist_identity');
-    try {
-      const persisted = this.store.db.prepare('SELECT * FROM provider_runs WHERE provider_run_id=?').get(String(run.provider_run_id));
-      if (persisted) {
-        for (const field of ['provider', 'job_id', 'task_id', 'lease_id', 'attempt', 'owner_epoch', 'input_commit', 'workflow', 'ref', 'dispatch_key', 'request_sha256', 'run_attempt']) {
-          const current = persisted[field]; const incoming = run[field];
-          if (current !== null && current !== undefined && incoming !== null && incoming !== undefined &&
-              String(current).toLowerCase() !== String(incoming).toLowerCase()) {
-            throw new Error(`provider run ${run.provider_run_id} immutable ${field} binding conflicts with durable ledger`);
-          }
-        }
-        if (persisted.state === 'COMPLETED' &&
-            (run.state !== 'COMPLETED' || String(persisted.conclusion ?? '') !== String(run.conclusion ?? ''))) {
-          throw new Error(`provider run ${run.provider_run_id} incoming state/conclusion conflicts with durable terminal state`);
-        }
-        if (persisted.state === 'COMPLETED') {
-          for (const field of ['artifact_id', 'output_commit']) {
-            if (persisted[field] !== null && persisted[field] !== undefined && run[field] !== null && run[field] !== undefined &&
-                String(persisted[field]).toLowerCase() !== String(run[field]).toLowerCase()) {
-              throw new Error(`provider run ${run.provider_run_id} incoming ${field} conflicts with durable terminal evidence`);
-            }
-          }
-        }
-      }
-      const result = this.store.db.prepare(`INSERT INTO provider_runs
-      (provider_run_id,provider,job_id,task_id,lease_id,attempt,owner_epoch,input_commit,dispatch_key,request_sha256,workflow,ref,state,conclusion,html_url,artifact_id,output_commit,run_attempt,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(provider_run_id) DO UPDATE SET
-      state=CASE WHEN provider_runs.state='COMPLETED' OR excluded.state='COMPLETED' THEN 'COMPLETED' ELSE excluded.state END,
-      conclusion=CASE WHEN provider_runs.state='COMPLETED' THEN provider_runs.conclusion ELSE excluded.conclusion END,
-      html_url=COALESCE(provider_runs.html_url,excluded.html_url),
-      artifact_id=COALESCE(provider_runs.artifact_id,excluded.artifact_id),
-      output_commit=COALESCE(provider_runs.output_commit,excluded.output_commit),
-      dispatch_key=COALESCE(provider_runs.dispatch_key,excluded.dispatch_key),
-      request_sha256=COALESCE(provider_runs.request_sha256,excluded.request_sha256),
-      owner_epoch=COALESCE(provider_runs.owner_epoch,excluded.owner_epoch),
-      run_attempt=COALESCE(provider_runs.run_attempt,excluded.run_attempt), updated_at=excluded.updated_at
-      WHERE (provider_runs.dispatch_key IS NULL OR excluded.dispatch_key IS NULL OR provider_runs.dispatch_key=excluded.dispatch_key)
-        AND (provider_runs.request_sha256 IS NULL OR excluded.request_sha256 IS NULL OR provider_runs.request_sha256=excluded.request_sha256)`)
-        .run(run.provider_run_id, 'github-actions', run.job_id, run.task_id, run.lease_id, run.attempt,
-        Number.isSafeInteger(Number(run.owner_epoch)) && Number(run.owner_epoch) >= 1 ? Number(run.owner_epoch) : null, run.input_commit,
-        run.dispatch_key || null, run.request_sha256 || null, run.workflow, run.ref, run.state, run.conclusion || null, run.html_url || null, run.artifact_id || null,
-        run.output_commit || null, Number.isSafeInteger(Number(run.run_attempt)) && Number(run.run_attempt) >= 1 ? Number(run.run_attempt) : null,
-        run.created_at || ts, ts);
-      if (result?.changes === 0) throw new Error(`provider run ${run.provider_run_id} immutable dispatch binding compare-and-set failed`);
-      const persistedAfterWrite = this.store.db.prepare('SELECT * FROM provider_runs WHERE provider_run_id=?').get(String(run.provider_run_id));
-      if (!persistedAfterWrite) throw new Error(`provider run ${run.provider_run_id} durable readback is missing after persistence`);
-      for (const field of ['provider', 'job_id', 'task_id', 'lease_id', 'attempt', 'owner_epoch', 'input_commit', 'workflow', 'ref', 'dispatch_key', 'request_sha256', 'run_attempt']) {
-        const expected = run[field];
-        const actual = persistedAfterWrite[field];
-        if (expected !== null && expected !== undefined && expected !== '' && actual !== null && actual !== undefined &&
-            String(actual).toLowerCase() !== String(expected).toLowerCase()) {
-          throw new Error(`provider run ${run.provider_run_id} durable readback conflicts with immutable ${field} binding`);
-        }
-        if (expected !== null && expected !== undefined && expected !== '' &&
-            ['job_id', 'task_id', 'lease_id', 'input_commit', 'workflow', 'ref', 'dispatch_key', 'request_sha256'].includes(field) &&
-            (actual === null || actual === undefined || actual === '')) {
-          throw new Error(`provider run ${run.provider_run_id} durable readback is missing immutable ${field} binding`);
-        }
-      }
-      for (const field of ['artifact_id', 'output_commit']) {
-        const expected = run[field];
-        const actual = persistedAfterWrite[field];
-        if (expected !== null && expected !== undefined && expected !== '' && actual !== null && actual !== undefined &&
-            String(actual).toLowerCase() !== String(expected).toLowerCase()) {
-          throw new Error(`provider run ${run.provider_run_id} durable readback conflicts with terminal ${field} evidence`);
-        }
-      }
-      if (persistedAfterWrite.state !== 'COMPLETED' && run.state === 'COMPLETED') {
-        throw new Error(`provider run ${run.provider_run_id} durable readback failed to preserve terminal state`);
-      }
-      if (persistedAfterWrite.state === 'COMPLETED' &&
-          (run.state !== 'COMPLETED' || String(persistedAfterWrite.conclusion ?? '') !== String(run.conclusion ?? ''))) {
-        throw new Error(`provider run ${run.provider_run_id} durable readback conflicts with terminal state/conclusion`);
-      }
-      this.store.db.exec('RELEASE SAVEPOINT provider_run_persist_identity');
-    } catch (error) {
-      try { this.store.db.exec('ROLLBACK TO SAVEPOINT provider_run_persist_identity'); } catch {}
-      try { this.store.db.exec('RELEASE SAVEPOINT provider_run_persist_identity'); } catch {}
-      throw error;
-    }
+    if (!this.state) return;
+    return this.state.persistProviderRun(run, {
+      provider: 'github-actions',
+      updatedAt: new Date(this.now()).toISOString()
+    });
   }
 
   _assertP3ResultCollectionLease(providerRunId, result, expectedOwnerEpoch) {
-    // This check is called after all remote awaits and while the caller holds a
-    // SQLite writer savepoint. Status/artifact reads may outlive the lease or
-    // race cancellation; the immutable provider run alone cannot authorize a
-    // result once its task/parent has become terminal or ownership has changed.
-    if (!this.store?.db || typeof this.store.getTaskLease !== 'function' ||
-        typeof this.store.getTask !== 'function' || typeof this.store.getJob !== 'function') return;
-    const currentRun = this._getPersisted(providerRunId);
-    const currentIntent = this._getDispatchIntent(providerRunId);
-    const lease = this.store.getTaskLease(result.lease_id);
-    const task = this.store.getTask(result.task_id);
-    const parent = this.store.getJob(result.job_id);
-    const expiry = typeof lease?.expires_at === 'string' ? Date.parse(lease.expires_at) : NaN;
-    if (!currentRun || !currentIntent || currentRun.provider_run_id !== String(providerRunId) ||
-        currentRun.provider !== 'github-actions' || currentRun.state !== 'COMPLETED' ||
-        String(currentRun.conclusion || '').toLowerCase() !== 'success' || currentRun.job_id !== result.job_id ||
-        currentRun.task_id !== result.task_id || currentRun.lease_id !== result.lease_id ||
-        currentRun.attempt !== result.attempt || currentRun.owner_epoch !== expectedOwnerEpoch ||
-        currentRun.run_attempt !== result.provider_run_attempt ||
-        String(currentRun.input_commit || '').toLowerCase() !== String(result.input_commit || '').toLowerCase() ||
-        currentIntent.state !== 'DISPATCHED' || currentIntent.provider_run_id !== String(providerRunId) ||
-        currentIntent.job_id !== result.job_id || currentIntent.task_id !== result.task_id ||
-        currentIntent.lease_id !== result.lease_id || currentIntent.attempt !== result.attempt ||
-        currentIntent.owner_epoch !== expectedOwnerEpoch || currentIntent.dispatch_key !== currentRun.dispatch_key ||
-        currentIntent.request_sha256 !== currentRun.request_sha256 ||
-        !/^[a-f0-9]{64}$/.test(String(currentIntent.request_sha256 || '')) ||
-        !currentIntent.request_json || crypto.createHash('sha256').update(currentIntent.request_json).digest('hex') !== currentIntent.request_sha256 ||
-        !lease || lease.state !== 'ACTIVE' || lease.job_id !== result.job_id || lease.task_id !== result.task_id ||
-        lease.attempt !== result.attempt || lease.owner_epoch !== expectedOwnerEpoch ||
-        !Number.isFinite(expiry) || new Date(expiry).toISOString() !== lease.expires_at || expiry <= this.now() ||
-        !task || task.job_id !== result.job_id || task.status !== 'running' || task.execution_attempt !== result.attempt ||
-        !parent || parent.status !== 'active' || ['COMPLETED', 'FAILED', 'CANCELLED'].includes(String(parent.state || '').toUpperCase())) {
-      throw new Error(`P3 result collection lost its exact active task/lease/dispatch fence for provider run ${providerRunId}`);
-    }
-    const request = parseStrictJson(currentIntent.request_json, 'durable P3 execution request at result-collection fence');
-    if (JSON.stringify(request) !== currentIntent.request_json) {
-      throw new Error(`P3 result collection found non-canonical immutable request bytes for provider run ${providerRunId}`);
-    }
-    assertProviderDispatchIntent(currentIntent, {
-      job_id: result.job_id, task_id: result.task_id, lease_id: result.lease_id,
-      attempt: result.attempt, owner_epoch: expectedOwnerEpoch, input_commit: result.input_commit,
-      request_sha256: currentIntent.request_sha256,
-      ...providerDispatchConfig(this)
+    if (!this.state || typeof this.state.getTaskLease !== 'function' ||
+        typeof this.state.getTask !== 'function' || typeof this.state.getJob !== 'function') return;
+    return this.state.assertP3ProviderResultCollectionLease({
+      providerRunId, result, expectedOwnerEpoch,
+      providerConfig: providerDispatchConfig(this), nowMs: this.now()
     });
   }
 
@@ -720,11 +539,11 @@ export class GitHubActionsProvider {
   }
 
   _getPersisted(providerRunId) {
-    return this.store?.db?.prepare('SELECT * FROM provider_runs WHERE provider_run_id=?').get(String(providerRunId)) || null;
+    return this.state?.getProviderRun(String(providerRunId)) || null;
   }
 
   _getDispatchIntent(providerRunId) {
-    return this.store?.db?.prepare('SELECT * FROM provider_dispatch_intents WHERE provider_run_id=?').get(String(providerRunId)) || null;
+    return this.state?.getProviderDispatchIntentForRun(String(providerRunId)) || null;
   }
 
   async _reconcileClaimedDispatchIntent(intent) {
@@ -736,7 +555,7 @@ export class GitHubActionsProvider {
       reconciliationError = String(error?.message || error);
     }
 
-    const latest = this.store?.db?.prepare('SELECT * FROM provider_dispatch_intents WHERE dispatch_key=?').get(String(intent.dispatch_key));
+    const latest = this.state?.getProviderDispatchIntent(String(intent.dispatch_key));
     if (latest?.provider_run_id) {
       this._assertProviderDispatchIntent(latest);
       const existing = this._getPersisted(latest.provider_run_id);
@@ -776,127 +595,28 @@ export class GitHubActionsProvider {
   }
 
   _assertActiveDispatchLease(intent, request, checkedAt = new Date(this.now()).toISOString()) {
-    const db = this.store?.db;
-    // Unit-level provider fakes do not implement SQLite lease storage. The
-    // production P3 boundary uses node:sqlite DatabaseSync, whose isOpen
-    // property distinguishes the real durable store from those narrow fakes.
-    if (!db || typeof db.isOpen !== 'boolean') return;
-    const lease = db.prepare('SELECT * FROM task_leases WHERE lease_id=?').get(String(intent.lease_id));
-    const job = db.prepare('SELECT job_id,state,status FROM jobs WHERE job_id=?').get(String(intent.job_id));
-    const task = db.prepare('SELECT task_id,job_id,status FROM tasks WHERE task_id=?').get(String(intent.task_id));
-    const jobTerminal = !job || ['COMPLETED', 'FAILED', 'CANCELLED'].includes(String(job.state || '').toUpperCase()) ||
-      ['completed', 'failed', 'cancelled'].includes(String(job.status || '').toLowerCase());
-    const valid = lease && lease.state === 'ACTIVE' &&
-      String(lease.job_id) === String(intent.job_id) &&
-      String(lease.task_id) === String(intent.task_id) &&
-      Number(lease.attempt) === Number(intent.attempt) &&
-      Number(lease.owner_epoch) === Number(intent.owner_epoch) &&
-      typeof lease.expires_at === 'string' && lease.expires_at > checkedAt &&
-      !jobTerminal && String(job.status).toLowerCase() === 'active' &&
-      task && String(task.job_id) === String(intent.job_id) && task.status === 'running' &&
-      String(request?.job_id) === String(intent.job_id) &&
-      String(request?.task_id) === String(intent.task_id) &&
-      String(request?.lease_id) === String(intent.lease_id) &&
-      Number(request?.attempt) === Number(intent.attempt) &&
-      Number(request?.owner_epoch) === Number(intent.owner_epoch);
-    if (!valid) {
-      const error = new Error('P3 dispatch requires the exact active, unexpired durable lease and nonterminal live Job/task at the provider send boundary');
-      error.remoteOutcome = 'not_sent';
-      throw error;
-    }
+    this.state?.assertActiveProviderDispatchLease(intent, request, checkedAt);
   }
 
   _bindDispatchRun(intent, run) {
-    const db = this.store?.db;
-    if (!db) throw new Error('GitHub Actions dispatch result binding requires durable SQLite storage');
+    if (!this.state) throw new Error('GitHub Actions dispatch result binding requires durable SQLite storage');
     this._assertProviderDispatchIntent(intent);
-    const expectedRunIdentity = {
-      job_id: intent.job_id, task_id: intent.task_id, lease_id: intent.lease_id,
-      attempt: Number(intent.attempt), owner_epoch: Number(intent.owner_epoch), input_commit: String(intent.input_commit).toLowerCase(),
-      workflow: intent.workflow, ref: intent.ref
-    };
-    for (const field of ['job_id', 'task_id', 'lease_id', 'attempt', 'owner_epoch', 'input_commit', 'workflow', 'ref']) {
-      if (field === 'attempt') {
-        if (Number(run[field]) !== expectedRunIdentity[field]) throw new Error(`GitHub Actions run binding does not match durable ${field} identity`);
-      } else if (field === 'owner_epoch') {
-        if (Number(run[field]) !== expectedRunIdentity[field]) throw new Error(`GitHub Actions run binding does not match durable ${field} identity`);
-      } else if (field === 'input_commit'
-        ? String(run[field] ?? '').toLowerCase() !== expectedRunIdentity[field]
-        : String(run[field] ?? '') !== String(expectedRunIdentity[field] ?? '')) {
-        throw new Error(`GitHub Actions run binding does not match durable ${field} identity`);
+    const currentIntent = this.state.getProviderDispatchIntent(String(intent.dispatch_key));
+    if (!currentIntent) throw new Error('GitHub Actions durable dispatch intent disappeared before provider-run binding');
+    this._assertProviderDispatchIntent(currentIntent);
+    for (const field of ['job_id', 'task_id', 'lease_id', 'attempt', 'owner_epoch', 'provider', 'input_commit',
+      'request_sha256', 'request_json', 'api_base', 'workflow', 'repository', 'event', 'ref']) {
+      const expected = intent[field];
+      const actual = currentIntent[field];
+      if ((field === 'attempt' || field === 'owner_epoch')
+        ? Number(actual) !== Number(expected)
+        : String(actual ?? '') !== String(expected ?? '')) {
+        throw new Error(`GitHub Actions durable dispatch intent changed immutable ${field} before provider-run binding`);
       }
     }
-    const bind = () => {
-      // DatabaseSync (the production node:sqlite API) has no transaction(fn)
-      // helper. Use a real savepoint and make its first statement a write so
-      // competing processes serialize before reading the intent. The intent CAS
-      // and provider-run ledger insert must commit or roll back together.
-      db.exec('SAVEPOINT provider_dispatch_run_binding');
-      try {
-      const reservation = db.prepare('UPDATE provider_dispatch_intents SET updated_at=updated_at WHERE dispatch_key=?')
-        .run(String(intent.dispatch_key));
-      if (reservation.changes !== 1) throw new Error('GitHub Actions durable dispatch intent disappeared before result binding');
-      const current = db.prepare('SELECT * FROM provider_dispatch_intents WHERE dispatch_key=?').get(String(intent.dispatch_key));
-      if (!current || current.job_id !== intent.job_id || current.task_id !== intent.task_id ||
-          current.lease_id !== intent.lease_id || Number(current.attempt) !== Number(intent.attempt) ||
-          Number(current.owner_epoch) !== Number(intent.owner_epoch) ||
-          current.provider !== 'github-actions' || String(current.input_commit).toLowerCase() !== String(intent.input_commit).toLowerCase() ||
-          current.request_sha256 !== intent.request_sha256 ||
-          current.request_json !== intent.request_json ||
-          current.api_base !== intent.api_base || current.workflow !== intent.workflow || current.repository !== intent.repository ||
-          current.event !== intent.event || current.ref !== intent.ref) {
-        throw new Error('GitHub Actions dispatch intent changed identity before result binding');
-      }
-      if (!Number.isSafeInteger(Number(run.run_attempt)) || Number(run.run_attempt) < 1) {
-        throw new Error('GitHub Actions P3 run binding requires a validated positive run_attempt');
-      }
-      const existingRun = this._getPersisted(run.provider_run_id);
-      if (existingRun && (existingRun.provider !== 'github-actions' || existingRun.workflow !== run.workflow ||
-          existingRun.ref !== run.ref || existingRun.job_id !== run.job_id || existingRun.task_id !== run.task_id ||
-          existingRun.lease_id !== run.lease_id || Number(existingRun.attempt) !== Number(run.attempt) ||
-          Number(existingRun.owner_epoch) !== Number(run.owner_epoch) ||
-          String(existingRun.input_commit).toLowerCase() !== String(run.input_commit).toLowerCase() ||
-          String(existingRun.dispatch_key || '') !== String(intent.dispatch_key) ||
-          String(existingRun.request_sha256 || '') !== String(intent.request_sha256) ||
-          Number(existingRun.run_attempt) !== Number(run.run_attempt))) {
-        throw new Error(`GitHub Actions run ${run.provider_run_id} is already bound to a different durable execution attempt`);
-      }
-      if (current.provider_run_id) {
-        if (String(current.provider_run_id) !== String(run.provider_run_id) || !['DISPATCHED', 'COMPLETED'].includes(String(current.state))) {
-          throw new Error('GitHub Actions dispatch intent was concurrently bound to a different provider run');
-        }
-        if (!existingRun) throw new Error('GitHub Actions dispatch intent points to a provider run missing from the durable run ledger');
-        db.exec('RELEASE SAVEPOINT provider_dispatch_run_binding');
-        return existingRun;
-      }
-      if (current.state !== 'DISPATCHING') throw new Error(`GitHub Actions dispatch intent cannot bind a run from state ${String(current.state)}`);
-      const update = db.prepare(`UPDATE provider_dispatch_intents SET state='DISPATCHED', provider_run_id=?, updated_at=?
-        WHERE dispatch_key=? AND state='DISPATCHING' AND provider_run_id IS NULL`)
-        .run(String(run.provider_run_id), new Date(this.now()).toISOString(), String(intent.dispatch_key));
-      if (update.changes !== 1) throw new Error('GitHub Actions dispatch intent compare-and-set failed during result binding');
-      if (process.env.NODE_ENV === 'test' && process.env.CHAT_ON_STEROIDS_TEST_CRASH_AFTER_PROVIDER_INTENT_BIND_CAS === 'SIGKILL') {
-        process.kill(process.pid, 'SIGKILL');
-      }
-      this._persist({ ...run, dispatch_key: String(intent.dispatch_key), request_sha256: String(intent.request_sha256) });
-      const persistedRun = this._getPersisted(run.provider_run_id);
-      if (!persistedRun || persistedRun.provider !== 'github-actions' || persistedRun.workflow !== run.workflow ||
-          persistedRun.ref !== run.ref || persistedRun.job_id !== run.job_id || persistedRun.task_id !== run.task_id ||
-          persistedRun.lease_id !== run.lease_id || Number(persistedRun.attempt) !== Number(run.attempt) ||
-          String(persistedRun.input_commit).toLowerCase() !== String(run.input_commit).toLowerCase() ||
-          String(persistedRun.dispatch_key || '') !== String(intent.dispatch_key) ||
-          String(persistedRun.request_sha256 || '') !== String(intent.request_sha256) ||
-          Number(persistedRun.run_attempt) !== Number(run.run_attempt)) {
-        throw new Error('GitHub Actions provider-run ledger readback does not match the exact dispatch binding');
-      }
-      db.exec('RELEASE SAVEPOINT provider_dispatch_run_binding');
-      return run;
-      } catch (error) {
-        try { db.exec('ROLLBACK TO SAVEPOINT provider_dispatch_run_binding'); } catch {}
-        try { db.exec('RELEASE SAVEPOINT provider_dispatch_run_binding'); } catch {}
-        throw error;
-      }
-    };
-    return bind();
+    return this.state.bindProviderDispatchRun(currentIntent, run, {
+      updatedAt: new Date(this.now()).toISOString()
+    });
   }
 
   async resolveCommit(commit) {
@@ -940,7 +660,7 @@ export class GitHubActionsProvider {
     }
     catch (error) { error.remoteOutcome = 'not_sent'; throw error; }
     const requiresP3Evidence = this.workflow.includes('p3-worker');
-    if (requiresP3Evidence && !this.store?.db) {
+    if (requiresP3Evidence && !this.state?.isDurable) {
       throw new Error('P3 GitHub Actions dispatch requires a durable provider-run ledger before any remote side effect');
     }
     if (requiresP3Evidence && !/^[a-f0-9]{64}$/i.test(String(dispatchKey || ''))) {
@@ -964,7 +684,7 @@ export class GitHubActionsProvider {
     catch (error) { error.remoteOutcome = 'not_sent'; throw error; }
     let dispatchIntent = null;
     if (requiresP3Evidence) {
-      dispatchIntent = this.store.db.prepare('SELECT * FROM provider_dispatch_intents WHERE dispatch_key=?').get(String(dispatchKey));
+      dispatchIntent = this.state?.getProviderDispatchIntent(String(dispatchKey));
       if (!dispatchIntent) throw new Error('P3 dispatch requires a pre-existing durable provider_dispatch_intents row before any remote side effect');
       if (dispatchIntent.job_id !== request.job_id || dispatchIntent.task_id !== request.task_id ||
           dispatchIntent.lease_id !== request.lease_id || Number(dispatchIntent.attempt) !== Number(request.attempt) ||
@@ -1027,28 +747,9 @@ export class GitHubActionsProvider {
       const dispatchClaimedAt = new Date(this.now()).toISOString();
       const durableRequestJson = dispatchIntent?.request_json;
       const durableRequestHash = dispatchIntent?.request_sha256;
-      const nativeSqlite = typeof this.store.db.isOpen === 'boolean';
-      const claimSql = `UPDATE provider_dispatch_intents
-        SET dispatch_claim_id=?, dispatch_claimed_at=?, updated_at=?
-        WHERE dispatch_key=? AND state='DISPATCHING' AND provider_run_id IS NULL AND dispatch_claim_id IS NULL
-          AND request_sha256=? AND request_json=?${nativeSqlite ? `
-          AND EXISTS (SELECT 1 FROM task_leases lease WHERE lease.lease_id=? AND lease.job_id=? AND lease.task_id=?
-            AND lease.attempt=? AND lease.owner_epoch=? AND lease.state='ACTIVE' AND lease.expires_at>?)
-          AND EXISTS (SELECT 1 FROM jobs job WHERE job.job_id=? AND job.status='active'
-            AND UPPER(COALESCE(job.state,'')) NOT IN ('COMPLETED','FAILED','CANCELLED'))
-          AND EXISTS (SELECT 1 FROM tasks task WHERE task.task_id=? AND task.job_id=? AND task.status='running')
-          AND NOT EXISTS (SELECT 1 FROM provider_dispatch_intents sibling WHERE sibling.lease_id=? AND sibling.task_id=?
-            AND sibling.attempt=? AND sibling.provider=? AND sibling.dispatch_key<>?)` : ''}`;
-      const claim = this.store.db.prepare(claimSql).run(...[
-        dispatchClaimId, dispatchClaimedAt, dispatchClaimedAt, String(dispatchKey), durableRequestHash, durableRequestJson,
-        ...(nativeSqlite ? [String(dispatchIntent.lease_id), String(dispatchIntent.job_id), String(dispatchIntent.task_id),
-          Number(dispatchIntent.attempt), Number(dispatchIntent.owner_epoch), dispatchClaimedAt,
-          String(dispatchIntent.job_id), String(dispatchIntent.task_id), String(dispatchIntent.job_id),
-          String(dispatchIntent.lease_id), String(dispatchIntent.task_id), Number(dispatchIntent.attempt),
-          String(dispatchIntent.provider), String(dispatchKey)] : [])
-      ]);
-      if (claim.changes !== 1) {
-        const latest = this.store.db.prepare('SELECT * FROM provider_dispatch_intents WHERE dispatch_key=?').get(String(dispatchKey));
+      const claim = this.state.claimProviderDispatchForSend({ intent: dispatchIntent, claimId: dispatchClaimId, claimedAt: dispatchClaimedAt });
+      if (!claim.claimed) {
+        const latest = claim.intent;
         if (!latest) throw new Error('P3 durable dispatch intent disappeared before the remote send claim');
         this._assertProviderDispatchIntent(latest, request, inputCommit);
         if (latest.provider_run_id) {
@@ -1057,7 +758,13 @@ export class GitHubActionsProvider {
           return { ...existing, dispatch_key: String(dispatchKey), idempotent: true };
         }
         if (latest.dispatch_claim_id) return this._reconcileClaimedDispatchIntent(latest);
-        throw new Error('P3 dispatch lost its durable one-way send claim before any remote side effect');
+        const error = new Error('P3 dispatch lost its durable one-way send claim before any remote side effect');
+        // This invocation did not acquire the one-way claim and therefore did
+        // not cross the POST boundary. The scheduler must still check sibling
+        // intents before releasing the lease: another intent for this exact
+        // execution tuple may already own a remote effect.
+        error.remoteOutcome = 'not_sent';
+        throw error;
       }
       dispatchIntent.dispatch_claim_id = dispatchClaimId;
       dispatchIntent.dispatch_claimed_at = dispatchClaimedAt;
@@ -1101,15 +808,16 @@ export class GitHubActionsProvider {
         // Only an explicit rejection before remote acceptance lets us release
         // the claim. If this cleanup is interrupted, the durable claim stays
         // conservative and recovery remains reconciliation-only.
-        this.store.db.prepare(`UPDATE provider_dispatch_intents SET dispatch_claim_id=NULL, dispatch_claimed_at=NULL, updated_at=?
-          WHERE dispatch_key=? AND state='DISPATCHING' AND provider_run_id IS NULL AND dispatch_claim_id=?`)
-          .run(new Date(this.now()).toISOString(), String(dispatchKey), dispatchClaimId);
+        this.state.releaseProviderDispatchSendClaim({
+          dispatchKey: String(dispatchKey), claimId: dispatchClaimId,
+          updatedAt: new Date(this.now()).toISOString()
+        });
       }
       // A transport failure after workflow_dispatch is ambiguous: GitHub may have
       // accepted the request even though the client did not receive its response.
       // Do not let the caller treat that as a definite dispatch failure and start
       // a replacement attempt until the original intent has been reconciled.
-      if (error?.remoteOutcome === 'not_sent' || (error?.status && error.status < 500) || !dispatchKey || !this.store?.db) throw error;
+      if (error?.remoteOutcome === 'not_sent' || (error?.status && error.status < 500) || !dispatchKey || !this.state?.isDurable) throw error;
       const intent = dispatchIntent || {
         dispatch_key: dispatchKey,
         job_id: request.job_id,
@@ -1143,7 +851,7 @@ export class GitHubActionsProvider {
     // the workflow_run_id after the run is created. Reconcile the dispatch intent
     // instead of treating a successful 204 as a failed dispatch.
     if (!data?.workflow_run_id) {
-      if (!dispatchKey || !this.store?.db) {
+      if (!dispatchKey || !this.state?.isDurable) {
         return { provider_run_id: null, dispatch_key: dispatchKey || null, state: 'DISPATCHING', pending_reconciliation: true };
       }
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -1251,8 +959,8 @@ export class GitHubActionsProvider {
       workflow: this.workflow, ref: this.ref, state: run.status === 'completed' ? 'COMPLETED' : 'RUNNING',
       conclusion: run.conclusion || null, html_url: run.html_url || null, created_at: run.created_at || new Date(this.now()).toISOString()
     };
-    if (this.store?.db) {
-      const durableIntent = this.store.db.prepare('SELECT * FROM provider_dispatch_intents WHERE dispatch_key=?').get(String(intent.dispatch_key));
+    if (this.state?.isDurable) {
+      const durableIntent = this.state?.getProviderDispatchIntent(String(intent.dispatch_key));
       if (durableIntent) return this._bindDispatchRun(intent, normalized);
       if (this.workflow.includes('p3-worker')) throw new Error('P3 reconciliation requires a current durable dispatch intent');
     }
@@ -1571,30 +1279,15 @@ export class GitHubActionsProvider {
       workflow: persisted?.workflow || this.workflow, ref: persisted?.ref || this.ref, state: 'COMPLETED',
       conclusion: status.conclusion, html_url: status.html_url, artifact_id: String(artifact.id),
       output_commit: persistedOutputCommit, created_at: persisted?.created_at || status.created_at };
-    if (requiresP3Evidence && this.store?.db && typeof this.store.getTaskLease === 'function' &&
-        typeof this.store.getTask === 'function' && typeof this.store.getJob === 'function') {
-      // Hold the writer reservation across the final active-lease/parent/task
-      // check and provider-run artifact/output persistence. Without this outer
-      // fence, a long artifact download could outlive the lease, then publish
-      // stale output metadata after another process had already terminalized or
-      // reassigned the task. _persist composes as a nested savepoint.
-      this.store.db.exec('SAVEPOINT p3_result_collection_terminal_fence');
-      try {
-        this._assertP3ResultCollectionLease(providerRunId, result, expectedOwnerEpoch);
-        this._persist(terminalRunUpdate);
-        const readback = this._getPersisted(providerRunId);
-        if (!readback || readback.state !== 'COMPLETED' || readback.conclusion !== status.conclusion ||
-            String(readback.artifact_id || '') !== String(artifact.id) ||
-            String(readback.output_commit || '') !== String(persistedOutputCommit || '') ||
-            readback.owner_epoch !== expectedOwnerEpoch || readback.run_attempt !== result.provider_run_attempt) {
-          throw new Error(`P3 result collection terminal readback failed exact artifact/trusted-output/attempt binding for ${providerRunId}`);
-        }
-        this.store.db.exec('RELEASE SAVEPOINT p3_result_collection_terminal_fence');
-      } catch (error) {
-        try { this.store.db.exec('ROLLBACK TO SAVEPOINT p3_result_collection_terminal_fence'); } catch {}
-        try { this.store.db.exec('RELEASE SAVEPOINT p3_result_collection_terminal_fence'); } catch {}
-        throw error;
-      }
+    if (requiresP3Evidence && this.state?.isDurable && typeof this.state.getTaskLease === 'function' &&
+        typeof this.state.getTask === 'function' && typeof this.state.getJob === 'function') {
+      // The state port owns the short writer savepoint: final lease/parent/task
+      // fence and provider-run artifact/outcome write commit or roll back together.
+      this.state.persistProviderRunResultWithLeaseFence({
+        providerRunId, result, expectedOwnerEpoch, run: terminalRunUpdate,
+        providerConfig: providerDispatchConfig(this), nowMs: this.now(),
+        updatedAt: new Date(this.now()).toISOString()
+      });
     } else {
       this._persist(terminalRunUpdate);
     }

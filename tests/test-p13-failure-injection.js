@@ -18,7 +18,7 @@ if (!process.env.P13_CHILD) {
 const dataDir = tempDir('p13-failure-');
 process.env.WORKFLOW_DATA_DIR = dataDir;
 process.env.WORKFLOW_DB = path.join(dataDir, 'workflow.db');
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const store = new WorkflowStore();
 
 const results = [];

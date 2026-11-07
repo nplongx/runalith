@@ -1,0 +1,52 @@
+[Unit]
+Description=Runalith isolated execution worker
+Wants=network-online.target
+Requires=runalith-quota-helper.socket
+After=network-online.target runalith-quota-helper.socket
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=runalith-worker
+Group=runalith-worker
+EnvironmentFile=/etc/runalith/worker.env
+StateDirectory=runalith-worker
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/runalith-worker
+UMask=0077
+ExecStartPre=/usr/bin/test -x /usr/bin/curl
+ExecStartPre=/usr/bin/test -x /usr/bin/bwrap
+ExecStart=/usr/local/bin/runalith-worker run
+ExecStop=/usr/local/bin/runalith-worker stop
+TimeoutStopSec=13min
+KillSignal=SIGTERM
+# The execution cgroups are descendants of this unit; after ExecStop's bounded
+# drain expires, systemd must terminate the complete unit process tree.
+KillMode=control-group
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/runalith-worker /srv/runalith/workspace
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+# Required for per-execution cgroup v2 children. Delegate only the controllers
+# used by the worker; the worker fails closed if delegation is unavailable.
+Delegate=cpu memory pids
+DelegateSubgroup=runalith-manager
+ProtectControlGroups=no
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

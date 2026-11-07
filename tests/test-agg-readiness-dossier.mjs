@@ -116,7 +116,45 @@ test('candidate hash disagreement and self-promoted graph verification fail clos
   assert.throws(() => buildAggReadinessDossier(badHash), /candidate SHA-256 differs/);
   const promoted = fixture();
   promoted.snapshot.verified = true;
-  assert.throws(() => buildAggReadinessDossier(promoted), /must retain its observed unverified/);
+  assert.throws(() => buildAggReadinessDossier(promoted), /preserve its observed unsigned state/);
+});
+
+test('a complete durable evidence manifest is distinct from independent signature and planning authority', () => {
+  const input = fixture();
+  input.snapshot.snapshot.nodes = Array.from({ length: 16 }, (_, i) => ({ id: `node-${i}`, evidence_refs: i < 9 ? [`artifact://artifact-${i}`] : [] }));
+  input.snapshot.snapshot.edges = Array.from({ length: 7 }, (_, i) => ({ id: `edge-${i}` }));
+  input.snapshot.snapshot.memberships = Array.from({ length: 16 }, (_, i) => ({ id: `member-${i}` }));
+  input.snapshot.snapshot.evidence_refs = Array.from({ length: 9 }, (_, i) => `artifact://artifact-${i}`);
+  input.snapshot.evidenceManifest = Array.from({ length: 9 }, (_, i) => ({ reference: `artifact://artifact-${i}`, valid: true,
+    status: 'durable_artifact_lineage_verified_claim_unverified' }));
+  input.snapshot.evidenceManifestHash = 'f'.repeat(64);
+  input.snapshot.eligibleForAttestation = true;
+  input.snapshot.currentVerification = { verified: false, status: 'verifier_unavailable', attestationId: null,
+    blockers: [{ code: 'KNOWLEDGE_VERIFIER_NOT_CONFIGURED' }] };
+  input.reconciliation.adaptiveGoalGraph.goals[0] = { goalId: input.snapshot.goal_id, snapshotHash: 'd'.repeat(64),
+    nodeCount: 16, edgeCount: 7, membershipCount: 16, evidenceAssessment: { declaredReferenceCount: 9, eligibleForExternalAttestation: true } };
+
+  const d = buildAggReadinessDossier(input);
+  assert.equal(d.liveState.graph.evidenceReferenceCount, 9);
+  assert.equal(d.liveState.graph.evidenceManifestCount, 9);
+  assert.equal(d.liveState.graph.eligibleForAttestation, true);
+  assert.equal(d.liveState.graph.verified, false);
+  assert.equal(d.liveState.graph.claimTruthVerified, false);
+  assert.equal(d.liveState.graph.independenceVerified, false);
+  assert.equal(d.liveState.graph.planningAuthorityEstablished, false);
+  assert.equal(d.liveState.graph.currentVerificationStatus, 'verifier_unavailable');
+  assert.ok(d.findings.some(f => f.code === 'GOAL_IDEA_EVIDENCE_READY_REQUIRES_INDEPENDENT_ATTESTATION'));
+  assert.ok(!d.findings.some(f => f.code === 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY'));
+  assert.equal(d.decision.status, 'BLOCKED');
+});
+
+test('unobserved reviewer trust remains NOT_OBSERVED rather than being reported missing', () => {
+  const input = fixture();
+  delete input.trustStatus.domains.action_intent_reviewer;
+  const d = buildAggReadinessDossier(input);
+  assert.equal(d.liveState.trustDomains.action_intent_reviewer.observationStatus, 'NOT_OBSERVED');
+  assert.equal(d.liveState.trustDomains.action_intent_reviewer.available, null);
+  assert.ok(!d.findings.some(f => f.code === 'AGG_TRUST_CONFIG_NOT_CONFIGURED'));
 });
 
 test('a missing RC.23 blocker is not auto-closed from omission', () => {

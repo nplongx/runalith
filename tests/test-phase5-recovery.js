@@ -7,7 +7,7 @@ const dir = tempDir('cos-phase5-');
 process.env.WORKFLOW_DB = path.join(dir, 'workflow.db');
 process.env.WORKFLOW_DATA_DIR = dir;
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { RecoveryManager } = await import('../src/runtime/recovery-manager.js');
 
 const store = new WorkflowStore();

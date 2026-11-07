@@ -73,7 +73,7 @@ function makeFailedChild({ sessionKey, runId, title }) {
 const repair = makeFailedChild({
   sessionKey: 'agent:architect:subagent:repair',
   runId: 'runtime-repair',
-  title: 'Production E2E recovery repair'
+  title: 'Production E2E batch-required recovery is blocked'
 });
 const beforeTaskCount = store.db.prepare('SELECT COUNT(*) n FROM tasks WHERE job_id = ?').get(repair.job.job_id).n;
 const beforeSessionCount = store.db.prepare('SELECT COUNT(*) n FROM agent_sessions WHERE job_id = ?').get(repair.job.job_id).n;
@@ -81,18 +81,19 @@ const recovery = new RecoveryManager(store, {
   sessionStaleMs: 1, trajectoryTimeoutMs: 1500, executionManager
 });
 await recovery.reconcile({ jobId: repair.job.job_id });
-assert.equal(store.getTask(repair.child.task_id).status, 'completed');
-assert.equal(store.getSession(repair.session.session_id).state, 'TERMINATED');
+assert.equal(store.getTask(repair.child.task_id).status, 'failed',
+  'trajectory evidence must not directly replay a deterministic task whose immutable plan requires a durable batch claim');
+assert.equal(store.getSession(repair.session.session_id).state, 'FAILED');
 assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tasks WHERE job_id = ?').get(repair.job.job_id).n, beforeTaskCount);
 assert.equal(store.db.prepare('SELECT COUNT(*) n FROM agent_sessions WHERE job_id = ?').get(repair.job.job_id).n, beforeSessionCount);
 const repairedResults = store.db.prepare('SELECT outcome, content FROM results WHERE task_id = ? ORDER BY created_at').all(repair.child.task_id);
-assert.equal(repairedResults.length, 2);
+assert.equal(repairedResults.length, 1);
 assert.equal(repairedResults[0].outcome, 'failure');
 assert.match(repairedResults[0].content, /runtime path failed/);
-const repairedResult = repairedResults[1];
-assert.equal(repairedResult.outcome, 'success');
-assert.match(repairedResult.content, /\[ACTUAL TOOL RESULT EVIDENCE\]/);
-assert.match(repairedResult.content, /exit status\/code: 0/);
+const blockedRecovery = store.db.prepare(`SELECT payload_json FROM events
+  WHERE job_id=? AND type='execution.evidence_recovery_blocked'
+    AND json_extract(payload_json,'$.taskId')=? ORDER BY created_at DESC LIMIT 1`).get(repair.job.job_id, repair.child.task_id);
+assert.match(blockedRecovery?.payload_json || '', /batch-required deterministic task has no durable batch claim/);
 
 const timeoutCase = makeFailedChild({
   sessionKey: 'agent:architect:subagent:timeout',

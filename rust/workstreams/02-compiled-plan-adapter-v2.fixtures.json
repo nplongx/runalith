@@ -1,0 +1,44 @@
+{
+  "fixture_set": "WS2-CompiledPlanV1-legacy-task-label-boundary",
+  "status": "DRAFT_NOT_RATIFIED",
+  "source_fixture": "rust/workstreams/02-compiled-plan-adapter-v1.fixtures.json",
+  "source_fixture_sha256": "fc98f572d25dee44661a5f84ad5566e1eacca57881ca8c8b1bbc974175c8a048",
+  "source_function": "rust/crates/runalith-store/src/lib.rs::custom_workflow_task_specs",
+  "source_function_sha256": "09b634dd2aadb12e359bb6c3c1f6ed81948b044e971a1fda4359f093ba17aac9",
+  "policy_compatibility_function_sha256": "e13dbacd977de1722fe4f7d693c7038393b1c674d337a1e7488b7a50e723120a",
+  "policy_evaluator_function_sha256": "52e48f8d1c4350c4540afa358363d261ba2deb9c09bad48b8080a192ffcf8fba",
+  "legacy_role_is_identity": false,
+  "stable_identity_fields": ["task_id", "custom_role_id", "custom_role_version"],
+  "legacy_role_pattern": "custom-task-{n}",
+  "forbidden_identity_operations": ["parse_ordinal", "infer_task_id_from_role", "infer_role_id_from_role", "bind_by_array_position"],
+  "negative_cases": [
+    {
+      "id": "missing-stable-task-id-must-not-fall-back-to-label",
+      "expected": "REJECT"
+    },
+    {
+      "id": "duplicate-stable-task-id-must-not-be-disambiguated-by-label",
+      "expected": "REJECT"
+    },
+    {
+      "id": "renumbered-custom-task-label-must-not-become-task-id",
+      "expected": "REJECT"
+    },
+    {
+      "id": "legacy-label-only-cannot-resolve-role-id",
+      "expected": "REJECT"
+    },
+    {
+      "id": "duplicate-legacy-labels-cannot-resolve-task-identities",
+      "expected": "REJECT"
+    },
+    {
+      "id": "renumbered-legacy-label-cannot-resolve-task-identity",
+      "expected": "REJECT"
+    }
+  ],
+  "invariance_cases": [
+    "duplicate-legacy-display-labels-do-not-change-explicit-stable-bindings",
+    "renumbered-legacy-display-labels-do-not-change-explicit-stable-bindings"
+  ]
+}

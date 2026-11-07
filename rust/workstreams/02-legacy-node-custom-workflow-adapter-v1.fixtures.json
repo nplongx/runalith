@@ -1,0 +1,47 @@
+{
+  "fixture_set": "WS2-Legacy-Node-Custom-Workflow-Compiler-Adapter-v1",
+  "status": "DRAFT_NOT_RATIFIED",
+  "compiler_path": "src/runtime/workflow/compiler.js::compileWorkflowPlan",
+  "compiler_sha256": "5784fa0e3b75b6c38857e66f4ddfd99233d0ec8dd2fa0e69fae01d6dbc4decf9",
+  "state_port_path": "src/runtime/workflow-state-port.js::assertImmutablePlannedExecution",
+  "state_port_sha256": "56100713342ec834f20f0806550559bf0dbfe563c2464d78cb9aeff0a7f5da52",
+  "policy_contract_path": "src/runtime/workflow/policy-contract.js",
+  "policy_contract_sha256": "cccb834047d97fbd1f36741a6b466baf03e83e9a480402e5d85a283ada921b89",
+  "tasks": [
+    {
+      "id": "node-child-requirements",
+      "role_id": "custom-owner",
+      "role_version": 4,
+      "role_name": "Owner",
+      "depends_on": []
+    },
+    {
+      "id": "node-child-review",
+      "role_id": "custom-reviewer",
+      "role_version": 2,
+      "role_name": "Reviewer",
+      "depends_on": ["node-child-requirements"]
+    }
+  ],
+  "expected_children": [
+    {
+      "id": "node-child-requirements",
+      "role": "custom-task-1",
+      "custom_role_id": "custom-owner",
+      "custom_role_version": 4,
+      "dependencies": []
+    },
+    {
+      "id": "node-child-review",
+      "role": "custom-task-2",
+      "custom_role_id": "custom-reviewer",
+      "custom_role_version": 2,
+      "dependencies": ["node-child-requirements"]
+    }
+  ],
+  "negative_cases": [
+    "missing-child-id-is-rejected-by-plan-validation",
+    "duplicate-child-id-is-rejected-by-plan-validation"
+  ],
+  "scope_limit": "legacy Node compiler runtime behavior only; no public W1 CompiledPlanV1 adapter, attachment revision/CAS/idempotency or authenticated executor identity"
+}

@@ -1,0 +1,462 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/plan.js::validateExecutionPlan + built-in deterministic task catalogs",
+  "valid_tasks": [
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-execution-batch",
+      "role": "batch-test-execution-batch",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-execution-batch.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-execution-batch.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-execution-concurrency",
+      "role": "batch-test-execution-concurrency",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-execution-batch-concurrency.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-execution-batch-concurrency.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-terminal-recovery",
+      "role": "batch-test-terminal-recovery",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-execution-batch-terminal-recovery.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-execution-batch-terminal-recovery.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-success-contract",
+      "role": "batch-test-success-contract",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-execution-success-contract.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-execution-success-contract.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-phase5-recovery",
+      "role": "batch-test-phase5-recovery",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-phase5-recovery.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-phase5-recovery.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-agent-tool-guidance",
+      "role": "batch-test-agent-tool-guidance",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-agent-tool-guidance.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-agent-tool-guidance.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-process-boundary",
+      "role": "batch-test-process-boundary",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-execution-control-process-boundary.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-execution-control-process-boundary.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-package-no-overwrite",
+      "role": "batch-test-package-no-overwrite",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-package-no-overwrite.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-package-no-overwrite.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-package-reproducibility",
+      "role": "batch-test-package-reproducibility",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-package-reproducibility.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-package-reproducibility.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-verified-result-atomicity",
+      "role": "batch-test-verified-result-atomicity",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-verified-execution-result-atomicity.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-verified-execution-result-atomicity.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "standard-engineering",
+      "task_id": "standard-batch-test-standard-engineering-planner",
+      "role": "batch-test-standard-engineering-planner",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--test",
+          "/home/long/work/chatgpt-adapter/tests/test-standard-engineering-workflow.js"
+        ],
+        "command": "node --test /home/long/work/chatgpt-adapter/tests/test-standard-engineering-workflow.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 300000,
+        "deterministic": true,
+        "batch_validation_task": true,
+        "output_artifact_type": "qa-report"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "hybrid-engineering",
+      "task_id": "hybrid-server-syntax-check",
+      "role": "hybrid-server-syntax-check",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server/index.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "hybrid-engineering",
+      "task_id": "hybrid-workflow-compiler-syntax-check",
+      "role": "hybrid-workflow-compiler-syntax-check",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/src/runtime/workflow/compiler.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/src/runtime/workflow/compiler.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "catalog": "production",
+      "task_id": "architect-check",
+      "role": "architect",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": true
+      },
+      "outcome": "ACCEPTED",
+      "error": null
+    }
+  ],
+  "validation_cases": [
+    {
+      "name": "wrong-executor",
+      "execution": {
+        "executor": "ChatOnSteroidsHost",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server/index.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": true,
+      "outcome": "REJECTED",
+      "error": "deterministic task must use ExecutionManager: wrong-executor"
+    },
+    {
+      "name": "missing-executable",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server/index.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": true,
+      "outcome": "REJECTED",
+      "error": "structured execution contract required: missing-executable"
+    },
+    {
+      "name": "arguments-not-array",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": {
+          "0": "--check"
+        },
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": true,
+      "outcome": "REJECTED",
+      "error": "structured execution contract required: arguments-not-array"
+    },
+    {
+      "name": "missing-cwd",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server/index.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "",
+        "timeout_ms": 120000,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": true,
+      "outcome": "REJECTED",
+      "error": "invalid deterministic execution metadata: missing-cwd"
+    },
+    {
+      "name": "fractional-timeout",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server/index.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 1.5,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": true,
+      "outcome": "REJECTED",
+      "error": "invalid deterministic execution metadata: fractional-timeout"
+    },
+    {
+      "name": "zero-timeout",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server/index.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 0,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": true,
+      "outcome": "REJECTED",
+      "error": "invalid deterministic execution metadata: zero-timeout"
+    },
+    {
+      "name": "truthy-string-marker",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          "/home/long/work/chatgpt-adapter/server/index.js"
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": "enabled",
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": false,
+      "outcome": "ACCEPTED",
+      "error": null
+    },
+    {
+      "name": "non-deterministic-host-task",
+      "execution": {
+        "executor": "ChatOnSteroidsHost",
+        "deterministic": false,
+        "execution_mode": "host-conversation"
+      },
+      "strict_deterministic": false,
+      "outcome": "NOT_DETERMINISTIC",
+      "error": null
+    },
+    {
+      "name": "non-string-argv-elements",
+      "execution": {
+        "executor": "ExecutionManager",
+        "executable": "node",
+        "args": [
+          "--check",
+          7,
+          null
+        ],
+        "command": "node --check /home/long/work/chatgpt-adapter/server/index.js",
+        "cwd": "/home/long/work/chatgpt-adapter",
+        "timeout_ms": 120000,
+        "deterministic": true,
+        "output_artifact_type": "documentation"
+      },
+      "strict_deterministic": true,
+      "outcome": "ACCEPTED",
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+name: Runalith Execution Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - rust/Cargo.toml
+      - rust/Cargo.lock
+      - rust/crates/runalith-worker/**
+      - rust/crates/runalith-linux-quota/**
+      - rust/crates/runalith-control-api/**
+      - rust/crates/runalith-store/**
+      - rust/crates/runalith-runtime/**
+      - rust/crates/runalith-providers/**
+      - rust/crates/runalith-sandbox/**
+      - rust/crates/runalith-artifacts/**
+      - rust/crates/runalith-domain/**
+      - rust/crates/runalith-execution-persistence/**
+      - rust/docs/worker-control-api-v1.md
+      - rust/deploy/worker/**
+      - .github/workflows/runalith-worker.yml
+  pull_request:
+    paths:
+      - rust/Cargo.toml
+      - rust/Cargo.lock
+      - rust/crates/runalith-worker/**
+      - rust/crates/runalith-linux-quota/**
+      - rust/crates/runalith-control-api/**
+      - rust/crates/runalith-store/**
+      - rust/crates/runalith-runtime/**
+      - rust/crates/runalith-providers/**
+      - rust/crates/runalith-sandbox/**
+      - rust/crates/runalith-artifacts/**
+      - rust/crates/runalith-domain/**
+      - rust/crates/runalith-execution-persistence/**
+      - rust/docs/worker-control-api-v1.md
+      - rust/deploy/worker/**
+      - .github/workflows/runalith-worker.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runalith-worker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: Build and package standalone worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PACKAGE_DIR: ${{ runner.temp }}/runalith-worker-package
+      PACKAGE_ARCHIVE: ${{ runner.temp }}/runalith-worker-${{ github.sha }}.tar.gz
+    steps:
+      - name: Checkout exact source revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.85.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.85.0
+          rustc --version
+          cargo --version
+
+      - name: Install sandbox and HTTP runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap curl
+          bwrap --version
+          curl --version
+
+      - name: Resolve locked dependency closure
+        working-directory: rust
+        run: |
+          cargo fetch --locked
+          cargo tree --locked -p runalith-worker --edges normal > "$RUNNER_TEMP/runalith-worker-dependencies.txt"
+          if grep -E 'runalith-store v|runalith-control-api v' "$RUNNER_TEMP/runalith-worker-dependencies.txt"; then
+            echo 'runalith-worker must remain independent of Workflow Control and its Store' >&2
+            exit 1
+          fi
+
+      - name: Formatting
+        working-directory: rust
+        run: cargo fmt --package runalith-artifacts --package runalith-worker --package runalith-providers --package runalith-sandbox --package runalith-linux-quota --package runalith-control-api --package runalith-store --package runalith-runtime -- --check
+
+      - name: Worker, provider and sandbox tests
+        working-directory: rust
+        run: cargo test -p runalith-artifacts -p runalith-worker -p runalith-providers -p runalith-sandbox -p runalith-linux-quota -p runalith-control-api -p runalith-store -p runalith-runtime --locked --offline
+
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy -p runalith-artifacts -p runalith-worker -p runalith-providers -p runalith-sandbox -p runalith-linux-quota -p runalith-control-api -p runalith-store -p runalith-runtime --all-targets --locked --offline -- -D warnings
+
+      - name: Build optimized standalone worker
+        working-directory: rust
+        run: cargo build -p runalith-worker --release --locked --offline
+
+      - name: Build privileged project-quota helper
+        working-directory: rust
+        run: cargo build -p runalith-linux-quota --bin runalith-quota-helper --release --locked --offline
+
+      - name: Build root-only kernel quota integration harness
+        working-directory: rust
+        run: cargo build -p runalith-linux-quota --bin runalith-quota-integration --release --locked --offline
+
+      - name: Assemble checksum-bearing deployment archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$PACKAGE_DIR"
+          install -d -m 0755 "$PACKAGE_DIR/usr/local/bin" "$PACKAGE_DIR/usr/local/libexec" "$PACKAGE_DIR/usr/share/runalith-worker/deploy"
+          install -m 0755 rust/target/release/runalith-worker "$PACKAGE_DIR/usr/local/bin/runalith-worker"
+          install -m 0755 rust/target/release/runalith-quota-helper "$PACKAGE_DIR/usr/local/libexec/runalith-quota-helper"
+          install -m 0755 rust/target/release/runalith-quota-integration "$PACKAGE_DIR/usr/local/libexec/runalith-quota-integration"
+          install -m 0644 rust/crates/runalith-worker/README.md "$PACKAGE_DIR/usr/share/runalith-worker/README.md"
+          install -m 0644 rust/crates/runalith-linux-quota/README.md "$PACKAGE_DIR/usr/share/runalith-worker/quota-integration.md"
+          install -m 0644 rust/docs/worker-control-api-v1.md "$PACKAGE_DIR/usr/share/runalith-worker/worker-control-api-v1.md"
+          install -m 0644 rust/deploy/worker/runalith-worker.service "$PACKAGE_DIR/usr/share/runalith-worker/deploy/runalith-worker.service"
+          install -m 0644 rust/deploy/worker/runalith-quota-helper.service "$PACKAGE_DIR/usr/share/runalith-worker/deploy/runalith-quota-helper.service"
+          install -m 0644 rust/deploy/worker/runalith-quota-helper.socket "$PACKAGE_DIR/usr/share/runalith-worker/deploy/runalith-quota-helper.socket"
+          install -m 0644 rust/deploy/worker/quota-helper.env.example "$PACKAGE_DIR/usr/share/runalith-worker/deploy/quota-helper.env.example"
+          install -m 0644 rust/deploy/worker/worker.env.example "$PACKAGE_DIR/usr/share/runalith-worker/deploy/worker.env.example"
+          install -m 0644 "$RUNNER_TEMP/runalith-worker-dependencies.txt" "$PACKAGE_DIR/usr/share/runalith-worker/dependencies.txt"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
+          find "$PACKAGE_DIR" -type f -exec touch --date="@$SOURCE_DATE_EPOCH" {} +
+          (
+            cd "$PACKAGE_DIR"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+            touch --date="@$SOURCE_DATE_EPOCH" SHA256SUMS
+          )
+          tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner -cf - -C "$PACKAGE_DIR" . | gzip -n > "$PACKAGE_ARCHIVE"
+          sha256sum "$PACKAGE_ARCHIVE" > "$PACKAGE_ARCHIVE.sha256"
+          tar -tzf "$PACKAGE_ARCHIVE"
+          cat "$PACKAGE_ARCHIVE.sha256"
+
+      - name: Upload worker deployment artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runalith-worker-${{ github.sha }}
+          path: |
+            ${{ env.PACKAGE_ARCHIVE }}
+            ${{ env.PACKAGE_ARCHIVE }}.sha256
+          if-no-files-found: error
+          retention-days: 30

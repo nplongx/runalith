@@ -1,0 +1,42 @@
+{
+  "fixture_set": "WS2-Control-Domain-Error-Codes-v1",
+  "status": "DRAFT_NOT_RATIFIED",
+  "schema_version": 1,
+  "scope": "WS2 producer-domain error vocabulary. No HTTP status, retryability contract or wire schema is frozen.",
+  "base_candidate_sha256": "86365876b2677ce9f99aeb23df0a1b49bcaaeb271f744731883740002f3ceec5",
+  "v10_addendum_sha256": "9fb54a38f1f97f41af6d969d6ec06fc8a779beddcf9128ce0049ffb74375b9e8",
+  "legacy_node_oracle": {
+    "fixture": "crates/runalith-domain/tests/fixtures/node-workflow-lifecycle-v1.json",
+    "codes": ["ILLEGAL_ACTIVE", "TERMINAL_REOPEN", "INVALID_PHASE_TRANSITION"],
+    "status": "OBSERVED_EXACT_COMPATIBILITY_VALUES"
+  },
+  "proposed_domain_codes": [
+    {"code":"AUTHENTICATION_FAILED","meaning":"Host-authenticated caller/service identity could not be established; distinct from authorization denial.","transport":"AUTHENTICATION_FAILED"},
+    {"code":"AUTHORIZATION_DENIED","meaning":"Known principal lacks required capability or action authority.","transport":"AUTHORIZATION_DENIED"},
+    {"code":"MALFORMED_REQUEST","meaning":"Closed DTO syntax, required field or canonical value constraint failed.","transport":"REQUEST_INVALID"},
+    {"code":"UNSUPPORTED_SCHEMA_VERSION","meaning":"Inner producer DTO version is unknown or incompatible; distinct from outer envelope negotiation.","transport":"PRESERVE_DOMAIN_CODE; OUTER_SCHEMA_UNSUPPORTED_IS_SEPARATE"},
+    {"code":"SUBJECT_MISMATCH","meaning":"Validly parsed message or receipt binds a different workflow/task/plan/action subject.","transport":"PRESERVE_EXACT_DOMAIN_CODE"},
+    {"code":"STALE_OWNER","meaning":"Attempt, claim, lease, worker or owner epoch is no longer current; durable rejection, never accepted result.","transport":"PRESERVE_EXACT_DOMAIN_CODE"},
+    {"code":"IDEMPOTENCY_CONFLICT","meaning":"Existing event/request/renewal identity reused with changed canonical subject or content digest.","transport":"CONFLICT"},
+    {"code":"STALE_WORKFLOW_HEAD","meaning":"Expected prior sequence/head CAS does not match current committed Control journal head.","transport":"PRESERVE_EXACT_DOMAIN_CODE"},
+    {"code":"ORDERING_GAP","meaning":"Required source sequence/predecessor is missing, gapped or conflicting.","transport":"PRESERVE_EXACT_DOMAIN_CODE"},
+    {"code":"AUTHORITY_UNAVAILABLE","meaning":"Required authenticated authority or trusted high-water cannot be obtained or validated; preserve precise verifier diagnostics.","transport":"PRESERVE_EXACT_DOMAIN_CODE"},
+    {"code":"EVIDENCE_UNRESOLVED","meaning":"Required source evidence is missing, incomplete, stale, ambiguous or cannot be independently verified.","transport":"PRESERVE_EXACT_DOMAIN_CODE"}
+  ],
+  "unknown_unresolved_codes": ["ORDERING_GAP", "AUTHORITY_UNAVAILABLE", "EVIDENCE_UNRESOLVED"],
+  "non_alias_rules": [
+    {"inner":"UNSUPPORTED_SCHEMA_VERSION","outer":"SCHEMA_UNSUPPORTED","rule":"distinct_version_domains"},
+    {"domain":"SUBJECT_MISMATCH","rule":"not_authentication_or_authorization_failure"},
+    {"domain":"STALE_OWNER","rule":"not_success_or_accepted_result"},
+    {"domain":"ORDERING_GAP","rule":"not_false_or_terminal_failure; preserve_UNKNOWN_UNRESOLVED"},
+    {"domain":"EVIDENCE_UNRESOLVED","rule":"not_false_or_terminal_failure; preserve_UNKNOWN_UNRESOLVED"},
+    {"domain":"AUTHORITY_UNAVAILABLE","rule":"not_generic_retryable_outcome; preserve verifier diagnostic distinctions"}
+  ],
+  "transport_policy": {
+    "producer_owns_domain_code_and_meaning": true,
+    "gateway_preserves_domain_code_unchanged": true,
+    "http_status_frozen": false,
+    "retryability_frozen": false,
+    "automatic_retry_for_ambiguous_mutations": false
+  }
+}

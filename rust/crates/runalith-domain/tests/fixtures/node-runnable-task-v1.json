@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/job-store.js::WorkflowStore.listRunnableTasks",
+  "note": "Models only the Node read-only runnable-task candidate query. Parent state, dependency readiness and lease expiry are recorded as context but are not predicates in that SQL query; acquireTaskLease applies a separate transactional parent/attempt/owner-epoch fence.",
+  "rows": [
+    {
+      "row_order": 1,
+      "task_id": "pending-oldest",
+      "job_id": "job-pending-oldest",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:01.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:01.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 2,
+      "task_id": "pending-newer",
+      "job_id": "job-pending-newer",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:02.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:02.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 3,
+      "task_id": "pending-terminal-parent",
+      "job_id": "job-pending-terminal-parent",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:03.000Z",
+      "parent_status": "completed",
+      "parent_state": "COMPLETED",
+      "parent_updated_at": "2026-01-01T00:00:03.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 4,
+      "task_id": "pending-unresolved-dependency",
+      "job_id": "job-pending-unresolved-dependency",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:04.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:04.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": true
+    },
+    {
+      "row_order": 5,
+      "task_id": "pending-active-lease",
+      "job_id": "job-pending-active-lease",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:05.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:05.000Z",
+      "has_active_lease": true,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 6,
+      "task_id": "pending-expired-active-lease",
+      "job_id": "job-pending-expired-active-lease",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:06.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:06.000Z",
+      "has_active_lease": true,
+      "has_expired_active_lease": true,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 7,
+      "task_id": "running",
+      "job_id": "job-running",
+      "status": "running",
+      "created_at": "2026-01-01T00:00:07.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:07.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 8,
+      "task_id": "failed",
+      "job_id": "job-failed",
+      "status": "failed",
+      "created_at": "2026-01-01T00:00:08.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:08.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 9,
+      "task_id": "completed",
+      "job_id": "job-completed",
+      "status": "completed",
+      "created_at": "2026-01-01T00:00:09.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:09.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 10,
+      "task_id": "cancelled",
+      "job_id": "job-cancelled",
+      "status": "cancelled",
+      "created_at": "2026-01-01T00:00:10.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:10.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 11,
+      "task_id": "other-job-pending",
+      "job_id": "job-other-job-pending",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:11.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:11.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 12,
+      "task_id": "fifo-old-task-recent-workflow",
+      "job_id": "job-fifo-old-task-recent-workflow",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:12.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:20.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    },
+    {
+      "row_order": 13,
+      "task_id": "fifo-new-task-old-workflow",
+      "job_id": "job-fifo-new-task-old-workflow",
+      "status": "pending",
+      "created_at": "2026-01-01T00:00:13.000Z",
+      "parent_status": "active",
+      "parent_state": "EXECUTING",
+      "parent_updated_at": "2026-01-01T00:00:01.000Z",
+      "has_active_lease": false,
+      "has_expired_active_lease": false,
+      "has_unmet_dependencies": false
+    }
+  ],
+  "cases": [
+    {
+      "name": "all-candidates",
+      "query": {
+        "limit": 100
+      },
+      "expected_task_ids": [
+        "pending-oldest",
+        "pending-newer",
+        "pending-terminal-parent",
+        "pending-unresolved-dependency",
+        "other-job-pending",
+        "fifo-old-task-recent-workflow",
+        "fifo-new-task-old-workflow"
+      ]
+    },
+    {
+      "name": "oldest-three",
+      "query": {
+        "limit": 3
+      },
+      "expected_task_ids": [
+        "pending-oldest",
+        "pending-newer",
+        "pending-terminal-parent"
+      ]
+    },
+    {
+      "name": "zero-limit",
+      "query": {
+        "limit": 0
+      },
+      "expected_task_ids": []
+    },
+    {
+      "name": "terminal-parent-only",
+      "query": {
+        "jobId": "job-pending-terminal-parent",
+        "limit": 100
+      },
+      "expected_task_ids": [
+        "pending-terminal-parent"
+      ]
+    },
+    {
+      "name": "other-job-only",
+      "query": {
+        "jobId": "job-other-job-pending",
+        "limit": 100
+      },
+      "expected_task_ids": [
+        "other-job-pending"
+      ]
+    },
+    {
+      "name": "unknown-job",
+      "query": {
+        "jobId": "job-does-not-exist",
+        "limit": 100
+      },
+      "expected_task_ids": []
+    },
+    {
+      "name": "one-row",
+      "query": {
+        "limit": 1
+      },
+      "expected_task_ids": [
+        "pending-oldest"
+      ]
+    }
+  ]
+}

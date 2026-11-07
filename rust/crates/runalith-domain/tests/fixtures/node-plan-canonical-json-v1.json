@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/plan.js::canonicalJson",
+  "numeric_contract": "finite safe integers; fractional and unsafe values are outside this Rust adapter contract",
+  "vectors": [
+    {
+      "name": "nested-object-insertion-order",
+      "input_json": "{\"z\":1,\"a\":{\"y\":2,\"b\":3},\"items\":[{\"z\":0,\"a\":true},null,\"text\"]}",
+      "canonical_json": "{\"a\":{\"b\":3,\"y\":2},\"items\":[{\"a\":true,\"z\":0},null,\"text\"],\"z\":1}",
+      "sha256": "e2d81c419f03dc401bfef17366f7873f2a6bda4de57d6fc767295e74e00f8ff2"
+    },
+    {
+      "name": "prototype-sensitive-own-key",
+      "input_json": "{\"workflow_id\":\"proto-key-test\",\"__proto__\":{\"authority\":\"untrusted\",\"nested\":{\"z\":2,\"a\":1}}}",
+      "canonical_json": "{\"__proto__\":{\"authority\":\"untrusted\",\"nested\":{\"a\":1,\"z\":2}},\"workflow_id\":\"proto-key-test\"}",
+      "sha256": "118c7179cd136dc52c21668f2e40d7ca4792eb03137f96427a3e4c3a96f7e594"
+    },
+    {
+      "name": "unicode-utf16-key-order",
+      "input_json": "{\"\\uE000\":1,\"😀\":2,\"a\":3,\"é\":4,\"é\":5}",
+      "canonical_json": "{\"a\":3,\"é\":5,\"é\":4,\"😀\":2,\"\":1}",
+      "sha256": "b1fb942d12fc81f11871dd64912bf0b255fe66b4d45e09e7865da36940814405"
+    },
+    {
+      "name": "safe-integer-boundaries-and-negative-zero",
+      "input_json": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"zero\":-0.0,\"nested\":[0,1,-1]}",
+      "canonical_json": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"nested\":[0,1,-1],\"zero\":0}",
+      "sha256": "709f3dd9b4db9ba7b2d82902a6617000dcca4577d7b6547bd7d92bc66ef5a3b1"
+    },
+    {
+      "name": "json-string-escaping-and-unicode-preservation",
+      "input_json": "{\"slash\":\"/\",\"quote\":\"\\\"\",\"backslash\":\"\\\\\",\"line\":\"first\\nsecond\",\"control\":\"\\u000f\",\"unicode\":\"é / é / 😀\"}",
+      "canonical_json": "{\"backslash\":\"\\\\\",\"control\":\"\\u000f\",\"line\":\"first\\nsecond\",\"quote\":\"\\\"\",\"slash\":\"/\",\"unicode\":\"é / é / 😀\"}",
+      "sha256": "74a544793d78874af8aa89e499befd3339ae930b37cef91e846d3e4d52709e7f"
+    },
+    {
+      "name": "empty-and-null-shapes",
+      "input_json": "{\"empty_object\":{},\"empty_array\":[],\"empty_string\":\"\",\"null_value\":null,\"false_value\":false,\"true_value\":true}",
+      "canonical_json": "{\"empty_array\":[],\"empty_object\":{},\"empty_string\":\"\",\"false_value\":false,\"null_value\":null,\"true_value\":true}",
+      "sha256": "37eb3d7e41cac4ed28173995237ae5e84076e4839f1d40ddf62cd8ad9f01fbe6"
+    }
+  ]
+}

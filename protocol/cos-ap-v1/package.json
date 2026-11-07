@@ -1,0 +1,28 @@
+{
+  "name": "@runalith/cos-ap",
+  "version": "0.1.0",
+  "description": "Versioned message and durable execution contracts used by Runalith adapters and runtimes.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "*.schema.json",
+    "README.md",
+    "API.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

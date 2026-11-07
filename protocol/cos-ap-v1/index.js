@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const COS_AP_PROTOCOL = 'cos-ap';
 export const COS_AP_VERSION = 1;
@@ -14,7 +15,7 @@ export const COS_AP_MESSAGE_TYPES = Object.freeze([
 ]);
 
 const MESSAGE_TYPE_SET = new Set(COS_AP_MESSAGE_TYPES);
-const ROOT = path.dirname(new URL(import.meta.url).pathname);
+const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 function fail(message) { throw new TypeError(`COS-AP validation failed: ${message}`); }
 function requiredString(value, field) { if (typeof value !== 'string' || !value.trim()) fail(`${field} must be a non-empty string`); }
@@ -371,5 +372,15 @@ export function createEnvelope({ messageId, messageType, jobId, taskId = null, a
   return Object.freeze(envelope);
 }
 
-export function schemaPath(name) { return path.join(ROOT, `${name}.schema.json`); }
+export const COS_AP_SCHEMA_NAMES = Object.freeze([
+  'child-result', 'envelope', 'execution-batch', 'execution-result', 'provider-status', 'synthesis'
+]);
+const COS_AP_SCHEMA_NAME_SET = new Set(COS_AP_SCHEMA_NAMES);
+
+export function schemaPath(name) {
+  if (typeof name !== 'string' || !COS_AP_SCHEMA_NAME_SET.has(name)) {
+    throw new TypeError(`unsupported COS-AP schema name: ${String(name)}`);
+  }
+  return path.join(ROOT, `${name}.schema.json`);
+}
 export function readSchema(name) { return JSON.parse(fs.readFileSync(schemaPath(name), 'utf8')); }

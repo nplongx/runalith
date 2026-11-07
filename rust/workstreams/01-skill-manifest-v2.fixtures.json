@@ -1,0 +1,235 @@
+{
+  "fixture_set": "WS1 portable skill manifest V2 candidate",
+  "status": "DRAFT_NOT_RATIFIED",
+  "generated_by": "rust/workstreams/01-skill-manifest-v2-test.mjs --write-fixture",
+  "profile": {
+    "profile_id": "urn:runalith:skill-manifest:v2-jcs-utf8-nfc-bytewise",
+    "file_record_fields_and_order": [
+      "path",
+      "sha256",
+      "size_bytes"
+    ],
+    "file_digest": "SHA-256 of exact UTF-8 file bytes",
+    "path_normalization": "paths must already be Unicode NFC; reject rather than rewrite",
+    "path_order": "unsigned lexicographic UTF-8 byte order; case-sensitive",
+    "manifest_serialization": "RFC 8785 JCS canonical UTF-8 JSON array of exact file records; JSON.stringify is byte-equivalent for the restricted record types/ordered ASCII keys described in the W1 spec",
+    "bundle_digest": "SHA-256 of exact canonical manifest UTF-8 bytes",
+    "limits": {
+      "max_files": 40,
+      "max_file_bytes": 32768,
+      "max_total_bytes": 163840
+    },
+    "scope_note": "This profile hashes a supplied eligible-file set; importer file-selection/exclusion rules require a separately pinned version."
+  },
+  "importer_selection_policy": {
+    "policy_id": "urn:runalith:skill-import:v2-text-tree-v1",
+    "eligible_extensions": [
+      ".md",
+      ".mdx",
+      ".txt",
+      ".json",
+      ".yaml",
+      ".yml",
+      ".toml",
+      ".csv",
+      ".xml",
+      ".html",
+      ".css",
+      ".svg",
+      ".js",
+      ".mjs",
+      ".cjs",
+      ".ts",
+      ".tsx",
+      ".py",
+      ".sh",
+      ".sql",
+      ".graphql"
+    ],
+    "enumeration": "recursive under one skill root, maximum depth 8; enumerate regular files only; do not follow symlinks; reject symlink entries in eligible paths",
+    "exclusions": "skip any hidden path component (leading dot) and directories .git,node_modules,.venv,venv,__pycache__,dist,build,.next",
+    "root_entry": "require exact root SKILL.md; metadata name must match the declared skill directory/name",
+    "content": "reject malformed UTF-8, lone UTF-16 surrogates and NUL-containing eligible text files; never decode with replacement",
+    "bounds": {
+      "max_files_per_skill": 40,
+      "max_file_bytes": 32768,
+      "max_total_bytes_per_role": 163840,
+      "max_skills_per_role": 8
+    },
+    "ordering": "enumeration order is irrelevant; final manifest order is the bundle profile UTF-8 bytewise order",
+    "filesystem_case": "logical path identity is case-sensitive; on case-insensitive filesystems require an alias check. This candidate conservatively supports only ASCII paths there and rejects ASCII case-fold collisions; non-ASCII requires a host/filesystem-specific alias verifier.",
+    "source_version": "GitHub binds immutable resolved commit + skill subtree tree OIDs; local binds complete content snapshot. Mutable path/branch/tag is provenance/reference only, not immutable version.",
+    "status": "DRAFT; separately versioned and included in any future skill plan pin"
+  },
+  "skill_version_examples": {
+    "github": "git:sha1:0123456789abcdef0123456789abcdef01234567:tree:89abcdef0123456789abcdef0123456789abcdef",
+    "local": "local-content-snapshot:v1:sha256:<bundle_sha256>",
+    "rule": "GitHub version binds resolved immutable commit and skill subtree tree OIDs. Local version binds a content-addressed complete snapshot; path is provenance only. Mutable branch/tag/path is not a version."
+  },
+  "vectors": [
+    {
+      "id": "ascii-and-nfc-unicode",
+      "files": [
+        {
+          "path": "z-last.txt",
+          "content_utf8": "last\n"
+        },
+        {
+          "path": "指南/步骤.txt",
+          "content_utf8": "步骤一\n"
+        },
+        {
+          "path": "SKILL.md",
+          "content_utf8": "---\nname: sample-skill\ndescription: manifest fixture\n---\nUse fixture only.\n"
+        },
+        {
+          "path": "references/éclair.md",
+          "content_utf8": "café\n"
+        },
+        {
+          "path": "A.md",
+          "content_utf8": "uppercase path\n"
+        },
+        {
+          "path": "a.md",
+          "content_utf8": "lowercase path\n"
+        }
+      ],
+      "records": [
+        {
+          "path": "A.md",
+          "sha256": "ef50af394c1b54ba22a5da4ae7d3053f3fc8e466b8772a77aa8e1a53b894350b",
+          "size_bytes": 15
+        },
+        {
+          "path": "SKILL.md",
+          "sha256": "9c2de208219a88a9ddb722a495d602a47f64c0113f89e769e43508b0f70a0424",
+          "size_bytes": 75
+        },
+        {
+          "path": "a.md",
+          "sha256": "41e01771a887c8138d0fec7f92ce3e83667d397eb85a3eca257f42ffc707ea1a",
+          "size_bytes": 15
+        },
+        {
+          "path": "references/éclair.md",
+          "sha256": "7b49b9e063bd91a4f9252b413261f5557b9c570aa61516989499f64a62dbcdd6",
+          "size_bytes": 6
+        },
+        {
+          "path": "z-last.txt",
+          "sha256": "761d1fb145ca8c7130231412276df60f34dd34554c4d174b973a45e3222475a9",
+          "size_bytes": 5
+        },
+        {
+          "path": "指南/步骤.txt",
+          "sha256": "4f987df3851008037e8a52adae4521fc14769b79d1a584db459605f90acbaa7b",
+          "size_bytes": 10
+        }
+      ],
+      "canonical_json": "[{\"path\":\"A.md\",\"sha256\":\"ef50af394c1b54ba22a5da4ae7d3053f3fc8e466b8772a77aa8e1a53b894350b\",\"size_bytes\":15},{\"path\":\"SKILL.md\",\"sha256\":\"9c2de208219a88a9ddb722a495d602a47f64c0113f89e769e43508b0f70a0424\",\"size_bytes\":75},{\"path\":\"a.md\",\"sha256\":\"41e01771a887c8138d0fec7f92ce3e83667d397eb85a3eca257f42ffc707ea1a\",\"size_bytes\":15},{\"path\":\"references/éclair.md\",\"sha256\":\"7b49b9e063bd91a4f9252b413261f5557b9c570aa61516989499f64a62dbcdd6\",\"size_bytes\":6},{\"path\":\"z-last.txt\",\"sha256\":\"761d1fb145ca8c7130231412276df60f34dd34554c4d174b973a45e3222475a9\",\"size_bytes\":5},{\"path\":\"指南/步骤.txt\",\"sha256\":\"4f987df3851008037e8a52adae4521fc14769b79d1a584db459605f90acbaa7b\",\"size_bytes\":10}]",
+      "canonical_bytes": 687,
+      "bundle_sha256": "2f32e98320c054fec85af3bf1dd02732943b9708bd1352f1127c4bd29d570636"
+    },
+    {
+      "id": "empty-content-and-multibyte-bytes",
+      "files": [
+        {
+          "path": "empty.txt",
+          "content_utf8": ""
+        },
+        {
+          "path": "unicode/你好.txt",
+          "content_utf8": "你好 🌱\n"
+        }
+      ],
+      "records": [
+        {
+          "path": "empty.txt",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size_bytes": 0
+        },
+        {
+          "path": "unicode/你好.txt",
+          "sha256": "7650c3fa72fb425ffd6b0c17bc2bb73aeac392d60bfc98308e45e6af26047d32",
+          "size_bytes": 12
+        }
+      ],
+      "canonical_json": "[{\"path\":\"empty.txt\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"size_bytes\":0},{\"path\":\"unicode/你好.txt\",\"sha256\":\"7650c3fa72fb425ffd6b0c17bc2bb73aeac392d60bfc98308e45e6af26047d32\",\"size_bytes\":12}]",
+      "canonical_bytes": 235,
+      "bundle_sha256": "b7bf79313e6925de994d284ce419649cf3d1ebc0c4850eee5336072fcff9a6bf"
+    }
+  ],
+  "negative_cases": [
+    {
+      "id": "absolute-posix-path",
+      "path": "/tmp/skill.md",
+      "expected": "path_absolute"
+    },
+    {
+      "id": "absolute-drive-path",
+      "path": "C:/skill.md",
+      "expected": "path_absolute"
+    },
+    {
+      "id": "empty-segment",
+      "path": "a//b.md",
+      "expected": "path_empty_segment"
+    },
+    {
+      "id": "dot-segment",
+      "path": "a/./b.md",
+      "expected": "path_dot_segment"
+    },
+    {
+      "id": "parent-segment",
+      "path": "a/../b.md",
+      "expected": "path_parent_segment"
+    },
+    {
+      "id": "backslash",
+      "path": "a\\b.md",
+      "expected": "path_backslash"
+    },
+    {
+      "id": "nul",
+      "path": "a\u0000b.md",
+      "expected": "path_control_character"
+    },
+    {
+      "id": "non-nfc-decomposed-path",
+      "path": "references/é.md",
+      "expected": "path_not_nfc"
+    },
+    {
+      "id": "control-character",
+      "path": "ab.md",
+      "expected": "path_control_character"
+    },
+    {
+      "id": "duplicate-path",
+      "path": "same.md",
+      "expected": "duplicate_path"
+    }
+  ],
+  "negative_content_cases": [
+    {
+      "id": "unpaired-high-surrogate",
+      "expected": "file_content_invalid_unicode"
+    },
+    {
+      "id": "unpaired-low-surrogate",
+      "expected": "file_content_invalid_unicode"
+    }
+  ],
+  "negative_filesystem_cases": [
+    {
+      "id": "ascii-case-collision-on-insensitive-filesystem",
+      "expected": "case_insensitive_path_collision"
+    },
+    {
+      "id": "unicode-path-on-insensitive-filesystem",
+      "expected": "case_insensitive_filesystem_requires_ascii_path"
+    }
+  ]
+}

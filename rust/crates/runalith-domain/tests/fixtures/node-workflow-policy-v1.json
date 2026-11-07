@@ -1,0 +1,25 @@
+{
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/policy-contract.js::createPolicySnapshot",
+  "snapshot": {
+    "schema_version": 1,
+    "policy_id": "require-owner",
+    "version": 1,
+    "name": "Require custom owner",
+    "description": "The immutable plan must include the custom owner role",
+    "constraints": [
+      {
+        "id": "owner-present",
+        "type": "task_role_present",
+        "role": "custom-owner"
+      }
+    ],
+    "success_criteria": [
+      {
+        "id": "all-complete",
+        "type": "all_tasks_completed"
+      }
+    ],
+    "content_hash": "1e998fe337e6aed6d0dcaf879a32a2ad3cfb9d723493378227c0b6c847e71380"
+  }
+}

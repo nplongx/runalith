@@ -1,0 +1,64 @@
+{
+  "fixture_id": "runalith.artifact-read-port.v1.golden-001",
+  "fixture_status": "DRAFT_CROSS_LANGUAGE_GOLDEN_VECTOR",
+  "payload_bytes_utf8": "{\"artifact\":\"payload\"}",
+  "payload_sha256": "548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+  "request": {
+    "contract_version": "1.0",
+    "request_id": "read-request-1",
+    "correlation_id": "corr-42",
+    "artifact": {
+      "contract_version": "1.0",
+      "artifact_id": "sha256:548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+      "sha256": "548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+      "byte_len": 22,
+      "media_type": "application/json",
+      "content_schema_id": "runalith.execution-result",
+      "content_schema_version": "1.0",
+      "source": {
+        "producer_id": "execution.worker",
+        "workflow_id": "workflow-42",
+        "task_id": "task-7",
+        "attempt": 3,
+        "correlation_id": "corr-42",
+        "created_at": "2026-11-03T10:00:00Z"
+      }
+    }
+  },
+  "request_canonical_utf8": "{\"contract_version\":\"1.0\",\"request_id\":\"read-request-1\",\"correlation_id\":\"corr-42\",\"artifact\":{\"contract_version\":\"1.0\",\"artifact_id\":\"sha256:548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c\",\"sha256\":\"548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c\",\"byte_len\":22,\"media_type\":\"application/json\",\"content_schema_id\":\"runalith.execution-result\",\"content_schema_version\":\"1.0\",\"source\":{\"producer_id\":\"execution.worker\",\"workflow_id\":\"workflow-42\",\"task_id\":\"task-7\",\"attempt\":3,\"correlation_id\":\"corr-42\",\"created_at\":\"2026-11-03T10:00:00Z\"}}}",
+  "request_sha256": "2da86591bf66584e0ec0cc0048e0ea97c55c2c38e023f0571e0b80aaad9feda1",
+  "available_observation": {
+    "contract_version": "1.0",
+    "request_id": "read-request-1",
+    "observation_id": "read-observation-1",
+    "source_service_id": "execution.worker-reader",
+    "correlation_id": "corr-42",
+    "artifact_id": "sha256:548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+    "expected_sha256": "548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+    "expected_byte_len": 22,
+    "media_type": "application/json",
+    "observed_at": "2026-11-03T10:01:00Z",
+    "disposition": "AVAILABLE",
+    "observed_sha256": "548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+    "observed_byte_len": 22
+  },
+  "available_observation_canonical_utf8": "{\"contract_version\":\"1.0\",\"request_id\":\"read-request-1\",\"observation_id\":\"read-observation-1\",\"source_service_id\":\"execution.worker-reader\",\"correlation_id\":\"corr-42\",\"artifact_id\":\"sha256:548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c\",\"expected_sha256\":\"548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c\",\"expected_byte_len\":22,\"media_type\":\"application/json\",\"observed_at\":\"2026-11-03T10:01:00Z\",\"disposition\":\"AVAILABLE\",\"observed_sha256\":\"548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c\",\"observed_byte_len\":22}",
+  "available_observation_sha256": "b97357cd91e83cae56f167ec4ce74921145530959b1dab006437a711831b4824",
+  "not_found_observation": {
+    "contract_version": "1.0",
+    "request_id": "read-request-1",
+    "observation_id": "read-observation-2",
+    "source_service_id": "execution.worker-reader",
+    "correlation_id": "corr-42",
+    "artifact_id": "sha256:548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+    "expected_sha256": "548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c",
+    "expected_byte_len": 22,
+    "media_type": "application/json",
+    "observed_at": "2026-11-03T10:02:00Z",
+    "disposition": "NOT_FOUND",
+    "observed_sha256": null,
+    "observed_byte_len": null
+  },
+  "not_found_observation_canonical_utf8": "{\"contract_version\":\"1.0\",\"request_id\":\"read-request-1\",\"observation_id\":\"read-observation-2\",\"source_service_id\":\"execution.worker-reader\",\"correlation_id\":\"corr-42\",\"artifact_id\":\"sha256:548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c\",\"expected_sha256\":\"548ea51e51b53db3366b33312a9ced1074dbc330c0155a790e996cfc4fa29a1c\",\"expected_byte_len\":22,\"media_type\":\"application/json\",\"observed_at\":\"2026-11-03T10:02:00Z\",\"disposition\":\"NOT_FOUND\",\"observed_sha256\":null,\"observed_byte_len\":null}",
+  "not_found_observation_sha256": "491340401f0670c59e8b611216b888033350c0fcd07f13259bdc0ee217b134be"
+}

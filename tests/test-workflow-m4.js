@@ -12,7 +12,7 @@ process.env.WORKFLOW_DATA_DIR = path.dirname(dbPath);
 process.env.WORKFLOW_WORKSPACE = workspace;
 fs.mkdirSync(process.env.WORKFLOW_WORKSPACE, { recursive: true });
 
-const { WorkflowStore, conversationKeyFromMessages } = await import('../src/runtime/job-store.js');
+const { WorkflowStore, conversationKeyFromMessages } = await import('../job-store.js');
 const { compileWorkflowPlan } = await import('../src/runtime/workflow/compiler.js');
 const { EngineeringWorkflow, EngineeringTaskId, isEngineeringWorkflow } = await import('../src/runtime/workflow/definitions/engineering.js');
 const { TaskCapability, getRoleContract } = await import('../src/runtime/workflow/roles.js');

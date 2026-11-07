@@ -26,7 +26,7 @@ assert.throws(() => validateArtifactContent('review', { ...accepted, decision: '
 const tempRoot = tempDir('m6-review-');
 process.env.WORKFLOW_DB = path.join(tempRoot, 'workflow.db');
 process.env.WORKFLOW_DATA_DIR = tempRoot;
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const store = new WorkflowStore();
 const job = store.createJob({ conversationKey: `m6-${process.pid}-${Date.now()}`, title: 'Software development M6 reviewer artifact' });
 store.transition(job.job_id, 'PROPOSED');

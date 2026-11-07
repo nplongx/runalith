@@ -8,8 +8,9 @@ import { spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { isSafePortableArchivePath, validateZipEntryTypes } from '../benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs';
-import { assertAdaptiveGoalTrustDomainsDisjoint, adaptiveGoalTrustConfigurationStatus,
-  inspectAdaptiveGoalTrustConfigurationHistory, loadAdaptiveGoalTrustConfiguration } from '../src/runtime/adaptive-goal-trust-configuration.js';
+import { adaptiveGoalTrustConfigurationStatus, inspectAdaptiveGoalTrustConfigurationHistory } from '../src/runtime/adaptive-goal-trust-configuration.js';
+import { ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS, assertAdaptiveGoalTrustDomainConfigurationsDisjoint,
+  loadAdaptiveGoalTrustDomainConfigurations } from '../src/runtime/adaptive-goal-trust-domains.js';
 import { parseStrictJson } from '../src/runtime/strict-json.js';
 import { canonicalExternalCheckpointPayload, verifyExternalTrustCheckpointResponse } from './lib/external-trust-checkpoint-contract.mjs';
 import { verifyPhase2CustodyEvidence } from './lib/phase2-custody-evidence.mjs';
@@ -19,6 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const APP_ROOT_DEFAULT = path.join(os.homedir(), '.config', 'chat-on-steroids');
 const WORKFLOW_DB_DEFAULT = path.join(os.homedir(), '.chat-on-steroids', 'agent-orchestrator', 'workflow.db');
 const PINNED_HISTORICAL_SERVER_SHA256 = 'aa2b8f45f5a98817aac019f1659ff91f0bfc22da68cdbef1d9ad1ae6ceee8cb8';
+const PINNED_CURRENT_HOST_COMPATIBILITY_SERVER_SHA256 = 'ced650a83470a1c188e47ae2cdcf6eef19a165c4ca00aaeea80d4c51d049b3db';
 const MAX_BUNDLE_BYTES = 512 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 2000;
 const MAX_UNPACKED_BYTES = 256 * 1024 * 1024;
@@ -662,8 +664,8 @@ export function inspectBundle(bundlePath, { requireCurrentSource = false } = {})
   }
   const archivedRuntime = Buffer.from(run('unzip', ['-p', absolute, entry], { encoding: 'buffer' }));
   const archivedHistorical = Buffer.from(run('unzip', ['-p', absolute, 'server/index.js'], { encoding: 'buffer' }));
-  if (!archivedRuntime.length || sha256(archivedHistorical) !== PINNED_HISTORICAL_SERVER_SHA256) {
-    throw new Error('candidate is missing its selected runtime or has drifted from the historical server/index.js pin');
+  if (!archivedRuntime.length || ![PINNED_HISTORICAL_SERVER_SHA256, PINNED_CURRENT_HOST_COMPATIBILITY_SERVER_SHA256].includes(sha256(archivedHistorical))) {
+    throw new Error('candidate is missing its selected runtime or has drifted from every pinned server/index.js compatibility identity');
   }
   if (requireCurrentSource) {
     const sourcePackage = safeJson(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'), 'repository package.json');
@@ -794,11 +796,8 @@ export function workflowDbSummary(dbPath) {
   } finally { db.close(); }
 }
 
-const AGG_TRUST_ENVIRONMENT_KEYS = new Set([
-  'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON', 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
-  'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM', 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON',
-  'AGG_REVIEW_IDENTITY_PROVIDER_ID', 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM'
-]);
+const AGG_TRUST_ENVIRONMENT_KEYS = new Set(ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS.flatMap(spec =>
+  [spec.configJsonEnv, spec.providerEnv, spec.publicKeyEnv]));
 
 function readRuntimeTrustEnvironment(pid, procRoot) {
   const raw = fs.readFileSync(path.join(procRoot, String(pid), 'environ'));
@@ -807,7 +806,13 @@ function readRuntimeTrustEnvironment(pid, procRoot) {
     const separator = item.indexOf('=');
     if (separator < 1) continue;
     const key = item.slice(0, separator);
-    if (AGG_TRUST_ENVIRONMENT_KEYS.has(key)) environment[key] = item.slice(separator + 1);
+    if (AGG_TRUST_ENVIRONMENT_KEYS.has(key)) {
+      if (Object.hasOwn(environment, key)) {
+        throw Object.assign(new Error(`active runtime has duplicate ${key} entries; refusing an ambiguous trust configuration`),
+          { code: 'AGG_TRUST_CONFIG_ENVIRONMENT_AMBIGUOUS' });
+      }
+      environment[key] = item.slice(separator + 1);
+    }
   }
   return environment;
 }
@@ -942,39 +947,19 @@ function externalAntiRollbackAnchorNotConfigured() {
 export function inspectRuntimeTrustConfiguration(pid, { procRoot = '/proc', now = Date.now() } = {}) {
   try {
     const environment = readRuntimeTrustEnvironment(pid, procRoot);
-    const sourceVerifier = loadAdaptiveGoalTrustConfiguration({
-      configJsonEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_CONFIG_JSON',
-      providerEnv: 'AGG_KNOWLEDGE_VERIFICATION_PROVIDER_ID',
-      publicKeyEnv: 'AGG_KNOWLEDGE_VERIFICATION_TRUST_ROOT_PUBLIC_KEY_PEM',
-      domain: 'goal_idea_verifier', scope: 'agg.goal_idea_graph.verify', now, environment
-    });
-    const reviewer = loadAdaptiveGoalTrustConfiguration({
-      configJsonEnv: 'AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON', providerEnv: 'AGG_REVIEW_IDENTITY_PROVIDER_ID',
-      publicKeyEnv: 'AGG_REVIEW_IDENTITY_TRUST_ROOT_PUBLIC_KEY_PEM',
-      domain: 'action_intent_reviewer', scope: 'agg.action_intent.review', now, environment
-    });
-    if (sourceVerifier.configurationSource !== 'admin_json_environment' || sourceVerifier.configVersion < 1 ||
-        reviewer.configurationSource !== 'admin_json_environment' || reviewer.configVersion < 1) {
-      throw Object.assign(new Error('production rollout requires schema-valid, versioned JSON trust configuration for both independent domains; legacy single-key configuration is migration-only'),
-        { code: 'PRODUCTION_AGG_TRUST_JSON_CONFIGURATION_REQUIRED' });
-    }
-    assertAdaptiveGoalTrustDomainsDisjoint(sourceVerifier, reviewer);
-    if (!sourceVerifier.available || !reviewer.available) {
-      throw Object.assign(new Error('one or both trust domains have no currently usable, non-revoked root inside its validity window'),
-        { code: 'PRODUCTION_AGG_TRUST_ROOT_NOT_CURRENT' });
-    }
-    const trustLedger = inspectRuntimeTrustLedger(pid, { procRoot, configurations: [sourceVerifier, reviewer] });
+    const configurations = loadAdaptiveGoalTrustDomainConfigurations({ environment, now });
+    const separation = assertAdaptiveGoalTrustDomainConfigurationsDisjoint(configurations);
+    const domains = Object.fromEntries(configurations.map(configuration => [
+      configuration.domain, adaptiveGoalTrustConfigurationStatus(configuration)
+    ]));
+    const trustLedger = inspectRuntimeTrustLedger(pid, { procRoot, configurations });
     if (!trustLedger.available) {
       return {
         available: false,
         status: 'BLOCKED',
         source: 'active_runtime_process_environment',
-        domains: {
-          goal_idea_verifier: adaptiveGoalTrustConfigurationStatus(sourceVerifier),
-          action_intent_reviewer: adaptiveGoalTrustConfigurationStatus(reviewer)
-        },
-        separation: { providerIdsDistinct: sourceVerifier.providerId !== reviewer.providerId,
-          publicRootsDisjoint: !sourceVerifier.roots.some(root => reviewer.roots.some(other => other.trustRootSha256 === root.trustRootSha256)) },
+        domains,
+        separation,
         trustLedger,
         externalAntiRollbackAnchor: externalAntiRollbackAnchorNotConfigured(),
         blockers: [{ code: 'PRODUCTION_AGG_TRUST_CONFIGURATION_LEDGER_NOT_CURRENT',
@@ -986,12 +971,8 @@ export function inspectRuntimeTrustConfiguration(pid, { procRoot = '/proc', now 
       available: true,
       status: 'CONFIGURED_IN_ACTIVE_RUNTIME_ENVIRONMENT',
       source: 'active_runtime_process_environment',
-      domains: {
-        goal_idea_verifier: adaptiveGoalTrustConfigurationStatus(sourceVerifier),
-        action_intent_reviewer: adaptiveGoalTrustConfigurationStatus(reviewer)
-      },
-      separation: { providerIdsDistinct: sourceVerifier.providerId !== reviewer.providerId,
-        publicRootsDisjoint: !sourceVerifier.roots.some(root => reviewer.roots.some(other => other.trustRootSha256 === root.trustRootSha256)) },
+      domains,
+      separation,
       trustLedger,
       externalAntiRollbackAnchor: externalAntiRollbackAnchorNotConfigured(),
       blockers: []
@@ -1447,8 +1428,9 @@ export function createInstalledRollbackSnapshot({ outPath, appRoot = APP_ROOT_DE
     }
     copyTree(sourceRoot);
     if (!beforeHashes.some(item => item.path === 'server/index.js') ||
-        beforeHashes.find(item => item.path === 'server/index.js')?.sha256 !== PINNED_HISTORICAL_SERVER_SHA256) {
-      throw new Error('installed generation does not preserve the exact historical server/index.js hash');
+        ![PINNED_HISTORICAL_SERVER_SHA256, PINNED_CURRENT_HOST_COMPATIBILITY_SERVER_SHA256].includes(
+          beforeHashes.find(item => item.path === 'server/index.js')?.sha256)) {
+      throw new Error('installed generation does not preserve an exact pinned server/index.js compatibility identity');
     }
     const archiveRoots = fs.readdirSync(copiedRoot).sort();
     if (!archiveRoots.length) throw new Error('installed generation snapshot has no package files');

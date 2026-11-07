@@ -18,11 +18,16 @@ import {
   verifyAdaptiveGoalReviewedTaskInputContractHash
 } from '../src/runtime/adaptive-goal-reviewed-task-inputs.js';
 import { canonicalJson, validateExecutionPlan } from '../src/runtime/workflow/plan.js';
-import { getAgentContract } from '../src/runtime/workflow/agent-contracts.js';
-import { canonicalAdaptiveGoalActionIntentDescription, getAdaptiveGoalActionIntentSemanticPolicy } from '../src/runtime/adaptive-goal-action-intent-policy.js';
+import { getAgentContract, configureCompiledActionIntentSemanticVerifier } from '../src/runtime/workflow/agent-contracts.js';
+import {
+  canonicalAdaptiveGoalActionIntentDescription,
+  getAdaptiveGoalActionIntentSemanticPolicy,
+  validateCompiledAdaptiveGoalActionIntentSemanticVerification
+} from '../src/runtime/adaptive-goal-action-intent-policy.js';
 import { resolveAdaptiveGoalSourceEvidence } from '../src/runtime/adaptive-goal-source-evidence.js';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
+configureCompiledActionIntentSemanticVerifier(validateCompiledAdaptiveGoalActionIntentSemanticVerification);
 function stableJson(value) {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
@@ -32,6 +37,12 @@ function rehashProposal(proposal) {
   const copy = structuredClone(proposal);
   delete copy.proposalHash;
   copy.proposalHash = sha(stableJson(copy));
+  return copy;
+}
+function rehashCandidate(candidate) {
+  const copy = structuredClone(candidate);
+  delete copy.candidateHash;
+  copy.candidateHash = sha(stableJson(copy));
   return copy;
 }
 
@@ -331,6 +342,35 @@ test('adapts a fresh Execution Graph proposal to the exact trusted compiler/vali
     preflight: value.preflight,
     reviewedActionIntents: value.reviewedActionIntents
   }));
+});
+
+test('candidate verifier rejects internally inconsistent envelopes even when attacker recomputes outer hashes', () => {
+  const value = context();
+  const candidate = buildAdaptiveGoalExecutionPlanCandidate({
+    jobId: value.jobId, proposalEventHash: sha('candidate-verifier'),
+    executionGraphProposal: value.graphProposal, compiledPlan: value.compiledPlan,
+    preflight: value.preflight, reviewedActionIntents: value.reviewedActionIntents
+  });
+
+  const forgedPlan = structuredClone(candidate);
+  forgedPlan.executionPlan.children.find(task => task.id === 'standard-engineer').execution.args = ['attacker-controlled'];
+  assert.equal(verifyAdaptiveGoalExecutionPlanCandidateHash(rehashCandidate(forgedPlan)), false,
+    'outer candidate hash cannot bless a compiler plan whose own plan_hash no longer verifies');
+
+  const forgedEvidence = structuredClone(candidate);
+  forgedEvidence.evidenceSnapshot[0].contentHash = '0'.repeat(64);
+  assert.equal(verifyAdaptiveGoalExecutionPlanCandidateHash(rehashCandidate(forgedEvidence)), false,
+    'candidate evidence snapshot must match its independently stored evidenceHash');
+
+  const forgedIntent = structuredClone(candidate);
+  const unsignedInputs = { ...forgedIntent.reviewedTaskInputs };
+  delete unsignedInputs.contractHash;
+  forgedIntent.reviewedTaskInputs.actions[0].actionIntent.operation = 'review';
+  const unsignedChangedInputs = { ...forgedIntent.reviewedTaskInputs };
+  delete unsignedChangedInputs.contractHash;
+  forgedIntent.reviewedTaskInputs.contractHash = sha(stableJson(unsignedChangedInputs));
+  assert.equal(verifyAdaptiveGoalExecutionPlanCandidateHash(rehashCandidate(forgedIntent)), false,
+    'reviewed intent cannot diverge from compiler task bindings after the outer hash is recomputed');
 });
 
 test('fails closed on candidate, graph proposal, compiler hash, job/template and preflight mismatches', () => {

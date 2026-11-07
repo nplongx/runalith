@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { parseStrictJson } from '../strict-json.js';
-import { normalizeSuccessContract } from './success-contract.js';
+import { normalizeSuccessContract } from '../workflow-contracts-public-api.js';
 
 const POLICY_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const POLICY_ID_MAX = 38;

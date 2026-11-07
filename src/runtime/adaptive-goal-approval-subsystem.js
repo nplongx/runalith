@@ -7,7 +7,8 @@ import {
   inspectAdaptiveGoalTrustConfigurationHistory,
   loadAdaptiveGoalTrustConfiguration
 } from './adaptive-goal-trust-configuration.js';
-import { canonicalJson } from './workflow/plan.js';
+import { canonicalJson } from './workflow-plan-public-api.js';
+import { ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS } from './adaptive-goal-trust-domains.js';
 
 export const ADAPTIVE_GOAL_APPROVAL_SUBSYSTEM_SCHEMA_VERSION = 1;
 export const ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE = 'agg.approval.policy';
@@ -17,20 +18,18 @@ export const ADAPTIVE_GOAL_APPROVAL_BINDING_VERSION = 1;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const KEY_CONFIGS = Object.freeze([
-  {
-    id: 'policyAuthority', env: 'AGG_APPROVAL_POLICY_TRUST_CONFIG_JSON', providerEnv: 'AGG_APPROVAL_POLICY_PROVIDER_ID',
-    publicKeyEnv: 'AGG_APPROVAL_POLICY_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'execution_approval_policy', scope: ADAPTIVE_GOAL_APPROVAL_POLICY_SCOPE
-  },
-  {
-    id: 'makerAuthority', env: 'AGG_ACTION_INTENT_MAKER_TRUST_CONFIG_JSON', providerEnv: 'AGG_ACTION_INTENT_MAKER_PROVIDER_ID',
-    publicKeyEnv: 'AGG_ACTION_INTENT_MAKER_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'action_intent_maker', scope: ADAPTIVE_GOAL_MAKER_AUTHORIZATION_SCOPE
-  },
-  {
-    id: 'decisionAuthority', env: 'AGG_EXECUTION_APPROVAL_TRUST_CONFIG_JSON', providerEnv: 'AGG_EXECUTION_APPROVAL_PROVIDER_ID',
-    publicKeyEnv: 'AGG_EXECUTION_APPROVAL_TRUST_ROOT_PUBLIC_KEY_PEM', domain: 'execution_approval', scope: ADAPTIVE_GOAL_EXECUTION_APPROVAL_SCOPE
-  }
-]);
+const APPROVAL_DOMAIN_IDS = Object.freeze({
+  execution_approval_policy: 'policyAuthority',
+  action_intent_maker: 'makerAuthority',
+  execution_approval: 'decisionAuthority'
+});
+const KEY_CONFIGS = Object.freeze(ADAPTIVE_GOAL_TRUST_DOMAIN_SPECS
+  .filter(spec => Object.hasOwn(APPROVAL_DOMAIN_IDS, spec.domain))
+  .map(spec => Object.freeze({
+    id: APPROVAL_DOMAIN_IDS[spec.domain], env: spec.configJsonEnv,
+    providerEnv: spec.providerEnv, publicKeyEnv: spec.publicKeyEnv,
+    domain: spec.domain, scope: spec.scope
+  })));
 const APPROVAL_POLICY_OBSERVED_EVENT = 'adaptive_goal.approval_policy_version_observed';
 
 function fail(code, message, details = {}) {
@@ -225,7 +224,7 @@ function loadTrustedRoot(configuration, envelope, expectedScope, field, now = Da
     fail('AGG_APPROVAL_EVIDENCE_EXPIRED', `${field} is future-dated, expired, or has an invalid time window`);
   }
   let root;
-  try { root = findAdaptiveGoalTrustedRoot(configuration, envelope.trust_root_sha256, { issuedAt, now: Date.now() }); }
+  try { root = findAdaptiveGoalTrustedRoot(configuration, envelope.trust_root_sha256, { issuedAt, now }); }
   catch (error) { fail(error?.code || 'AGG_APPROVAL_TRUST_ROOT_REJECTED', `${field}: ${String(error?.message || error)}`); }
   if (!root.usableNow || root.scope !== expectedScope) fail('AGG_APPROVAL_TRUST_ROOT_REJECTED', `${field} signing root is not currently valid for ${expectedScope}`);
   return { root, issuedAt, expiresAt };

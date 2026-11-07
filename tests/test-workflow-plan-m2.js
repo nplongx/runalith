@@ -12,7 +12,7 @@ process.env.WORKFLOW_DB = dbPath;
 process.env.WORKFLOW_DATA_DIR = path.dirname(dbPath);
 process.env.WORKFLOW_WORKSPACE = workspace;
 
-const { WorkflowStore, conversationKeyFromMessages } = await import('../src/runtime/job-store.js');
+const { WorkflowStore, conversationKeyFromMessages } = await import('../job-store.js');
 const { compileWorkflowPlan } = await import('../src/runtime/workflow/compiler.js');
 const { canonicalJson } = await import('../src/runtime/workflow/plan.js');
 

@@ -1,0 +1,46 @@
+{
+  "profile": "runalith-current-command-request-serde-v1",
+  "status": "DRAFT_NOT_RATIFIED",
+  "scope": "Observed current Rust runalith_sandbox::CommandRequest serialization only; not a ratified TaskClaimV4 producer mapping or signed claim preimage.",
+  "serializer": "serde_json::to_vec(CommandRequest) in struct field order; PathBuf as UTF-8 string; environment as BTreeMap key order; stdin Vec<u8> as a JSON integer array.",
+  "vectors": [
+    {
+      "name": "minimal-true",
+      "command": {
+        "executable": "/usr/bin/true",
+        "arguments": [],
+        "working_directory": ".",
+        "environment": {},
+        "stdin": []
+      },
+      "serialized_json": "{\"executable\":\"/usr/bin/true\",\"arguments\":[],\"working_directory\":\".\",\"environment\":{},\"stdin\":[]}",
+      "sha256": "7cdb59b2331c7eed448b46c971fe1d6dccf915ddc82ad6d1b21bca4bae55a3a5"
+    },
+    {
+      "name": "unicode-env-binary-stdin",
+      "command": {
+        "executable": "/usr/bin/env",
+        "arguments": [
+          "-u",
+          "TOKEN",
+          "python3",
+          "-c",
+          "print('café 🧪')"
+        ],
+        "working_directory": "jobs/run-1",
+        "environment": {
+          "ZED": "last",
+          "ALPHA": "first",
+          "TOKEN": "shadow"
+        },
+        "stdin": [
+          0,
+          255,
+          10
+        ]
+      },
+      "serialized_json": "{\"executable\":\"/usr/bin/env\",\"arguments\":[\"-u\",\"TOKEN\",\"python3\",\"-c\",\"print('café 🧪')\"],\"working_directory\":\"jobs/run-1\",\"environment\":{\"ALPHA\":\"first\",\"TOKEN\":\"shadow\",\"ZED\":\"last\"},\"stdin\":[0,255,10]}",
+      "sha256": "6e3fbfe695f74f36739e454c6cd541f7cd4c0487d2d1c9e91302e8a2d9833fb7"
+    }
+  ]
+}

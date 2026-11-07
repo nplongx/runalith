@@ -8,12 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const fixturePath = path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v147.json');
+const fixturePath = path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v174.json');
 const runnerPath = path.join(root, 'benchmarks/adaptive-goal-graph/run-benchmark.mjs');
 const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 
 function run() {
-  const result = spawnSync(process.execPath, [runnerPath, '--fixture', 'fixtures/recovery-verifier-v147.json'], { cwd: root, encoding: 'utf8', timeout: 15000 });
+  const result = spawnSync(process.execPath, [runnerPath, '--fixture', 'fixtures/recovery-verifier-v174.json'], { cwd: root, encoding: 'utf8', timeout: 15000 });
   assert.equal(result.status, 0, result.stderr || `runner exited ${result.status}`);
   return JSON.parse(result.stdout);
 }
@@ -37,6 +37,16 @@ function createIsolatedRunnerWorkspace() {
     'tests/test-adaptive-goal-source-evidence.js',
     'tests/test-adaptive-goal-candidate-assessment-contract.mjs',
     'src/runtime/adaptive-goal-sandbox-executor.js',
+    'src/runtime/execution-persistence-store.js',
+    'src/runtime/execution-persistence-participant.js',
+    'src/runtime/workflow-state-port.js',
+    'src/runtime/runalith-runtime-composition.js',
+    'tests/test-execution-persistence-participant-boundary.mjs',
+    'tests/test-agent-session-store-boundary.mjs',
+    'docs/subsystems/api-and-data-ownership.md',
+    'docs/subsystems/workflow-state-port.md',
+    'docs/subsystems/execution-runtime.md',
+    'docs/subsystems/repository-extraction.md',
     'benchmarks/adaptive-goal-graph/run-benchmark.mjs',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v18.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v19.json',
@@ -142,6 +152,30 @@ function createIsolatedRunnerWorkspace() {
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v145.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v146.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v147.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v148.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v149.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v150.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v151.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v152.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v153.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v154.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v155.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v156.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v157.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v158.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v159.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v160.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v161.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v162.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v163.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v165.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v166.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v167.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v170.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v171.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v172.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v173.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v174.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v125.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v17.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v15.json',
@@ -166,11 +200,11 @@ function createIsolatedRunnerWorkspace() {
 }
 
 function isolatedFixturePath(workspace) {
-  return path.join(workspace, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v147.json');
+  return path.join(workspace, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v174.json');
 }
 
 function runIsolated(workspace) {
-  return spawnSync(process.execPath, [path.join(workspace, 'benchmarks/adaptive-goal-graph/run-benchmark.mjs'), '--fixture', 'fixtures/recovery-verifier-v147.json'], {
+  return spawnSync(process.execPath, [path.join(workspace, 'benchmarks/adaptive-goal-graph/run-benchmark.mjs'), '--fixture', 'fixtures/recovery-verifier-v174.json'], {
     cwd: workspace, encoding: 'utf8', timeout: 15000
   });
 }
@@ -322,7 +356,19 @@ test('versioned provenance pins current sources and preserves the previous artif
     [143, 'b9c6ac01f65c5f925f829b2df5a2b98f5324b076163b96fed7feac4bcd8a6310'],
     [144, 'c4ff1eff737388bff8c18ff0d51939323e50c6f705454d26e51b128c6d84d8db'],
     [145, '9d7d73d8cf65043f51dac5541962f3088646af8a769efa623a63c569e676b61b'],
-    [146, '5eec91752ccd72d1caa4d0f851ea2e71a2525c4b5d9a56062339e22663b54133']
+    [146, '5eec91752ccd72d1caa4d0f851ea2e71a2525c4b5d9a56062339e22663b54133'],
+    [147, '7e19eac297032a31db0a3e09e3cd129cbcfdfe60e0c5279776cd484b09c91f7b'],
+    [148, '0bb80be01acd8cd419bcedca195b69b571448f3ca6cb2df51698a7e6555d7e2c'],
+    [149, 'dc0e5468894a695314f0b17028037cd2b4ba9c6ef9d89e4191ff1d5654b782b3'],
+    [150, '2e84cc89e4416d6be73805d7200022a928387bfa74baae221610eb2c40a9a5e7'],
+    [151, '33a245e62ff0cb274df42458863327fe43fce22df888ea783552b84b601b5441'],
+    [152, 'e8963bcffe0b20603d29a2a7e14298d2973098af1cff09b3881795367feda5e2'],
+    [153, '6336956f611b9ca9973985fe09bc02ab4937aa5ead23b69b93a4e74e704d3033'],
+    [154, '4c61c648f1d8fa4f539e34be26f5e1b7ea0aa1e606340827f12ce0d46c17d26d'],
+    [155, '8b42fdab7969680f9116dcc9c924004469f68c2c083bd51e57c6ae6842f95335'],
+    [156, '74a9667c347feeb7729572669f2df71704698a9b3a34cf8a09489438b3c25a69'],
+    [157, 'a1959e08b793f5fc566af16f1f636dc6410286a2dcede1650828402c57629db6'],
+    [158, 'ab7c5b3e51f57875bbfb5f41ab0193c8788d0436646352d4ebeaa7ad0dab2cf9']
   ]);
   const historicalFixtureBytes = new Map();
   for (const [version, expectedHash] of historicalFixtureHashes) {
@@ -372,10 +418,79 @@ test('versioned provenance pins current sources and preserves the previous artif
     'v66 remains byte-for-byte preserved as the RC.24 source identity fixture');
   const historicalV65 = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v65.json'));
   assert.equal(createHash('sha256').update(historicalV65).digest('hex'), '40acdf4ac7cb4ab9b403b53702ee0e79744ec5bdc4b9b095ced85445bae4a19c', 'v65 remains byte-for-byte preserved as the source-mismatch recovery fixture');
-  assert.equal(fixture.schemaVersion, 117);
-  assert.equal(fixture.fixtureId, 'recovery-verifier-investigation-v117');
-  assert.equal(fixture.supersedesFixtureId, 'recovery-verifier-investigation-v116');
+  assert.equal(fixture.schemaVersion, 123);
+  assert.equal(fixture.fixtureId, 'recovery-verifier-investigation-v123');
+  assert.equal(fixture.supersedesFixtureId, 'recovery-verifier-investigation-v122');
   const historicalFixtureObjects = new Map([...historicalFixtureBytes].map(([version, bytes]) => [version, JSON.parse(bytes.toString('utf8'))]));
+  historicalFixtureObjects.set(159, JSON.parse(fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v159.json'), 'utf8')));
+  const historicalV160Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v160.json'));
+  assert.equal(createHash('sha256').update(historicalV160Bytes).digest('hex'), '0b8911fc2dec163c068c7136aba987a8533e6c18a7f7d50dc9f53086f3bdc4c3',
+    'v160 remains byte-for-byte preserved as a historical predecessor fixture');
+  historicalFixtureObjects.set(160, JSON.parse(historicalV160Bytes.toString('utf8')));
+  const historicalV161Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v161.json'));
+  assert.equal(createHash('sha256').update(historicalV161Bytes).digest('hex'), '82b14a32a38180296212f488926fb766e5772c2b7588970c86226f3907ae1f63',
+    'v161 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(161, JSON.parse(historicalV161Bytes.toString('utf8')));
+  const historicalV162Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v162.json'));
+  assert.equal(createHash('sha256').update(historicalV162Bytes).digest('hex'), '7d8763bd0a418ad0c027adf89410340322777307f016c307fe8e7cf37f82eb19',
+    'v162 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(162, JSON.parse(historicalV162Bytes.toString('utf8')));
+  const historicalV163Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v163.json'));
+  assert.equal(createHash('sha256').update(historicalV163Bytes).digest('hex'), '1777d6dc6b985a34871be02d5b8cad32f7482744c54351654f792baf737ceec8',
+    'v163 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(163, JSON.parse(historicalV163Bytes.toString('utf8')));
+  const historicalV164Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v164.json'));
+  assert.equal(createHash('sha256').update(historicalV164Bytes).digest('hex'), '06e29a7945618574f31068af1eebb324ba30765edd2bcbffda6eb70e2dc7c72c',
+    'v164 remains byte-for-byte preserved as the immediate predecessor fixture');
+  historicalFixtureObjects.set(164, JSON.parse(historicalV164Bytes.toString('utf8')));
+  const historicalV165Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v165.json'));
+  assert.equal(createHash('sha256').update(historicalV165Bytes).digest('hex'), '486c69fa08d00912d1c9d6ee2bf8aa4fbfd1229cf3f8c10a2eb31ddecd78bc50',
+    'v165 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(165, JSON.parse(historicalV165Bytes.toString('utf8')));
+  const historicalV166Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v166.json'));
+  assert.equal(createHash('sha256').update(historicalV166Bytes).digest('hex'), 'c2734d64c45aecc932343f0d2312c1eb7ee4ec6c9efc16d733e2438ea3ca6154',
+    'v166 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(166, JSON.parse(historicalV166Bytes.toString('utf8')));
+  const historicalV167Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v167.json'));
+  assert.equal(createHash('sha256').update(historicalV167Bytes).digest('hex'), '023fadf6b2ee2d784d63bcda149319154a45a36dd2f8bec985f381dc95fe1eac',
+    'v167 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(167, JSON.parse(historicalV167Bytes.toString('utf8')));
+  const historicalV168Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v168.json'));
+  assert.equal(createHash('sha256').update(historicalV168Bytes).digest('hex'), '5c9985ebce2872da423cfc98d39c75bc2f9f8e620d8bf462b0a92c619f890f6a',
+    'v168 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(168, JSON.parse(historicalV168Bytes.toString('utf8')));
+  const historicalV169Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v169.json'));
+  assert.equal(createHash('sha256').update(historicalV169Bytes).digest('hex'), '82effce3215d3d5aeeccf54fe100d77075d23f464bfdee85b9f2bec2eb311741',
+    'v169 remains byte-for-byte preserved as the immutable predecessor fixture');
+  historicalFixtureObjects.set(169, JSON.parse(historicalV169Bytes.toString('utf8')));
+  const historicalV170Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v170.json'));
+  assert.equal(createHash('sha256').update(historicalV170Bytes).digest('hex'), 'edff7805cc9e9539a86d546733f4af2f4e36fb53217d13d4d49f83d014e05aca',
+    'v170 remains byte-for-byte preserved as the immediate predecessor fixture');
+  historicalFixtureObjects.set(170, JSON.parse(historicalV170Bytes.toString('utf8')));
+  const historicalV171Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v171.json'));
+  assert.equal(createHash('sha256').update(historicalV171Bytes).digest('hex'), '2dd426d39888769804dda5b31071e78c50be1c30675d467ffecbc025d91bed9b',
+    'v171 remains byte-for-byte preserved as the immediate predecessor fixture');
+  historicalFixtureObjects.set(171, JSON.parse(historicalV171Bytes.toString('utf8')));
+  const historicalV172Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v172.json'));
+  assert.equal(createHash('sha256').update(historicalV172Bytes).digest('hex'), '1c2b9a0c4a92df4f095161b405009da024b8b006c9663212c7340e081ebe0204',
+    'v172 remains byte-for-byte preserved as the immediate predecessor provenance fixture');
+  historicalFixtureObjects.set(172, JSON.parse(historicalV172Bytes.toString('utf8')));
+  const historicalV173Bytes = fs.readFileSync(path.join(root, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v173.json'));
+  assert.equal(createHash('sha256').update(historicalV173Bytes).digest('hex'), 'ed77482df80c7403546be7724547f76160ef5cf771f84409ad8d5139e75cb514',
+    'v173 remains byte-for-byte preserved as the immediate predecessor provenance fixture');
+  historicalFixtureObjects.set(173, JSON.parse(historicalV173Bytes.toString('utf8')));
+  assert.ok(fixture.provenanceRevision >= 158);
+  assert.equal(fixture.migration.from, 'recovery-verifier-v173');
+  assert.equal(fixture.migration.to, 'recovery-verifier-v174');
+  assert.equal(fixture.migration.priorFixtureSha256, createHash('sha256').update(historicalV173Bytes).digest('hex'));
+  assert.match(fixture.provenance.find(item => item.path === 'benchmarks/adaptive-goal-graph/run-benchmark.mjs')?.claim || '',
+    /defaults to recovery-verifier-v174\.json/);
+  assert.match(fixture.provenance.find(item => item.path === 'tests/test-adaptive-goal-benchmark.mjs')?.claim || '',
+    /selects v174.*v173 as immutable predecessor/);
+  assert.deepEqual(fixture.groundTruth, historicalFixtureObjects.get(163).groundTruth,
+    'v172 must preserve the exact frozen ground-truth oracle');
+  assert.deepEqual(fixture.tasks, historicalFixtureObjects.get(163).tasks,
+    'v172 must preserve all frozen task/node/edge identities');
   const historicalV99Fixture = historicalFixtureObjects.get(99);
   const historicalV100Fixture = historicalFixtureObjects.get(100);
   const historicalV101Fixture = historicalFixtureObjects.get(101);
@@ -403,16 +518,28 @@ test('versioned provenance pins current sources and preserves the previous artif
   const readmePinV100 = historicalV100Fixture.provenance.find(item => item.path === 'docs/README.md');
   assert.equal(readmePinV100.previouslyPinnedBeforeRC63RefreshSha256, historicalReadmePin.sha256,
     'v100 carries the exact pre-refresh README pin');
-  assert.equal(readmePinV100.sha256, readmeHash,
-    'v100 pins the reviewed current README bytes');
-  for (const version of [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147]) {
-    const selected = version === 147 ? fixture : historicalFixtureObjects.get(version);
+  assert.equal(readmePinV100.sha256, 'c75048013f56412f8ea89122045348ed8b6f8983c28db01fb01647d677195854',
+    'v100 pins the exact RC.63 README bytes and is not rewritten when later documentation changes');
+  for (const version of [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149]) {
+    const selected = historicalFixtureObjects.get(version);
     const readmePin = selected.provenance.find(item => item.path === 'docs/README.md');
-    assert.equal(readmePin.sha256, readmeHash, `v${version} binds current README bytes`);
+    assert.equal(readmePin.sha256, readmePinV100.sha256, `v${version} preserves the historical RC.63 README bytes`);
     assert.equal(readmePin.previouslyPinnedBeforeRC63RefreshSha256, historicalReadmePin.sha256,
       `v${version} preserves original README mismatch lineage`);
   }
-  for (const version of [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 144, 145, 146]) {
+  const currentReadmePin = fixture.provenance.find(item => item.path === 'docs/README.md');
+  assert.equal(currentReadmePin.sha256, readmeHash, 'v168 preserves the exact current README bytes');
+  assert.equal(currentReadmePin.previouslyPinnedBeforeRC72V166Sha256,
+    historicalFixtureObjects.get(165).provenance.find(item => item.path === 'docs/README.md').sha256,
+    'v168 preserves the v166 README source identity');
+  assert.equal(currentReadmePin.previouslyPinnedBeforeRC71V158Sha256,
+    historicalFixtureObjects.get(157).provenance.find(item => item.path === 'docs/README.md').sha256,
+    'v168 preserves the original v158-to-v157 README lineage');
+  assert.equal(currentReadmePin.previouslyPinnedBeforeRC71V150Sha256, readmePinV100.sha256,
+    'v168 retains the exact v150 README source identity');
+  assert.equal(currentReadmePin.previouslyPinnedBeforeRC63RefreshSha256, historicalReadmePin.sha256,
+    'v168 preserves the original README mismatch lineage');
+  for (const version of [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171]) {
     const selected = historicalFixtureObjects.get(version);
     assert.deepEqual(selected.groundTruth, fixture.groundTruth, `v${version} graph/scoring oracle remains unchanged`);
     assert.deepEqual(selected.tasks, fixture.tasks, `v${version} task/node/edge identities remain unchanged`);
@@ -422,33 +549,139 @@ test('versioned provenance pins current sources and preserves the previous artif
   const refreshedPins = [
     'benchmarks/adaptive-goal-graph/run-benchmark.mjs',
     'tests/test-adaptive-goal-benchmark.mjs',
+    'scripts/build-agg-readiness-dossier.mjs',
+    'tests/test-agg-readiness-dossier.mjs',
+    'scripts/build-agg-live-remediation-plan.mjs',
+    'tests/test-agg-live-remediation-plan.mjs',
     'benchmarks/plugin-workflow-benchmark/test-create-phase2-candidate-inventory.mjs',
     'tests/test-mcp-eof-shutdown-framing-20261017.js',
     'package.json',
     'package-lock.json',
     'plugin/manifest.json',
     'scripts/verify-mcpb-source-alignment.mjs',
+    'tests/test-agg-v2-event-callers.mjs',
     'scripts/runalith-rollout.mjs',
     'tests/test-runalith-rollout.mjs',
     'docs/agg-production-trust-provisioning-runbook.md',
+    'docs/agg-external-checkpoint-v2-implementation-tooling-20261030.md',
+    'docs/agg-external-checkpoint-v2-record-event-callers-successor-20261101.md',
+    'docs/README.md',
+    'scripts/validate-agg-trust-config.mjs',
+    'tests/test-adaptive-goal-trust-configuration.mjs',
+    'src/runtime/job-store.js',
+    'src/runtime/adaptive-goal-knowledge-store.js',
+    'src/runtime/adaptive-goal-knowledge-verifier.js',
+    'tests/test-adaptive-goal-knowledge-store.js',
+    'tests/test-adaptive-goal-knowledge-verifier.mjs',
+    'scripts/run-agg-v2-local-preflight.mjs',
+    'docs/adaptive-goal-graph.md',
+    'docs/MCP_REFERENCE.md',
+    'tests/test-adaptive-goal-store-dispatch-guard.mjs',
     'scripts/package-runalith-mcpb.sh',
     'tests/test-runalith-plugin.js'
+    ,'package.json'
+    ,'scripts/audit-agg-v2-sql-mutation-callers.mjs'
+    ,'scripts/build-agg-v2-event-query-register.mjs'
+    ,'scripts/collect-plugin-runtime.mjs'
+    ,'scripts/verify-mcpb-source-alignment.mjs'
+    ,'server/index-v1.0.9-rc.71-versioned-approval-subsystem-20261030.js'
+    ,'server/index.js'
+    ,'src/runtime/distributed-scheduler.js'
+    ,'src/runtime/github-actions-provider.js'
+    ,'src/runtime/job-store.js'
+    ,'tests/test-adaptive-goal-execution-plan-candidate.js'
+    ,'tests/test-adaptive-goal-knowledge-capture-mcp.mjs'
+    ,'tests/test-adaptive-goal-store-dispatch-guard.mjs'
+    ,'tests/test-agg-v2-sql-mutation-audit.mjs'
+    ,'tests/test-package-reproducibility.js'
+    ,'tests/test-phase5-recovery.js'
+    ,'tests/test-provider-pre-send-recovery.js'
+    ,'tests/test-workflow-plan-structural-contract.js'
+    ,'tests/test-workflow-terminal-failure-atomicity.js'
+    ,'scripts/runalith-rollout.mjs'
+    ,'tests/test-runalith-rollout.mjs'
+    ,'tests/test-agg-v2-event-callers.mjs'
+    ,'docs/agg-external-checkpoint-v2-record-event-callers-successor-20261101.md'
   ];
   for (const relative of refreshedPins) {
     const currentPin = fixture.provenance.find(item => item.path === relative);
-    const predecessorPin = historicalFixtureObjects.get(146)?.provenance.find(item => item.path === relative);
-    assert.ok(currentPin && predecessorPin, 'v146/v147 both preserve source pin ' + relative);
-    assert.equal(currentPin.sha256, currentSourceDigest(relative), 'v147 pins exact current source bytes for ' + relative);
-    if (currentPin.sha256 !== predecessorPin.sha256) {
-      assert.equal(currentPin.previouslyPinnedBeforeRC71V147Sha256, predecessorPin.sha256,
-        'v147 records the exact predecessor source digest for changed bytes at ' + relative);
-    } else {
-      assert.equal(currentPin.previouslyPinnedBeforeRC71V147Sha256, undefined,
-        'v147 does not invent a predecessor transition for unchanged bytes at ' + relative);
+    const predecessorPin = historicalFixtureObjects.get(173)?.provenance.find(item => item.path === relative);
+    assert.ok(currentPin, 'v173 preserves each source pin; v174 must refresh exact current bytes: ' + relative);
+    assert.equal(currentPin.sha256, currentSourceDigest(relative), 'v174 pins exact current source bytes for ' + relative);
+    if (!predecessorPin) {
+      assert.equal(currentPin.previouslyPinnedBeforeRC72V174Sha256, undefined,
+        'new source evidence has no fabricated v173 predecessor digest');
+      continue;
     }
+    if (currentPin.sha256 !== predecessorPin.sha256) {
+      assert.equal(currentPin.previouslyPinnedBeforeRC72V174Sha256, predecessorPin.sha256,
+        'v174 records the exact v173 predecessor source digest for changed bytes at ' + relative);
+    } else {
+      assert.equal(currentPin.previouslyPinnedBeforeRC72V174Sha256, undefined,
+        'v174 does not invent a predecessor transition for unchanged bytes at ' + relative);
+    }
+  }
+  const newlyPinnedSources = [
+    '.github/workflows/cos-ap-package.yml',
+    'tests/test-agg-rc23-to-rc71-migration.mjs',
+    'scripts/test-cos-ap-packed-consumer.mjs',
+    'scripts/verify-subsystem-extraction-readiness.mjs',
+    'docs/recovery-verifier-v174-provenance-successor-20261101.md',
+    'artifacts/adaptive-goal-graph/subsystem-extraction-live-observation-20261101.json',
+    'artifacts/adaptive-goal-graph/subsystem-extraction-live-observation-20261101-v2.json',
+    'artifacts/adaptive-goal-graph/subsystem-extraction-archive-audit-20261101.json',
+    'artifacts/adaptive-goal-graph/subsystem-extraction-readiness-20261101-v2.json',
+    'docs/subsystems/milestone-2-authority-remediation.md',
+    'artifacts/adaptive-goal-graph/rc71-direct-sql-mutation-callers-20261101T074005Z-v15.json',
+    'docs/agg-external-checkpoint-v2-record-event-caller-inventory-20261101-v0.5.17.json',
+    'docs/agg-external-checkpoint-v2-record-event-caller-register-20261101-v0.5.17.json',
+    'docs/agg-external-checkpoint-v2-event-query-register-20261101-v0.5.14.json'
+  ];
+  for (const relative of newlyPinnedSources) {
+    const currentPin = fixture.provenance.find(item => item.path === relative);
+    assert.ok(currentPin, 'v174 explicitly pins new extraction evidence ' + relative);
+    assert.equal(currentPin.sha256, currentSourceDigest(relative), 'v174 binds exact current source bytes for ' + relative);
+    assert.equal(currentPin.previouslyPinnedBeforeRC72V174Sha256, undefined,
+      'v174 does not fabricate a predecessor digest for a source not pinned by v173: ' + relative);
+  }
+  for (const relative of [
+    'scripts/build-agg-v2-event-query-register.mjs',
+    'tests/test-agg-v2-sql-mutation-audit.mjs',
+    'docs/agg-external-checkpoint-v2-event-query-classification-20261031-v0.1.md',
+    'docs/agg-external-checkpoint-v2-event-query-register-20261030-v0.3.json',
+    'docs/agg-external-checkpoint-v2-event-query-classification-20261031-v0.2.md',
+    'docs/agg-external-checkpoint-v2-event-query-register-20261030-v0.4.json',
+    'docs/agg-external-checkpoint-v2-event-query-register-20261030-v0.5.1.json',
+    'docs/agg-external-checkpoint-v2-event-query-register-20261030-v0.5.2.json',
+    'docs/agg-external-checkpoint-v2-event-query-register-20261031-v0.5.3.json',
+    'docs/agg-external-checkpoint-v2-event-query-register-20261031-v0.5.4.json',
+    'docs/agg-external-checkpoint-v2-record-event-caller-register-20261031-v0.2.json',
+    'docs/agg-external-checkpoint-v2-record-event-caller-register-20261031-v0.3.json',
+    'docs/agg-external-checkpoint-v2-record-event-caller-register-20261031-v0.4.json',
+    'docs/agg-external-checkpoint-v2-record-event-caller-register-20261031-v0.5.5.json',
+    'docs/agg-external-checkpoint-v2-record-event-caller-register-20261031-v0.5.6.json',
+    'docs/agg-external-checkpoint-v2-event-query-classification-20261031-v0.3.md',
+    'docs/goal-plan-execution-acceptance-rc23-20261028.md',
+    'artifacts/adaptive-goal-graph/rc71-direct-sql-mutation-callers-20261030T132800Z-multi-statement-aware-v2.json',
+    'artifacts/adaptive-goal-graph/rc71-record-event-callers-20261031T051500Z-v2.json',
+    'artifacts/adaptive-goal-graph/rc71-direct-sql-mutation-callers-20261031T051500Z-v3.json',
+    'artifacts/adaptive-goal-graph/rc71-record-event-callers-20261031T054500Z-v3.json',
+    'artifacts/adaptive-goal-graph/rc71-record-event-callers-20261031T063000Z-v4.json',
+    'artifacts/adaptive-goal-graph/rc71-direct-sql-mutation-callers-20261031T054500Z-v4.json'
+    ,'artifacts/adaptive-goal-graph/rc71-record-event-callers-20261031T065755Z-v5.json'
+    ,'artifacts/adaptive-goal-graph/rc71-direct-sql-mutation-callers-20261031T065755Z-v5.json'
+    ,'artifacts/adaptive-goal-graph/rc71-record-event-callers-20261031T073101Z-v6.json'
+    ,'artifacts/adaptive-goal-graph/rc71-direct-sql-mutation-callers-20261031T073101Z-v6.json'
+    ,'tests/test-workflow-plan-structural-contract.js'
+    ,'artifacts/adaptive-goal-graph/phase2-frozen-71-path-contract-discrepancy-20261031-v1.json'
+  ]) {
+    const currentPin = fixture.provenance.find(item => item.path === relative);
+    assert.ok(currentPin, 'v168 includes source pin ' + relative);
+    assert.equal(currentPin.sha256, currentSourceDigest(relative), 'v168 pins exact current bytes for ' + relative);
   }
   for (const relative of [
     'tests/test-adaptive-goal-current-scope-producer-e2e.mjs',
+    'tests/test-agg-v2-event-callers.mjs',
     'server/index.js',
     'server/index-v1.0.9-rc.63.js',
     'server/index-v1.0.9-rc.64.js',
@@ -468,16 +701,20 @@ test('versioned provenance pins current sources and preserves the previous artif
     'src/runtime/adaptive-goal-execution-graph-proposal.js',
     'src/runtime/adaptive-goal-execution-plan-candidate.js',
     'tests/test-adaptive-goal-execution-graph-proposal.js',
+    'tests/test-adaptive-goal-execution-plan-candidate.js',
     'docs/execution-graph-source-draft-binding.md',
     'src/runtime/adaptive-goal-reviewer-identity.js',
     'tests/test-adaptive-goal-reviewer-identity.js',
     'tests/test-runalith-plugin.js',
     'docs/adaptive-goal-reviewer-attestation-ingestion.md',
     'docs/adaptive-goal-graph.md',
+    'docs/agg-external-checkpoint-v2-projection-inventory-20261030-v0.12.md',
+    'docs/agg-external-checkpoint-v2-record-event-caller-register-20261030-v0.1.json',
     'docs/MCP_REFERENCE.md',
     'scripts/build-agg-readiness-dossier.mjs',
     'tests/test-agg-readiness-dossier.mjs',
     'tests/test-adaptive-goal-benchmark.mjs',
+    'tests/test-agg-v2-event-callers.mjs',
     'tests/test-extracted-package-tool-schemas.mjs',
     'package.json',
     'package-lock.json',
@@ -501,16 +738,16 @@ test('versioned provenance pins current sources and preserves the previous artif
     'tests/test-mcp-shutdown-backpressure-deadline-20261017.js'
   ]) {
     const currentPin = fixture.provenance.find(item => item.path === relative);
-    const predecessorPin = historicalFixtureObjects.get(146)?.provenance.find(item => item.path === relative);
-    assert.ok(currentPin, 'v147 preserves source pin ' + relative);
-    assert.equal(currentPin.sha256, currentSourceDigest(relative), 'v147 binds current bytes for ' + relative);
+    const predecessorPin = historicalFixtureObjects.get(173)?.provenance.find(item => item.path === relative);
+    assert.ok(currentPin, 'v174 preserves source pin ' + relative);
+    assert.equal(currentPin.sha256, currentSourceDigest(relative), 'v174 binds current bytes for ' + relative);
     if (predecessorPin) {
       if (currentPin.sha256 !== predecessorPin.sha256) {
-        assert.equal(currentPin.previouslyPinnedBeforeRC71V147Sha256, predecessorPin.sha256,
-          'v147 preserves predecessor source identity for changed bytes at ' + relative);
+        assert.equal(currentPin.previouslyPinnedBeforeRC72V174Sha256, predecessorPin.sha256,
+          'v174 preserves immediate predecessor source identity for changed bytes at ' + relative);
       } else {
-        assert.equal(currentPin.previouslyPinnedBeforeRC71V147Sha256, undefined,
-          'v147 does not invent a source transition for unchanged bytes at ' + relative);
+        assert.equal(currentPin.previouslyPinnedBeforeRC72V174Sha256, undefined,
+          'v174 does not invent a source transition for unchanged bytes at ' + relative);
       }
     }
   }
@@ -659,6 +896,30 @@ test('versioned provenance pins current sources and preserves the previous artif
   assert.equal(createHash('sha256').update(historicalV6).digest('hex'), '342358144e9ae83b4b1865652fa4400fadb36231c4f38a683897dd801ab600e1',
     'versioned v6 provenance fixture must remain byte-for-byte preserved');
   assert.equal(new Set(fixture.provenance.map(source => source.path)).size, fixture.provenance.length);
+  for (const sourcePath of [
+    'src/runtime/execution-persistence-store.js',
+    'src/runtime/execution-persistence-participant.js',
+    'src/runtime/workflow-state-port.js',
+    'src/runtime/runalith-runtime-composition.js',
+    'tests/test-execution-persistence-participant-boundary.mjs',
+    'tests/test-agent-session-store-boundary.mjs',
+    'docs/subsystems/README.md',
+    'docs/subsystems/api-and-data-ownership.md',
+    'docs/subsystems/workflow-state-port.md',
+    'docs/subsystems/execution-runtime.md',
+    'docs/subsystems/repository-extraction.md'
+  ]) {
+    const pin = fixture.provenance.find(source => source.path === sourcePath);
+    assert.ok(pin, `v174 must bind extraction boundary input ${sourcePath}`);
+    const predecessorPin = historicalFixtureObjects.get(173)?.provenance.find(source => source.path === sourcePath);
+    assert.ok(predecessorPin, `${sourcePath} was already pinned in v173`);
+    assert.equal(pin.sha256, currentSourceDigest(sourcePath));
+    if (pin.sha256 !== predecessorPin.sha256) {
+      assert.equal(pin.previouslyPinnedBeforeRC72V174Sha256, predecessorPin.sha256);
+    } else {
+      assert.equal(pin.previouslyPinnedBeforeRC72V174Sha256, undefined);
+    }
+  }
   for (const source of fixture.provenance) {
     const bytes = fs.readFileSync(path.join(root, source.path));
     const observed = createHash('sha256').update(bytes).digest('hex');
@@ -710,7 +971,9 @@ test('semantic recovery-verifier pin detects a changed function even if the whol
     assert.notEqual(altered, fs.readFileSync(sourcePath, 'utf8'), 'test mutation must target the pinned function marker');
     fs.writeFileSync(sourcePath, altered);
     const copy = fixtureBytes(workspace);
-    copy.provenance[0].sha256 = createHash('sha256').update(altered).digest('hex');
+    const serverPin = copy.provenance.find(item => item.path === 'server/index.js');
+    assert.ok(serverPin, 'server entrypoint semantic pin must exist');
+    serverPin.sha256 = createHash('sha256').update(altered).digest('hex');
     saveFixture(workspace, copy);
     const result = runIsolated(workspace);
     assert.notEqual(result.status, 0);
@@ -722,8 +985,10 @@ test('runner rejects path traversal and symlink substitutions in provenance sour
   const traversalWorkspace = createIsolatedRunnerWorkspace();
   try {
     const copy = fixtureBytes(traversalWorkspace);
-    copy.provenance[0].path = '../package.json';
-    copy.provenance[0].sha256 = createHash('sha256').update(fs.readFileSync(path.join(traversalWorkspace, 'package.json'))).digest('hex');
+    const serverPin = copy.provenance.find(item => item.path === 'server/index.js');
+    assert.ok(serverPin, 'server entrypoint pin must exist');
+    serverPin.path = '../package.json';
+    serverPin.sha256 = createHash('sha256').update(fs.readFileSync(path.join(traversalWorkspace, 'package.json'))).digest('hex');
     saveFixture(traversalWorkspace, copy);
     const result = runIsolated(traversalWorkspace);
     assert.notEqual(result.status, 0);
@@ -755,7 +1020,9 @@ test('runner rejects duplicate and malformed provenance records before reporting
   const malformedWorkspace = createIsolatedRunnerWorkspace();
   try {
     const copy = fixtureBytes(malformedWorkspace);
-    copy.provenance[0].semanticScope.startMarker = '';
+    const serverPin = copy.provenance.find(item => item.path === 'server/index.js');
+    assert.ok(serverPin?.semanticScope, 'server entrypoint semantic pin must exist');
+    serverPin.semanticScope.startMarker = '';
     saveFixture(malformedWorkspace, copy);
     const result = runIsolated(malformedWorkspace);
     assert.notEqual(result.status, 0);

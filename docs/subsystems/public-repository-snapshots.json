@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Byte-level provenance for public subsystem sources mirrored in this monorepo. Update source files, public repository commits and this manifest together.",
+  "snapshots": [
+    {
+      "name": "cos-ap-v1",
+      "repository": "https://github.com/nplongx/runalith-cos-ap",
+      "commit": "b6f2b51d549ba2f287ebd49d18ce29a212b2270a",
+      "localRoot": "protocol/cos-ap-v1",
+      "files": [
+        {
+          "path": "API.md",
+          "sha256": "a0c916ba147f819e25e6c5224f48bfcf5e362ffafa4cc014270cf5bef6418c70"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "sha256": "2cd1fdf5bab52b5ed5881e2b2d4497787c094e2bcd376f4d3188b35fa83a2a3a"
+        },
+        {
+          "path": "CODE_OF_CONDUCT.md",
+          "sha256": "2b8e7d67e2e5cec3a924ac29dedcacb5e0e0fabcf77c61122d575406223abf7a"
+        },
+        {
+          "path": "CONTRIBUTING.md",
+          "sha256": "c30e347f5429700df4966c955d43a5e591464c62b176172d3923870665ccdbac"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "1126322e2cc8d165adc4c792eeb195717de2bcc7b39be1ce77959d78e87ef685"
+        },
+        {
+          "path": "README.md",
+          "sha256": "624749290bc35262161b72e7bcf0c96c83ae0ce1ba8c65be59d3c25ad5395275"
+        },
+        {
+          "path": "SECURITY.md",
+          "sha256": "b48f3422b99888cb2117a16e4c11235eb122e7e26ef706c9705651e621a6892e"
+        },
+        {
+          "path": "child-result.schema.json",
+          "sha256": "1717504354e687cf1166a9369e86f82005b543e8998b55990d63a238a0be9ae9"
+        },
+        {
+          "path": "envelope.schema.json",
+          "sha256": "c8fb23a906d84d727c5acf1d2bf6b6ca23e1b707f3e3b21865d99cbbac8ce7dc"
+        },
+        {
+          "path": "execution-batch.schema.json",
+          "sha256": "35174ab450f89c03c546cec90643d97e108ee1a69e3c515c3e79ab1bcbda7e7b"
+        },
+        {
+          "path": "execution-result.schema.json",
+          "sha256": "d44cf68e02ddac198d0808e693614996642acb445bb423e106b74c39b09c8e22"
+        },
+        {
+          "path": "index.js",
+          "sha256": "43db058bfabc6792d0bb579de7031ca9a91e5f920847ba47cba7814a7bcff0de"
+        },
+        {
+          "path": "package.json",
+          "sha256": "a5ba56381f6d160dc13278d2fbf5b493a8817807694026ce775a4b6d39e06ed9"
+        },
+        {
+          "path": "provider-status.schema.json",
+          "sha256": "08c8e8140b1a614921b3633a92b4a5d2570cb462e89b9434137e9246e92bfcc0"
+        },
+        {
+          "path": "synthesis.schema.json",
+          "sha256": "f4a8180493ac7aef7af65a50eec1c9bc7c211699be2749010ad67bb474323fe0"
+        },
+        {
+          "path": "test/public-api.test.js",
+          "sha256": "69fe8153f12f3f9bbe11e962ec2f5045db2a61f5826db8f10cb8cc2dfbf970a6"
+        }
+      ]
+    },
+    {
+      "name": "adaptive-goal-graph-core",
+      "repository": "https://github.com/nplongx/runalith-adaptive-goal-graph-core",
+      "commit": "d329718731faa8c8adab9fc5f1661ef801b98353",
+      "localRoot": "src/runtime",
+      "files": [
+        {
+          "path": "adaptive-goal-graph.js",
+          "sha256": "08a6ea8ba74efca2402a56bfb067c3b1e44b0807d13e10e66780c9108086db64"
+        },
+        {
+          "path": "adaptive-goal-discriminator.js",
+          "sha256": "9f4f5ac8a82acdc366499da2b5b678824895816a77f51dafc8f1152ce74a350e"
+        },
+        {
+          "path": "adaptive-goal-phase2-search.js",
+          "sha256": "871cc438938a17ef380abd95c4e352263b3053454502be5384495e093b9f89a8"
+        },
+        {
+          "path": "adaptive-goal-phase2-dataset.js",
+          "sha256": "2df83956b8853d4f9435c9f7594511caa9eb2c776192a9acc6fe6c860b2e642d"
+        },
+        {
+          "path": "adaptive-goal-phase3-mcts.js",
+          "sha256": "2b3758d43433370f21fa87efd49c9aabe5e96a162ef0a6e6ed279fc0565ddb01"
+        },
+        {
+          "path": "canonical-json.js",
+          "sha256": "2ce5230005bd3e497be08540bfe2da44c2a47e82c89bf886f284bc6b4afbfc78"
+        }
+      ]
+    },
+    {
+      "name": "workflow-contracts",
+      "repository": "https://github.com/nplongx/runalith-workflow-contracts",
+      "commit": "0419b17985500e3d9b3aa18e07c0b2f6b010070b",
+      "localRoot": "src/runtime",
+      "files": [
+        {
+          "path": "strict-json.js",
+          "sha256": "9e1f3b865f0f11a62e33592c333f617613a02309cc0d3357e95fc451d9ac736a"
+        },
+        {
+          "path": "workflow/artifacts.js",
+          "sha256": "e2ce2d7bbd26bd2f00d263f8458c0c350412525cc4a22c16c2eb6bd1b7bbd204"
+        },
+        {
+          "path": "workflow/success-contract.js",
+          "sha256": "08253ff8d31cc98b07bfa61346711e669ed07f91813975556b5292b30f585951"
+        }
+      ]
+    },
+    {
+      "name": "agent-contracts",
+      "repository": "https://github.com/nplongx/runalith-agent-contracts",
+      "commit": "7253657b5c3e2815cd21afed08d1e7027510d866",
+      "localRoot": "src/runtime",
+      "files": [
+        {
+          "path": "agent-contracts-public-api.js",
+          "sha256": "9fdd33f4b1dc90fb79c24f3b34b2d5ff9e209ace86e312bbb10407c7c47b920c"
+        }
+      ]
+    }
+  ]
+}

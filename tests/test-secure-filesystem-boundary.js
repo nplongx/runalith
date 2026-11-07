@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { tempDir } from './test-temp-dir.js';
 import {
-  lstatWithin, openDirectoryWithin, readFileWithin, readlinkWithin, resolveWithinRoot,
+  lstatWithin, openDirectoryWithin, readFileWithin, readlinkWithin, replaceFileWithin, resolveWithinRoot,
   writeFileAtDirectory, writeFileWithin
 } from '../src/runtime/secure-filesystem.js';
+
+const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
 
 const root = tempDir('secure-filesystem-boundary-');
 const outside = path.join(root, '..', `secure-filesystem-outside-${process.pid}-${Date.now()}`);
@@ -41,6 +44,36 @@ try {
   fs.mkdirSync(path.join(root, 'new-parent'), { mode: 0o700 });
   writeFileWithin(root, 'new-parent/final.txt', 'durable\n');
   assert.equal(fs.readFileSync(path.join(root, 'new-parent', 'final.txt'), 'utf8'), 'durable\n');
+
+  // Simulate a directory fsync/readback failure after rename has already
+  // replaced the target. The helper must tell the caller a mutation may have
+  // happened; treating the thrown error as "not modified" is unsafe.
+  const mutationPath = path.join(root, 'nested', 'mutation-after-rename.txt');
+  const beforeBytes = Buffer.from('before bytes\n');
+  const afterBytes = Buffer.from('after bytes\n');
+  fs.writeFileSync(mutationPath, beforeBytes, { flag: 'wx', mode: 0o600 });
+  const originalRenameSync = fs.renameSync;
+  try {
+    fs.renameSync = (...args) => {
+      originalRenameSync(...args);
+      throw Object.assign(new Error('injected fsync-like failure after rename'), { code: 'EIO' });
+    };
+    assert.throws(() => replaceFileWithin(root, 'nested/mutation-after-rename.txt', afterBytes, {
+      expectedSha256: sha256(beforeBytes)
+    }), error => error?.workspaceMutationAttempted === true && /injected fsync-like failure/.test(error.message));
+  } finally {
+    fs.renameSync = originalRenameSync;
+  }
+  assert.deepEqual(fs.readFileSync(mutationPath), afterBytes,
+    'injected post-rename error must leave the test target changed while reporting possible mutation');
+
+  const rejectedBasePath = path.join(root, 'nested', 'precondition-still-no-mutation.txt');
+  fs.writeFileSync(rejectedBasePath, beforeBytes, { flag: 'wx', mode: 0o600 });
+  assert.throws(() => replaceFileWithin(root, 'nested/precondition-still-no-mutation.txt', afterBytes, {
+    expectedSha256: sha256(Buffer.from('different base'))
+  }), error => error?.code === 'WORKSPACE_WRITE_BASE_HASH_MISMATCH' && error.workspaceMutationAttempted !== true);
+  assert.deepEqual(fs.readFileSync(rejectedBasePath), beforeBytes,
+    'precondition failures before rename/link must remain known no-mutation outcomes');
   console.log('SECURE FILESYSTEM: descriptor-anchored traversal, no-follow reads, exclusive durable writes, and symlink escape rejection PASS');
 } finally {
   fs.rmSync(root, { recursive: true, force: true });

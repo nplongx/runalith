@@ -1,0 +1,53 @@
+name: Agent contracts package
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/runtime/agent-contracts-public-api.js'
+      - 'src/runtime/workflow/agent-contracts.js'
+      - 'src/runtime/adaptive-goal-action-intent-policy.js'
+      - 'tests/test-subsystem-public-repo-alignment.mjs'
+      - 'tests/test-m1-agent-contracts.js'
+      - 'tests/test-adaptive-goal-execution-plan-candidate.js'
+      - 'docs/subsystems/public-repository-snapshots.json'
+      - '.github/workflows/agent-contracts-package.yml'
+  pull_request:
+    paths:
+      - 'src/runtime/agent-contracts-public-api.js'
+      - 'src/runtime/workflow/agent-contracts.js'
+      - 'src/runtime/adaptive-goal-action-intent-policy.js'
+      - 'tests/test-subsystem-public-repo-alignment.mjs'
+      - 'tests/test-m1-agent-contracts.js'
+      - 'tests/test-adaptive-goal-execution-plan-candidate.js'
+      - 'docs/subsystems/public-repository-snapshots.json'
+      - '.github/workflows/agent-contracts-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-contracts-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Public source alignment and facade contract
+        run: node tests/test-subsystem-public-repo-alignment.mjs
+      - name: Built-in role contract regression
+        run: node tests/test-m1-agent-contracts.js
+      - name: AGG compiled semantic adapter regression
+        run: node --test tests/test-adaptive-goal-execution-plan-candidate.js

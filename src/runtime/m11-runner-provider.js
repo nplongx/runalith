@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { createExecutionResult, validateExecutionRequest } from './execution-contract.js';
+import { createWorkflowStatePort } from './workflow-state-port.js';
 
 const ROLE_OUTPUTS = Object.freeze({
   'product-owner': { scope: 'M11 runner-owned product scope', acceptance_criteria: ['runner dispatch is durable', 'no local specialist session is created'], non_goals: ['local OpenClaw child spawning'] },
@@ -15,12 +16,12 @@ const ROLE_OUTPUTS = Object.freeze({
 });
 
 export class M11RunnerProvider {
-  constructor({ now = () => Date.now(), runnerId = 'm11-mock-runner', store = null } = {}) {
+  constructor({ now = () => Date.now(), runnerId = 'm11-mock-runner', store = null, statePort = null } = {}) {
     this.now = now;
     this.runnerId = runnerId;
-    this.store = store;
     this.runs = new Map();
-    this.store?.db?.exec?.(`CREATE TABLE IF NOT EXISTS provider_runs (provider_run_id TEXT PRIMARY KEY, provider TEXT NOT NULL, job_id TEXT NOT NULL, task_id TEXT NOT NULL, lease_id TEXT NOT NULL, attempt INTEGER NOT NULL, input_commit TEXT NOT NULL, workflow TEXT NOT NULL, ref TEXT NOT NULL, state TEXT NOT NULL, conclusion TEXT, html_url TEXT, artifact_id TEXT, output_commit TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+    this.state = (statePort || store) ? createWorkflowStatePort(statePort || store) : null;
+    this.state?.ensureProviderExecutionSchema();
   }
   async dispatch(request) {
     const { dispatch_key: _dispatchKey, ...executionRequest } = request;
@@ -38,8 +39,14 @@ export class M11RunnerProvider {
       runner_id: this.runnerId
     });
     this.runs.set(providerRunId, { request, result, state: 'COMPLETED' });
-    this.store?.db?.prepare?.(`INSERT OR REPLACE INTO provider_runs(provider_run_id,provider,job_id,task_id,lease_id,attempt,input_commit,workflow,ref,state,conclusion,html_url,artifact_id,output_commit,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(providerRunId, 'm11-mock-runner', executionRequest.job_id, executionRequest.task_id, executionRequest.lease_id, executionRequest.attempt, executionRequest.input_commit, 'm11-mock-runner', 'local', 'COMPLETED', 'success', null, result.evidence_artifact, request.input_commit, started, finished);
+    this.state?.persistProviderRun({
+      provider_run_id: providerRunId, job_id: executionRequest.job_id, task_id: executionRequest.task_id,
+      lease_id: executionRequest.lease_id, attempt: executionRequest.attempt, owner_epoch: null,
+      input_commit: executionRequest.input_commit, workflow: 'm11-mock-runner', ref: 'local',
+      state: 'COMPLETED', conclusion: 'success', html_url: null,
+      artifact_id: result.evidence_artifact, output_commit: request.input_commit,
+      run_attempt: null, created_at: started
+    }, { provider: 'm11-mock-runner', updatedAt: finished });
     return { provider_run_id: providerRunId, job_id: request.job_id, task_id: request.task_id, lease_id: request.lease_id, attempt: request.attempt, input_commit: request.input_commit, workflow: 'm11-mock-runner', ref: 'local', state: 'COMPLETED', conclusion: 'success', created_at: started };
   }
   async getStatus(providerRunId) {

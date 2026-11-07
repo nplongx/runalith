@@ -23,7 +23,7 @@ process.env.WORKFLOW_DB = path.join(dataDir, 'workflow.db');
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
 
-const jobStorePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/runtime/job-store.js');
+const jobStorePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../job-store.js');
 const executionManagerPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/runtime/execution-manager.js');
 const { WorkflowStore } = await import(pathToFileURL(jobStorePath));
 store = new WorkflowStore();
@@ -267,15 +267,15 @@ for (const terminal of [
   const ambiguousProviderLease = store.acquireTaskLease(ambiguousProviderTask.task_id, {
     leaseId: `lease-provider-cardinality-${process.pid}`, workerId: 'provider-cardinality-worker', ttlMs: 60_000
   });
-  store.db.exec(`CREATE TABLE provider_runs (
+  store.db.exec(`CREATE TABLE IF NOT EXISTS provider_runs (
     provider_run_id TEXT PRIMARY KEY, provider TEXT NOT NULL, job_id TEXT NOT NULL, task_id TEXT NOT NULL,
     lease_id TEXT NOT NULL, attempt INTEGER NOT NULL, owner_epoch INTEGER, state TEXT NOT NULL,
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   )`);
   const ts = new Date().toISOString();
   for (const runId of ['provider-run-cardinality-a', 'provider-run-cardinality-b']) {
-    store.db.prepare(`INSERT INTO provider_runs(provider_run_id,provider,job_id,task_id,lease_id,attempt,owner_epoch,state,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,'IN_PROGRESS',?,?)`).run(
+  store.db.prepare(`INSERT INTO provider_runs(provider_run_id,provider,job_id,task_id,lease_id,attempt,owner_epoch,input_commit,workflow,ref,state,created_at,updated_at)
+      VALUES(?,?,?,?,?,?,?,'input-commit','workflow.yml','main','IN_PROGRESS',?,?)`).run(
         runId, 'github-actions', ambiguousProviderJob.job_id, ambiguousProviderTask.task_id,
         ambiguousProviderLease.lease_id, ambiguousProviderLease.attempt, ambiguousProviderLease.owner_epoch, ts, ts
       );

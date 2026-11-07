@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:runalith:contracts:control-domain-diagnostic:v1.0.1",
+  "title": "ControlDomainDiagnosticV1.0.1",
+  "description": "WS2-owned route-specific diagnostic payload. Exact domain_code and cause_code are independent. Unknown future cause_code values that satisfy syntax are preserved verbatim and remain UNKNOWN/UNRESOLVED; no auth/retry/terminal inference.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "domain_code",
+    "cause_code"
+  ],
+  "properties": {
+    "domain_code": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "AUTHENTICATION_FAILED",
+            "AUTHORITY_UNAVAILABLE",
+            "IDEMPOTENCY_CONFLICT",
+            "MALFORMED_REQUEST",
+            "SUBJECT_MISMATCH"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "cause_code": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Exact case-sensitive source cause string. Preserve unrecognized future values verbatim; never infer authentication, retryability, terminality or success."
+    }
+  }
+}

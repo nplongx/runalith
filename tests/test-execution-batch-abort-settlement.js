@@ -12,7 +12,7 @@ process.env.WORKFLOW_WORKSPACE = root;
 process.env.EXECUTION_TMP_DIR = path.join(dataDir, 'runtime');
 process.env.NODE_ENV = 'test';
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { ExecutionManager } = await import('../src/runtime/execution-manager.js');
 const store = new WorkflowStore();
 const manager = new ExecutionManager(store, { timeoutMs: 5000, executionTmpDir: process.env.EXECUTION_TMP_DIR });

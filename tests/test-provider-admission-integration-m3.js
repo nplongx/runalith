@@ -10,8 +10,10 @@ process.env.WORKFLOW_DATA_DIR = path.dirname(dbPath);
 
 const { WorkflowStore } = await import('../job-store.js');
 const { ProviderAdmissionController } = await import('../provider-admission.js');
+const { createWorkflowStatePort } = await import('../src/runtime/workflow-state-port.js');
 const store = new WorkflowStore();
-const admission = new ProviderAdmissionController(store, { hardBlockMs: 60_000, leaseMs: 30_000 });
+const workflowStatePort = createWorkflowStatePort(store);
+const admission = new ProviderAdmissionController(store.db, { workflowStatePort, hardBlockMs: 60_000, leaseMs: 30_000 });
 const job = store.createJob({ conversationKey: `m3-int-${process.pid}`, title: 'M3 integration' });
 const providers = ['chatgpt:account:1', 'chatgpt:account:2'];
 admission.syncProviders(providers);
@@ -41,15 +43,19 @@ assert.equal(store.getWorkflowRuntimeState(job.job_id).resume_after, null);
 assert.equal(store.getWorkflowRuntimeState(job.job_id).last_error, null);
 
 const singleFlightJob = store.createJob({ conversationKey: 'm3-single-' + process.pid, title: 'M3 single flight' });
-const singleFlight = new ProviderAdmissionController(store, { hardBlockMs: 60_000, leaseMs: 30_000 });
+const singleFlight = new ProviderAdmissionController(store.db, { workflowStatePort, hardBlockMs: 60_000, leaseMs: 30_000 });
 singleFlight.syncProviders(['chatgpt:single']);
-const firstLease = singleFlight.admit({ providerIds: ['chatgpt:single'], jobId: singleFlightJob.job_id, role: 'architect' });
+const singleFlightTask = store.ensureTask(singleFlightJob.job_id, { role: 'architect', description: 'single flight task' });
+const firstLease = singleFlight.admit({ providerIds: ['chatgpt:single'], jobId: singleFlightJob.job_id, taskId: singleFlightTask.task_id, role: 'architect' });
+const activeLookup = singleFlight.findActiveLease({ jobId: singleFlightJob.job_id, taskId: singleFlightTask.task_id, role: 'architect' });
+assert.equal(activeLookup.lease_id, firstLease.leaseId);
+assert.deepEqual(singleFlight.listActiveLeasesForJob(singleFlightJob.job_id).map(row => row.lease_id), [firstLease.leaseId]);
 assert.throws(
-  () => singleFlight.admit({ providerIds: ['chatgpt:single'], jobId: singleFlightJob.job_id, role: 'qa' }),
+  () => singleFlight.admit({ providerIds: ['chatgpt:single'], jobId: singleFlightJob.job_id, taskId: singleFlightTask.task_id, role: 'qa' }),
   error => error.code === 'PROVIDER_UNAVAILABLE'
 );
 singleFlight.release(firstLease.leaseId);
-const secondLease = singleFlight.admit({ providerIds: ['chatgpt:single'], jobId: singleFlightJob.job_id, role: 'qa' });
+const secondLease = singleFlight.admit({ providerIds: ['chatgpt:single'], jobId: singleFlightJob.job_id, taskId: singleFlightTask.task_id, role: 'qa' });
 assert.equal(secondLease.providerId, 'chatgpt:single');
 singleFlight.release(secondLease.leaseId);
 

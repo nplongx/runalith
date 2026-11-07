@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { canonicalJson, validateExecutionPlan } from './workflow/plan.js';
-import { artifactSchemaForType } from './workflow/artifacts.js';
-import { getAgentArtifactType, getAgentContract } from './workflow/agent-contracts.js';
+import { canonicalJson, validateExecutionPlan } from './workflow-plan-public-api.js';
+import { artifactSchemaForType } from './workflow-contracts-public-api.js';
+import { getAgentArtifactType, getAgentContract } from './agent-contracts-public-api.js';
 import {
   ADAPTIVE_GOAL_EXECUTION_GRAPH_PROPOSAL_SCHEMA_VERSION,
   verifyAdaptiveGoalExecutionGraphProposalHash
@@ -480,7 +480,145 @@ export function buildAdaptiveGoalExecutionPlanCandidate({
 }
 
 export function verifyAdaptiveGoalExecutionPlanCandidateHash(candidate) {
-  if (!isRecord(candidate) || !SHA256.test(candidate.candidateHash || '')) return false;
-  const { candidateHash, ...unsigned } = candidate;
-  return hash(unsigned) === candidateHash;
+  try {
+    if (!isRecord(candidate) || !SHA256.test(candidate.candidateHash || '') ||
+        candidate.schemaVersion !== ADAPTIVE_GOAL_EXECUTION_PLAN_CANDIDATE_SCHEMA_VERSION ||
+        candidate.kind !== 'adaptive_goal_execution_plan_candidate' || candidate.status !== 'review_required' ||
+        !isRecord(candidate.source) || !isRecord(candidate.compiler) || !isRecord(candidate.hashes) ||
+        !isRecord(candidate.gates) || !Array.isArray(candidate.evidenceSnapshot) ||
+        !Array.isArray(candidate.sourceEvidenceSnapshot) || !Array.isArray(candidate.actionProjection) ||
+        !Array.isArray(candidate.dependencyEdges) || !isRecord(candidate.executionPlan) ||
+        !verifyAdaptiveGoalReviewedTaskInputContractHash(candidate.reviewedTaskInputs)) return false;
+
+    const { candidateHash, ...unsigned } = candidate;
+    if (hash(unsigned) !== candidateHash) return false;
+
+    const plan = candidate.executionPlan;
+    const { plan_hash: planHash, ...unsignedPlan } = plan;
+    if (!SHA256.test(planHash || '') || hash(canonicalJson(unsignedPlan)) !== planHash ||
+        candidate.compiler.compilerPlanHash !== planHash ||
+        candidate.compiler.preflightCandidatePlanHash !== planHash ||
+        candidate.compiler.workflowId !== plan.workflow_id ||
+        candidate.compiler.workflowVersion !== plan.workflow_version ||
+        candidate.compiler.planSchemaVersion !== plan.schema_version ||
+        candidate.compiler.validator !== 'validateExecutionPlan') return false;
+    validateExecutionPlan(plan);
+
+    const reviewed = candidate.reviewedTaskInputs;
+    const actions = reviewed.actions;
+    if (!Array.isArray(actions) || !actions.length || reviewed.kind !== 'adaptive_goal_reviewed_task_inputs' ||
+        reviewed.status !== 'review_only_blocked' || reviewed.gates?.executionAuthorized !== false ||
+        candidate.source.executionGraphProposalJobId !== plan.job_id ||
+        candidate.source.executionGraphFingerprint !== reviewed.source.executionGraphFingerprint ||
+        candidate.source.executionGraphProposalHash !== reviewed.source.executionGraphProposalHash ||
+        candidate.source.sourcePlanProposalJobId !== reviewed.source.sourcePlanProposalJobId ||
+        candidate.source.sourceGraphHash !== reviewed.source.sourceGraphHash ||
+        candidate.source.planGraphDraftHash !== reviewed.source.planGraphDraftHash ||
+        candidate.source.sourceCandidateId !== reviewed.source.sourceCandidateId) return false;
+
+    const expectedBindings = buildAdaptiveGoalCompilerActionIntentBindings(reviewed);
+    const actualBindings = plan.children.filter(task => Object.hasOwn(task.execution || {}, 'action_intent'))
+      .map(task => ({ taskId: task.id, role: task.role,
+        roleContractId: task.execution.action_intent.role_contract_id,
+        roleContractVersion: task.execution.action_intent.role_contract_version,
+        actionIntent: task.execution.action_intent
+      })).sort((a, b) => a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0);
+    if (canonicalJson(actualBindings) !== canonicalJson(expectedBindings) ||
+        candidate.compiler.typedActionIntentBindings !== expectedBindings.length) return false;
+
+    const normalizedBindings = actions.map(action => ({
+      stepId: action.stepId, taskId: action.taskId, role: action.role, capability: action.capability,
+      roleContractId: action.roleContract.id, roleContractVersion: action.roleContract.version
+    })).sort((a, b) => a.stepId < b.stepId ? -1 : a.stepId > b.stepId ? 1 : 0);
+    const plannedProjection = candidate.actionProjection.map(node => ({
+      nodeId: node.nodeId, taskId: node.compilerTaskId, dependencies: node.dependencyTaskIds
+    }));
+    const roleContractSnapshots = actions.map(action => ({
+      stepId: action.stepId, taskId: action.taskId,
+      contract: {
+        id: action.roleContract.id, version: action.roleContract.version, role: action.roleContract.role,
+        capability: action.roleContract.capability, inputs: action.roleContract.requiredInputs,
+        outputs: action.roleContract.expectedOutputs, completionCriteria: action.roleContract.requiredCompletionCriteria,
+        actionIntentContract: {
+          schemaVersion: action.roleContract.actionIntentContract.schemaVersion,
+          operations: [...action.roleContract.actionIntentContract.operations],
+          targetKinds: [...action.roleContract.actionIntentContract.targetKinds],
+          maxDescriptionLength: action.roleContract.actionIntentContract.maxDescriptionLength,
+          minSuccessCriteria: action.roleContract.actionIntentContract.minSuccessCriteria,
+          maxSuccessCriteria: action.roleContract.actionIntentContract.maxSuccessCriteria,
+          maxSuccessCriterionLength: action.roleContract.actionIntentContract.maxSuccessCriterionLength
+        }
+      }
+    })).sort((a, b) => a.stepId < b.stepId ? -1 : a.stepId > b.stepId ? 1 : 0);
+    const artifactSchemaSnapshots = actions.map(action => ({
+      stepId: action.stepId, taskId: action.taskId, artifactType: action.outputArtifactContract.type,
+      schemaVersion: action.outputArtifactContract.schemaVersion,
+      requiredContentFields: action.outputArtifactContract.requiredContentFields
+    })).sort((a, b) => a.stepId < b.stepId ? -1 : a.stepId > b.stepId ? 1 : 0);
+    const reviewedEvidence = actions.flatMap(action => action.evidenceProvenance).map(item => ({
+      reference: item.reference, artifactId: item.artifactId, type: item.artifactType,
+      schemaVersion: item.schemaVersion, contentHash: item.contentHash,
+      artifactCreatedEventId: item.artifactCreatedEventId, producerRole: item.producerRole,
+      producerTaskId: item.producerTaskId, producerResultId: item.producerResultId,
+      producerResultOutcome: item.producerResultOutcome,
+      producerCompletionEventId: item.producerCompletionEventId,
+      producerCompletionEventType: item.producerCompletionEventType
+    })).sort((a, b) => a.reference < b.reference ? -1 : a.reference > b.reference ? 1 : 0);
+    const candidateEvidence = candidate.evidenceSnapshot.map(item => ({
+      reference: item.reference, artifactId: item.artifactId, type: item.type,
+      schemaVersion: item.schemaVersion, contentHash: item.contentHash,
+      artifactCreatedEventId: item.artifactCreatedEventId, producerRole: item.producerRole,
+      producerTaskId: item.producerTaskId, producerResultId: item.producerResultId,
+      producerResultOutcome: item.producerResultOutcome,
+      producerCompletionEventId: item.producerCompletionEventId,
+      producerCompletionEventType: item.producerCompletionEventType
+    })).sort((a, b) => a.reference < b.reference ? -1 : a.reference > b.reference ? 1 : 0);
+    if (canonicalJson(candidateEvidence) !== canonicalJson(reviewedEvidence)) return false;
+    const expectedHashes = {
+      executionGraphFingerprint: candidate.source.executionGraphFingerprint,
+      executionGraphProposalHash: candidate.source.executionGraphProposalHash,
+      proposalEventHash: candidate.hashes.proposalEventHash,
+      compilerPlanHash: planHash,
+      evidenceHash: hash(candidate.evidenceSnapshot),
+      sourceEvidenceHash: hash(candidate.sourceEvidenceSnapshot),
+      bindingHash: hash(normalizedBindings),
+      dependencyHash: hash({ edges: candidate.dependencyEdges, projection: plannedProjection }),
+      roleContractHash: hash(roleContractSnapshots),
+      artifactSchemaHash: hash(artifactSchemaSnapshots),
+      reviewedActionIntentHash: reviewed.reviewedActionIntentHash,
+      reviewedTaskInputContractHash: reviewed.contractHash,
+      reviewedTaskInputBindingsHash: hash(actions.map(action => ({
+        stepId: action.stepId, taskId: action.taskId, roleContract: action.roleContract,
+        taskInputBindings: action.taskInputBindings
+      }))),
+      reviewedTaskDependencyHash: hash(actions.map(action => ({
+        stepId: action.stepId, taskId: action.taskId, dependencies: action.dependencies
+      }))),
+      reviewedTaskEvidenceProvenanceHash: hash(actions.map(action => ({
+        stepId: action.stepId, taskId: action.taskId, evidenceProvenance: action.evidenceProvenance
+      }))),
+      compilerActionIntentBindingHash: hash(expectedBindings),
+      semanticPolicyVersion: 1,
+      semanticVerificationHash: hash(actions.map(action => ({
+        stepId: action.stepId, taskId: action.taskId, semanticVerification: action.semanticVerification
+      })))
+    };
+    if (canonicalJson(candidate.hashes) !== canonicalJson(expectedHashes)) return false;
+
+    const fingerprint = hash({
+      schemaVersion: candidate.schemaVersion, jobId: plan.job_id,
+      workflowId: plan.workflow_id, workflowVersion: plan.workflow_version, hashes: expectedHashes
+    });
+    if (candidate.fingerprint !== fingerprint || candidate.candidateId !== `agg-epc-${fingerprint.slice(0, 24)}`) return false;
+    const expectedGates = {
+      humanReviewRequired: true, workflowApprovalRequired: true,
+      actionIntentSemanticEquivalenceVerified: true, actionIntentSemanticPolicyVersion: 1,
+      reviewerIdentityVerified: false, executionEligible: false, executionGraphMaterialized: false,
+      aggActionsExecutable: false, immutableExecutionPlanCreated: false,
+      dispatchAllowed: false, executionAuthorized: false
+    };
+    return canonicalJson(candidate.gates) === canonicalJson(expectedGates);
+  } catch {
+    return false;
+  }
 }

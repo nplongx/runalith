@@ -1,0 +1,14 @@
+{
+  "source_fixture_path": "ws7-evidence/fixtures/goal-evidence-v2-01-subject-v1-golden.json",
+  "source_fixture_sha256": "cfa3d3fa502e2b0af745e08837e8b461fbb3be44986265fe03e529760529186e",
+  "profile": "restricted-JCS-UTF8-closed-five-field-subject-v1",
+  "subject": {
+    "goal_id": "goal-42",
+    "idea_id": "idea-42",
+    "graph_revision": 17,
+    "graph_snapshot_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "evidence_manifest_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "canonical_utf8": "{\"evidence_manifest_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"goal_id\":\"goal-42\",\"graph_revision\":17,\"graph_snapshot_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"idea_id\":\"idea-42\"}",
+  "subject_sha256": "81ef500643ded8865c2a6ba1d20b0a2d58dcedb15daead85f6b6ec554b6dd5b4"
+}

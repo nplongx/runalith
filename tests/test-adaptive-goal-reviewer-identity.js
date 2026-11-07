@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, sign, randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { canonicalJson } from '../src/runtime/workflow/plan.js';
@@ -56,6 +60,14 @@ function storeFixture() {
 function closeStore(store) {
   store.db.close();
   store.trustDb.close();
+}
+
+function observeReviewerTrust(store, observedAt = now) {
+  const status = getAdaptiveGoalReviewerConfigurationStatus({ now: observedAt, trustConfigurationDb: store.trustDb });
+  assert.ok(status.antiRollback?.latest, JSON.stringify(status));
+  assert.equal(status.antiRollback.status, 'current_or_forward', JSON.stringify(status.antiRollback));
+  assert.equal(status.audit?.versionRecorded, true, 'explicit host/admin status operation records the trust high-water mark');
+  return status;
 }
 
 function environment(t, { configured = true, trustedPem = publicKeyPem } = {}) {
@@ -124,6 +136,7 @@ test('reviewer attestation validates only with configured trust root and exact c
   environment(t);
   const store = storeFixture();
   t.after(() => closeStore(store));
+  observeReviewerTrust(store);
   const candidate = candidateFixture();
   const attestation = signedAttestation(candidate);
   const eventId = persistAttestation(store, attestation);
@@ -133,6 +146,27 @@ test('reviewer attestation validates only with configured trust root and exact c
   assert.equal(result.authorizationScope, ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE);
   assert.equal(result.immutablePlanHash, candidate.executionPlan.plan_hash);
   assert.equal(result.attestationEventId, eventId);
+});
+
+test('reviewer verification requires a prior explicit trust observation and never writes the anti-rollback ledger', t => {
+  environment(t);
+  const store = storeFixture();
+  t.after(() => closeStore(store));
+  const candidate = candidateFixture();
+  const attestation = signedAttestation(candidate);
+  persistAttestation(store, attestation);
+
+  assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now }),
+    error => error.code === 'AGG_TRUST_CONFIG_NOT_OBSERVED');
+  assert.equal(store.trustDb.prepare('SELECT COUNT(*) AS count FROM adaptive_goal_trust_configuration_history').get().count, 0,
+    'verification must not create an implicit trust observation');
+
+  observeReviewerTrust(store);
+  const before = store.trustDb.prepare('SELECT COUNT(*) AS count FROM adaptive_goal_trust_configuration_history').get().count;
+  const verified = assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now });
+  const after = store.trustDb.prepare('SELECT COUNT(*) AS count FROM adaptive_goal_trust_configuration_history').get().count;
+  assert.equal(verified.verified, true);
+  assert.equal(after, before, 'read-only signature verification must not mutate trust history');
 });
 
 test('reviewer anti-rollback never falls back to the workflow database when the dedicated trust ledger is absent or aliased', t => {
@@ -220,6 +254,7 @@ test('administered reviewer trust configuration loads a rotated key and revocati
   const candidate = candidateFixture();
   const attestation = signedAttestation(candidate, JOB_ID, { signingKey: rotated.privateKey, rootPem: rotatedPem,
     trustRootSha256: adaptiveGoalPublicKeyFingerprint(rotatedPem), providerId });
+  observeReviewerTrust(store);
   persistAttestation(store, attestation);
   const verified = assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now });
   assert.equal(verified.verified, true);
@@ -228,6 +263,8 @@ test('administered reviewer trust configuration loads a rotated key and revocati
   assert.equal(verified.configurationChangeReference, 'IDP-SEC-1');
 
   process.env.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON = JSON.stringify(makeConfig(2, new Date(now - 1000).toISOString()));
+  const revokedStatus = observeReviewerTrust(store);
+  assert.equal(revokedStatus.antiRollback.latest.config_version, 2);
   assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now }), /revoked/);
   process.env.AGG_REVIEW_IDENTITY_TRUST_CONFIG_JSON = JSON.stringify(makeConfig(1));
   assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now }), /rollback/);
@@ -247,6 +284,7 @@ test('wrong trust root and signature from a non-trusted key are rejected', t => 
   const store = storeFixture();
   t.after(() => closeStore(store));
   const candidate = candidateFixture();
+  observeReviewerTrust(store);
   persistAttestation(store, signedAttestation(candidate, JOB_ID, { signingKey: otherKeyPair.privateKey }));
   assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now }), /signature does not verify/);
 
@@ -254,7 +292,12 @@ test('wrong trust root and signature from a non-trusted key are rejected', t => 
   const attestation = signedAttestation(candidate);
   persistAttestation(store, attestation);
   environment(t, { trustedPem: otherKeyPair.publicKey.export({ type: 'spki', format: 'pem' }) });
-  assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now }), /trust root/);
+  const alternateTrustDb = new DatabaseSync(':memory:');
+  configureAdaptiveGoalTrustConfigurationLedger(alternateTrustDb);
+  t.after(() => alternateTrustDb.close());
+  const alternateStatus = getAdaptiveGoalReviewerConfigurationStatus({ now, trustConfigurationDb: alternateTrustDb });
+  assert.equal(alternateStatus.audit?.versionRecorded, true);
+  assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now, trustConfigurationDb: alternateTrustDb }), /trust root/);
 });
 
 test('reviewer without required scope, stale/future proof, or mismatched candidate/plan is rejected', t => {
@@ -262,6 +305,7 @@ test('reviewer without required scope, stale/future proof, or mismatched candida
   const store = storeFixture();
   t.after(() => closeStore(store));
   const candidate = candidateFixture();
+  observeReviewerTrust(store);
   persistAttestation(store, signedAttestation(candidate, JOB_ID, { scope: 'workflow.read' }));
   assert.throws(() => assertAdaptiveGoalReviewerAttestation(store, JOB_ID, candidate, { now }), /scope/);
 
@@ -282,6 +326,7 @@ test('reviewer nonce replay across jobs and multiple same-candidate attestations
   const store = storeFixture();
   t.after(() => closeStore(store));
   const candidate = candidateFixture();
+  observeReviewerTrust(store);
   const attestation = signedAttestation(candidate);
   persistAttestation(store, attestation, JOB_ID);
   persistAttestation(store, attestation, 'job_123e4567-e89b-42d3-a456-426614174001');
@@ -331,11 +376,18 @@ test('runtime reviewer ingestion atomically persists one provider-signed exact-c
   environment(t);
   const store = storeFixture();
   t.after(() => closeStore(store));
+  observeReviewerTrust(store);
   const candidate = candidateFixture();
   candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
   const attestation = signedAttestation(candidate);
+  let readbackOverride = null;
+  let candidateLoadCount = 0;
   const options = { now, trustConfigurationDb: store.trustDb,
-    loadCurrentCandidate: () => currentCandidateReadback(store, JOB_ID, candidate) };
+    loadCurrentCandidate: () => {
+      candidateLoadCount += 1;
+      if (candidateLoadCount % 2 === 0 && readbackOverride) return readbackOverride;
+      return currentCandidateReadback(store, JOB_ID, candidate);
+    } };
 
   const first = ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, options);
   assert.equal(first.stored, true);
@@ -347,6 +399,19 @@ test('runtime reviewer ingestion atomically persists one provider-signed exact-c
   assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events WHERE job_id=? AND type=?')
     .get(JOB_ID, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 1);
 
+  readbackOverride = { ...currentCandidateReadback(store, JOB_ID, candidate), executionReviewReady: false };
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, options),
+    /AGG_REVIEWER_ATTESTATION_INGEST_READBACK_MISMATCH/,
+    'an exact signed retry must not claim success if semantic review readiness has fallen false');
+  readbackOverride = {
+    ...currentCandidateReadback(store, JOB_ID, candidate),
+    sourceGraphVerification: { ...sourceVerificationFixture(), snapshotHash: sha('different-source-snapshot') }
+  };
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, options),
+    /AGG_REVIEWER_ATTESTATION_INGEST_READBACK_MISMATCH/,
+    'an exact signed retry must not claim success when current source snapshot binding changed');
+  readbackOverride = null;
+
   const retry = ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, options);
   assert.equal(retry.stored, false);
   assert.equal(retry.idempotent, true);
@@ -356,10 +421,48 @@ test('runtime reviewer ingestion atomically persists one provider-signed exact-c
   'exact retry must read back the prior signed assertion without creating a second durable record');
 });
 
+test('reviewer ingestion uses a read-only trust connection while a separate workflow connection owns the same SQLite writer transaction', t => {
+  environment(t);
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-reviewer-shared-db-'));
+  const dbPath = path.join(temp, 'workflow.db');
+  const workflowDb = new DatabaseSync(dbPath);
+  const trustDb = new DatabaseSync(dbPath);
+  configureAdaptiveGoalTrustConfigurationLedger(trustDb);
+  workflowDb.exec(`CREATE TABLE events (
+    event_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+  const store = { db: workflowDb, trustDb };
+  t.after(() => {
+    workflowDb.close();
+    trustDb.close();
+    fs.rmSync(temp, { recursive: true, force: true });
+  });
+  observeReviewerTrust(store);
+  const candidate = candidateFixture();
+  candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
+  const attestation = signedAttestation(candidate);
+  const options = { now, trustConfigurationDb: trustDb,
+    loadCurrentCandidate: () => currentCandidateReadback(store, JOB_ID, candidate) };
+
+  const ingested = ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, options);
+  assert.equal(ingested.stored, true, JSON.stringify(ingested));
+  assert.equal(ingested.verified, true);
+  assert.equal(workflowDb.isTransaction, false);
+  assert.equal(workflowDb.prepare('SELECT COUNT(*) AS count FROM events WHERE type=?')
+    .get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 1);
+  const historyCount = trustDb.prepare('SELECT COUNT(*) AS count FROM adaptive_goal_trust_configuration_history').get().count;
+  assert.equal(historyCount, 1, 'trust verification under the workflow writer transaction must not append a second observation');
+});
+
 test('runtime reviewer ingestion rolls back invalid signatures and candidate/plan mismatches', t => {
   environment(t);
   const store = storeFixture();
   t.after(() => closeStore(store));
+  observeReviewerTrust(store);
   const candidate = candidateFixture();
   candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
   const options = { now, trustConfigurationDb: store.trustDb,
@@ -380,6 +483,7 @@ test('runtime reviewer ingestion rejects nonce replay across distinct candidate 
   environment(t);
   const store = storeFixture();
   t.after(() => closeStore(store));
+  observeReviewerTrust(store);
   const candidate = candidateFixture();
   candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
   const firstAttestation = signedAttestation(candidate);
@@ -414,4 +518,166 @@ test('runtime reviewer ingestion refuses stale source snapshots and already-appr
     loadCurrentCandidate: () => ({ ...currentCandidateReadback(store, JOB_ID, candidate), wrapperState: 'APPROVED', wrapperApproved: true }) };
   assert.throws(() => ingestAdaptiveGoalReviewerAttestation(store, JOB_ID, attestation, advancedOptions), /unapproved, unpinned, undispatched/);
   assert.equal(store.db.prepare('SELECT COUNT(*) AS count FROM events').get().count, 0);
+});
+
+test('reviewer nonce ingestion is serialized across independent processes and persisted attestation recovers after restart', async t => {
+  environment(t);
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'agg-reviewer-process-recovery-'));
+  const workflowPath = path.join(temp, 'workflow.db');
+  const trustPath = path.join(temp, 'trust.db');
+  const workflowDb = new DatabaseSync(workflowPath);
+  workflowDb.exec(`CREATE TABLE events (
+    event_id TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+  const trustDb = new DatabaseSync(trustPath);
+  const initialStore = { db: workflowDb, trustDb };
+  configureAdaptiveGoalTrustConfigurationLedger(trustDb);
+  observeReviewerTrust(initialStore);
+  workflowDb.close();
+  trustDb.close();
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }));
+
+  const candidate = candidateFixture();
+  candidate.reviewedTaskInputs.gates = { actionIntentSemanticEquivalenceVerified: true };
+  const nonce = randomUUID();
+  const jobIds = [JOB_ID, 'job_123e4567-e89b-42d3-a456-426614174001'];
+  const attestations = jobIds.map(jobId => signedAttestation(candidate, jobId, { nonce }));
+  const reviewerModuleUrl = new URL('../src/runtime/adaptive-goal-reviewer-identity.js', import.meta.url).href;
+  const childScript = `
+    import { DatabaseSync } from 'node:sqlite';
+    const reviewer = await import(${JSON.stringify(reviewerModuleUrl)});
+    const db = new DatabaseSync(process.env.TEST_WORKFLOW_DB);
+    db.exec('PRAGMA busy_timeout=5000');
+    const trustDb = new DatabaseSync(process.env.TEST_TRUST_DB);
+    reviewer.configureAdaptiveGoalTrustConfigurationLedger(trustDb);
+    const candidate = JSON.parse(process.env.TEST_CANDIDATE);
+    const attestation = JSON.parse(process.env.TEST_ATTESTATION);
+    const jobId = process.env.TEST_JOB_ID;
+    const now = Number(process.env.TEST_NOW);
+    const source = JSON.parse(process.env.TEST_SOURCE);
+    const originalExec = db.exec.bind(db);
+    db.exec = sql => {
+      if (sql === 'BEGIN IMMEDIATE') process.stdout.write('BEGIN_ATTEMPT\\n');
+      return originalExec(sql);
+    };
+    const loadCurrentCandidate = () => {
+      let verified = null;
+      const rows = db.prepare('SELECT event_id FROM events WHERE job_id=? AND type=?')
+        .all(jobId, reviewer.ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
+      if (rows.length === 1) {
+        try { verified = reviewer.assertAdaptiveGoalReviewerAttestation({ db }, jobId, candidate, { now, trustConfigurationDb: trustDb }); }
+        catch {}
+      }
+      return {
+        found: true, status: 'fresh', candidate, candidateHash: candidate.candidateHash,
+        wrapperState: 'IDLE', wrapperApproved: false, immutablePlanPinned: false,
+        taskRowsCreated: false, dispatchStarted: false, approvalCount: 0,
+        reviewerIdentityVerified: Boolean(verified?.verified),
+        reviewerAttestation: verified ? { attestationEventId: verified.attestationEventId } : null,
+        executionReviewReady: Boolean(verified?.verified && candidate.reviewedTaskInputs?.gates?.actionIntentSemanticEquivalenceVerified === true),
+        sourceGraphVerification: source
+      };
+    };
+    process.stdout.write('READY\\n');
+    await new Promise(resolve => process.stdin.once('data', resolve));
+    try {
+      const result = reviewer.ingestAdaptiveGoalReviewerAttestation({ db }, jobId, attestation, {
+        now, trustConfigurationDb: trustDb, loadCurrentCandidate
+      });
+      process.stdout.write(JSON.stringify({ outcome: 'stored', jobId, eventId: result.attestationEventId }));
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ outcome: 'rejected', jobId, code: error.code || null, message: String(error.message || error) }));
+    } finally { db.close(); trustDb.close(); }
+  `;
+  const source = sourceVerificationFixture();
+  const launchChild = (jobId, attestation) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', childScript], {
+      cwd: process.cwd(),
+      env: { ...process.env, TEST_WORKFLOW_DB: workflowPath, TEST_TRUST_DB: trustPath,
+        TEST_CANDIDATE: JSON.stringify(candidate), TEST_ATTESTATION: JSON.stringify(attestation),
+        TEST_JOB_ID: jobId, TEST_NOW: String(now), TEST_SOURCE: JSON.stringify(source) }
+    });
+    let stdout = '';
+    let stderr = '';
+    let readySeen = false;
+    let beginSeen = false;
+    let resolveReady;
+    let rejectReady;
+    let resolveBegin;
+    let rejectBegin;
+    const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+    const beginAttempt = new Promise((resolve, reject) => { resolveBegin = resolve; rejectBegin = reject; });
+    child.stdout.setEncoding('utf8').on('data', chunk => {
+      stdout += chunk;
+      if (!readySeen && stdout.includes('READY\n')) { readySeen = true; resolveReady(); }
+      if (!beginSeen && stdout.includes('BEGIN_ATTEMPT\n')) { beginSeen = true; resolveBegin(); }
+    });
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk; });
+    const result = new Promise((resolve, reject) => {
+      child.once('error', error => { rejectReady(error); reject(error); });
+      child.once('close', code => {
+        if (!readySeen) rejectReady(new Error(`reviewer child exited before ready (${code}): ${stderr || stdout}`));
+        if (!beginSeen) rejectBegin(new Error(`reviewer child exited before BEGIN IMMEDIATE (${code}): ${stderr || stdout}`));
+        if (code !== 0) return reject(new Error(`reviewer child exited ${code}: ${stderr || stdout}`));
+        try { resolve(JSON.parse(stdout.split(/\r?\n/u).filter(Boolean).at(-1))); }
+        catch { reject(new Error(`reviewer child returned invalid output: ${stdout}; ${stderr}`)); }
+      });
+    });
+    return { child, ready, beginAttempt, result };
+  };
+
+  const writerFence = new DatabaseSync(workflowPath);
+  writerFence.exec('PRAGMA busy_timeout=5000');
+  writerFence.exec('BEGIN IMMEDIATE');
+  let writerFenceOpen = true;
+  t.after(() => {
+    if (!writerFenceOpen) return;
+    try { if (writerFence.isTransaction) writerFence.exec('ROLLBACK'); }
+    finally { writerFence.close(); }
+  });
+  const children = jobIds.map((jobId, index) => launchChild(jobId, attestations[index]));
+  await Promise.all(children.map(item => item.ready));
+  // Keep a third connection's writer reservation while both child processes
+  // reach the pre-BEGIN marker. Each then immediately calls BEGIN IMMEDIATE;
+  // releasing only after both markers forces the two attempts to race at the
+  // SQLite writer boundary (the synchronous API cannot acknowledge "blocked").
+  for (const item of children) item.child.stdin.end('GO\n');
+  await Promise.all(children.map(item => item.beginAttempt));
+  writerFence.exec('COMMIT');
+  writerFence.close();
+  writerFenceOpen = false;
+  const concurrent = await Promise.all(children.map(item => item.result));
+  assert.equal(concurrent.filter(result => result.outcome === 'stored').length, 1, JSON.stringify(concurrent));
+  const replay = concurrent.find(result => result.outcome === 'rejected');
+  assert.equal(replay?.code, 'AGG_REVIEWER_ATTESTATION_INGEST_REPLAY', JSON.stringify(concurrent));
+  const winner = concurrent.find(result => result.outcome === 'stored');
+  const winnerIndex = jobIds.indexOf(winner.jobId);
+  const loserIndex = 1 - winnerIndex;
+
+  const reopenedDb = new DatabaseSync(workflowPath);
+  const reopenedTrustDb = new DatabaseSync(trustPath);
+  configureAdaptiveGoalTrustConfigurationLedger(reopenedTrustDb);
+  const reopenedStore = { db: reopenedDb, trustDb: reopenedTrustDb };
+  t.after(() => closeStore(reopenedStore));
+  assert.equal(reopenedDb.prepare('SELECT COUNT(*) AS count FROM events WHERE type=?')
+    .get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 1,
+  'only one process may persist a globally unique reviewer nonce');
+  const persisted = assertAdaptiveGoalReviewerAttestation(reopenedStore, winner.jobId, candidate, { now, trustConfigurationDb: reopenedTrustDb });
+  assert.equal(persisted.attestationEventId, winner.eventId, 'the reviewer event must verify after both databases are reopened');
+
+  const retry = ingestAdaptiveGoalReviewerAttestation(reopenedStore, winner.jobId, attestations[winnerIndex], {
+    now, trustConfigurationDb: reopenedTrustDb,
+    loadCurrentCandidate: () => currentCandidateReadback(reopenedStore, winner.jobId, candidate)
+  });
+  assert.equal(retry.idempotent, true, 'exact retry must recover the original durable reviewer assertion after restart');
+  assert.throws(() => ingestAdaptiveGoalReviewerAttestation(reopenedStore, jobIds[loserIndex], attestations[loserIndex], {
+    now, trustConfigurationDb: reopenedTrustDb,
+    loadCurrentCandidate: () => currentCandidateReadback(reopenedStore, jobIds[loserIndex], candidate)
+  }), /nonce already exists/, 'the losing process nonce must remain replay-protected after restart');
+  assert.equal(reopenedDb.prepare('SELECT COUNT(*) AS count FROM events WHERE type=?')
+    .get(ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT).count, 1);
 });

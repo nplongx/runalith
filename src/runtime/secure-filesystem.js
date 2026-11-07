@@ -183,6 +183,7 @@ export function replaceFileWithin(root, candidate, contents, { expectedSha256, m
   const temporaryName = `.runalith-write-${crypto.randomUUID()}.tmp`;
   const temporaryPath = procPath(parent.fd, temporaryName);
   let temporaryCreated = false;
+  let targetMutationAttempted = false;
   try {
     let before = null;
     let beforeStat = null;
@@ -237,6 +238,7 @@ export function replaceFileWithin(root, candidate, contents, { expectedSha256, m
       }
       // POSIX rename atomically replaces the directory entry. The path remains
       // rooted at the opened parent descriptor and never follows a final link.
+      targetMutationAttempted = true;
       fs.renameSync(temporaryPath, targetPath);
     } else {
       if (currentStat) {
@@ -246,6 +248,7 @@ export function replaceFileWithin(root, candidate, contents, { expectedSha256, m
       }
       // link is exclusive: an external creator cannot be silently overwritten
       // when the expected base was ABSENT.
+      targetMutationAttempted = true;
       fs.linkSync(temporaryPath, targetPath);
       fs.unlinkSync(temporaryPath);
     }
@@ -260,6 +263,15 @@ export function replaceFileWithin(root, candidate, contents, { expectedSha256, m
       throw new Error('secure filesystem replacement readback hash mismatch');
     }
     return { changed: true, outcome: beforeStat ? 'replaced' : 'created', path: relative.split(path.sep).join('/'), before_sha256: beforeHash || 'ABSENT', after_sha256: afterHash, size_bytes: bytes.length };
+  } catch (error) {
+    // rename/link can succeed before a later directory fsync or byte readback
+    // throws. Preserve that boundary fact so callers never report a false
+    // "not modified" outcome when the filesystem may already have changed.
+    if (targetMutationAttempted && error && typeof error === 'object') {
+      try { Object.defineProperty(error, 'workspaceMutationAttempted', { value: true, enumerable: true, configurable: true }); }
+      catch { try { error.workspaceMutationAttempted = true; } catch {} }
+    }
+    throw error;
   } finally {
     if (temporaryCreated) {
       try { fs.unlinkSync(temporaryPath); } catch {}

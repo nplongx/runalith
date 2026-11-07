@@ -1,0 +1,29 @@
+[package]
+name = "runalith-linux-quota"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+libc.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[[bin]]
+name = "runalith-quota-helper"
+path = "src/bin/runalith-quota-helper.rs"
+
+[[bin]]
+name = "runalith-quota-integration"
+path = "src/bin/runalith-quota-integration.rs"
+

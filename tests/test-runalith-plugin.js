@@ -1701,6 +1701,17 @@ assert.equal(executionGraphGet.gates.executionAuthorized, false);
 // First force an actual SQLite write failure and verify the enclosing candidate
 // create transaction rolls back; then retry normally. This is a disposable
 // MCP E2E database fixture, not the user's durable workflow database.
+// The host/admin trust-status operation is the explicit high-water observation
+// boundary. Observe configured test roots before any reviewer verification;
+// read-only verification itself must never record trust configuration.
+const initialAggTrustObservation = await tool('adaptive_goal_trust_configuration_status', {});
+assert.equal(initialAggTrustObservation.status, 'configured', JSON.stringify(initialAggTrustObservation.blockers, null, 2));
+assert.equal(initialAggTrustObservation.domains.goal_idea_verifier.available, true);
+assert.equal(initialAggTrustObservation.domains.goal_idea_verifier.currentTrustConfigurationObserved, true);
+assert.equal(initialAggTrustObservation.domains.action_intent_reviewer.available, true);
+assert.equal(initialAggTrustObservation.domains.action_intent_reviewer.audit.versionRecorded, true);
+assert.equal(initialAggTrustObservation.approvalSubsystem.status, 'configured',
+  JSON.stringify(initialAggTrustObservation.approvalSubsystem.blockers, null, 2));
 const candidateFailureDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
 candidateFailureDb.exec(`CREATE TRIGGER inject_agg_execution_plan_candidate_write_failure
   BEFORE INSERT ON events WHEN NEW.type='adaptive_goal.execution_plan_candidate_created'
@@ -2460,6 +2471,62 @@ try {
   const intervention = await tool('workflow_record_intervention', { reason: 'Test fixture required a manual fallback.', workaround: 'Used the explicit local MCP test path.', proposed_automation: 'Add a deterministic regression test.' });
   assert.equal(intervention.recorded, true);
   assert.equal((await tool('workflow_interventions', { limit: 10 })).interventions.some(item => item.intervention_id === intervention.intervention.intervention_id), true);
+  const manualInterventionJob = await tool('workflow_create', {
+    title: 'Manual intervention task ownership fixture',
+    task: 'Create a private task identity used only to test manual intervention association and event atomicity.',
+    workflow: 'standard-engineering', workspace
+  });
+  await tool('workflow_approve', { job_id: manualInterventionJob.job_id, confirmation: 'Approve isolated manual intervention ownership fixture only.' });
+  await tool('workflow_dispatch', { job_id: manualInterventionJob.job_id });
+  const manualInterventionTasks = await tool('workflow_prepare_tasks', { job_id: manualInterventionJob.job_id });
+  const interventionTaskId = manualInterventionTasks.tasks[0].task_id;
+  const crossJobIntervention = await rawRpc({ jsonrpc: '2.0', id: 'manual-intervention-cross-job', method: 'tools/call', params: {
+    name: 'workflow_record_intervention', arguments: {
+      job_id: preflightProposal.job_id, task_id: interventionTaskId,
+      reason: 'Cross-job task association must be denied.', workaround: 'None.'
+    }
+  } });
+  assert.equal(crossJobIntervention.result?.isError, true);
+  assert.match(crossJobIntervention.result?.content?.[0]?.text || '', /does not belong to workflow/);
+  const orphanIntervention = await rawRpc({ jsonrpc: '2.0', id: 'manual-intervention-orphan-task', method: 'tools/call', params: {
+    name: 'workflow_record_intervention', arguments: {
+      task_id: interventionTaskId, reason: 'Task-only association must be denied.', workaround: 'None.'
+    }
+  } });
+  assert.equal(orphanIntervention.result?.isError, true);
+  assert.match(orphanIntervention.result?.content?.[0]?.text || '', /requires its owning job_id/);
+
+  const manualEventFailureDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  manualEventFailureDb.exec(`CREATE TRIGGER fail_manual_intervention_event BEFORE INSERT ON events
+    WHEN NEW.type='manual_intervention.recorded' AND NEW.job_id='${manualInterventionJob.job_id}'
+    BEGIN SELECT RAISE(ABORT, 'injected manual intervention event failure'); END;`);
+  const manualEventFailure = await rawRpc({ jsonrpc: '2.0', id: 'manual-intervention-event-rollback', method: 'tools/call', params: {
+    name: 'workflow_record_intervention', arguments: {
+      job_id: manualInterventionJob.job_id, task_id: interventionTaskId,
+      reason: 'Atomic row/event regression.', workaround: 'Injected event failure must roll the audit row back.'
+    }
+  } });
+  assert.equal(manualEventFailure.result?.isError, true);
+  assert.match(manualEventFailure.result?.content?.[0]?.text || '', /injected manual intervention event failure/);
+  assert.equal(manualEventFailureDb.prepare(`SELECT COUNT(*) AS n FROM manual_interventions
+    WHERE job_id=? AND reason='Atomic row/event regression.'`).get(manualInterventionJob.job_id).n, 0,
+  'manual intervention row must roll back when its workflow event cannot be committed');
+  manualEventFailureDb.exec('DROP TRIGGER fail_manual_intervention_event');
+  manualEventFailureDb.close();
+
+  const atomicIntervention = await tool('workflow_record_intervention', {
+    job_id: manualInterventionJob.job_id, task_id: interventionTaskId,
+    reason: 'Atomic row/event regression.', workaround: 'Committed both audit row and workflow event.'
+  });
+  assert.equal(atomicIntervention.recorded, true);
+  const atomicInterventionDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  try {
+    assert.equal(atomicInterventionDb.prepare('SELECT COUNT(*) AS n FROM manual_interventions WHERE intervention_id=?')
+      .get(atomicIntervention.intervention.intervention_id).n, 1);
+    assert.equal(atomicInterventionDb.prepare(`SELECT COUNT(*) AS n FROM events
+      WHERE job_id=? AND type='manual_intervention.recorded' AND json_extract(payload_json,'$.intervention_id')=?`)
+      .get(manualInterventionJob.job_id, atomicIntervention.intervention.intervention_id).n, 1);
+  } finally { atomicInterventionDb.close(); }
   assert.equal((await tool('workflow_access_diagnostics')).read_only, true);
   const artifactValidation = await tool('workflow_validate_artifact', { artifact_type: 'qa-report', role: 'qa', artifact: { checks: ['fixture'], results: ['pass'], decision: 'accept' } });
   assert.equal(artifactValidation.valid, true);
@@ -3130,7 +3197,7 @@ try {
   let retryStore;
   let retriedHybridBatch;
   try {
-    const { WorkflowStore } = await import('../src/runtime/job-store.js');
+    const { WorkflowStore } = await import('../job-store.js');
     const { ExecutionManager } = await import('../src/runtime/execution-manager.js');
     retryStore = new WorkflowStore();
     const retryManager = new ExecutionManager(retryStore, { executionTmpDir: recoveryRuntimeDir });
@@ -4381,7 +4448,7 @@ try {
   // local test workspace there instead of allowing validation commands to escape
   // to repository paths outside the immutable approved cwd.
   const fixtureForwarders = new Map([
-    ['job-store.js', "export * from './src/runtime/job-store.js';\n"],
+    ['job-store.js', "export { WorkflowStore, RunalithWorkflowStore, createRunalithWorkflowStore, workflowStore, WORKFLOW_DB_PATH } from './src/runtime/runalith-runtime-composition.js';\nexport { hasUnresolvedProviderOutcome, conversationKeyFromMessages } from './src/runtime/job-store.js';\n"],
     ['execution-manager.js', "export * from './src/runtime/execution-manager.js';\n"],
     ['recovery-manager.js', "export * from './src/runtime/recovery-manager.js';\n"]
   ]);
@@ -4883,6 +4950,9 @@ try {
     'invalid reviewer identity must be rejected before the durable one-shot execution claim');
   rogueAggSandboxReadbackDb.close();
   const removeRogueAggProofDb = new DatabaseSync(path.join(dataDir, 'workflow.db'));
+  // Model privileged schema tampering in this disposable test only. Normal
+  // application SQL must not be able to delete reviewer anti-replay evidence.
+  removeRogueAggProofDb.exec('DROP TRIGGER IF EXISTS agg_approval_reviewer_security_events_no_delete');
   removeRogueAggProofDb.prepare('DELETE FROM events WHERE job_id=? AND type=?')
     .run(executionGraphProposal.job_id, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
   removeRogueAggProofDb.close();
@@ -4899,11 +4969,6 @@ try {
   assert.equal(verifiedAggCandidate.reviewerAttestation.reviewerSubject, reviewedExecutionGraphActionIntents.review.reviewerId);
   assert.equal(verifiedAggCandidate.reviewerAttestation.authorizationScope, ADAPTIVE_GOAL_REVIEWER_AUTHORIZATION_SCOPE);
 
-  // Explicitly observe the independent policy, maker, and execution-approval
-  // trust roots in this disposable test host. This is test fixture setup only;
-  // production trust remains external and unverified.
-  const aggTrustObservation = await tool('adaptive_goal_trust_configuration_status', {});
-  assert.equal(aggTrustObservation.approvalSubsystem.status, 'configured', JSON.stringify(aggTrustObservation.approvalSubsystem.blockers, null, 2));
   const trustedAggApprovalEvidence = signedAggApprovalEvidence(
     executionGraphProposal.job_id, verifiedAggCandidate.candidate, verifiedAggCandidate.sourceGraphVerification
   );

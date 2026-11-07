@@ -12,7 +12,7 @@ process.env.WORKFLOW_DATA_DIR = root;
 process.env.WORKFLOW_WORKSPACE = root;
 process.env.NODE_ENV = 'test';
 
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { GitHubActionsProvider } = await import('../src/runtime/github-actions-provider.js');
 const { LangGraphControlLoop } = await import('../src/runtime/langgraph-control-loop.js');
 const openDatabases = [];

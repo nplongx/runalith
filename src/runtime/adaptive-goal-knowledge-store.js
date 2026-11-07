@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const KNOWLEDGE_NODE_TYPES = Object.freeze(['goal', 'hypothesis', 'idea', 'capability', 'experiment', 'evidence', 'condition']);
+export const KNOWLEDGE_NODE_TYPES = Object.freeze(['goal', 'hypothesis', 'idea', 'capability', 'experiment', 'evidence', 'condition', 'task']);
 export const KNOWLEDGE_EDGE_TYPES = Object.freeze(['supports', 'tested_by', 'enables', 'contradicts', 'alternative_to', 'recovers_to', 'depends_on', 'requires_all']);
 const NODE_TYPES = new Set(KNOWLEDGE_NODE_TYPES);
 const EDGE_TYPES = new Set(KNOWLEDGE_EDGE_TYPES);
@@ -251,12 +251,12 @@ export function createAdaptiveGoalKnowledgeStore(db) {
     if (input.type === 'tested_by' && !(['hypothesis', 'idea'].includes(fromNode.type) && toNode.type === 'experiment')) {
       fail('tested_by must connect a hypothesis/idea node to an experiment node');
     }
-    if (input.type === 'supports' && !(['hypothesis', 'idea', 'capability', 'experiment', 'evidence', 'goal'].includes(fromNode.type) &&
-        ['hypothesis', 'idea', 'capability', 'condition', 'experiment', 'goal'].includes(toNode.type))) {
+    if (input.type === 'supports' && !(['hypothesis', 'idea', 'capability', 'experiment', 'evidence', 'goal', 'task'].includes(fromNode.type) &&
+        ['hypothesis', 'idea', 'capability', 'condition', 'experiment', 'goal', 'task'].includes(toNode.type))) {
       fail('supports must connect an explanatory/capability/evidence source to a target concept');
     }
-    if (input.type === 'enables' && !(['hypothesis', 'idea', 'capability', 'experiment', 'evidence', 'goal'].includes(fromNode.type) &&
-        ['idea', 'capability', 'condition', 'experiment', 'goal'].includes(toNode.type))) {
+    if (input.type === 'enables' && !(['hypothesis', 'idea', 'capability', 'experiment', 'evidence', 'goal', 'task'].includes(fromNode.type) &&
+        ['idea', 'capability', 'condition', 'experiment', 'goal', 'task'].includes(toNode.type))) {
       fail('enables must connect a capability/idea/experiment/evidence source to a target concept or experiment');
     }
     if (input.type === 'recovers_to' && !(fromNode.type === 'experiment' &&
@@ -447,11 +447,11 @@ export function createAdaptiveGoalKnowledgeStore(db) {
       const edgeSemanticsValid = row.type === 'tested_by'
         ? ['hypothesis','idea'].includes(fromType) && toType === 'experiment'
         : row.type === 'supports'
-          ? ['hypothesis','idea','capability','experiment','evidence','goal'].includes(fromType) &&
-            ['hypothesis','idea','capability','condition','experiment','goal'].includes(toType)
+          ? ['hypothesis','idea','capability','experiment','evidence','goal','task'].includes(fromType) &&
+            ['hypothesis','idea','capability','condition','experiment','goal','task'].includes(toType)
           : row.type === 'enables'
-            ? ['hypothesis','idea','capability','experiment','evidence','goal'].includes(fromType) &&
-              ['idea','capability','condition','experiment','goal'].includes(toType)
+            ? ['hypothesis','idea','capability','experiment','evidence','goal','task'].includes(fromType) &&
+              ['idea','capability','condition','experiment','goal','task'].includes(toType)
             : row.type === 'recovers_to'
               ? fromType === 'experiment' && ['experiment','idea','capability','condition'].includes(toType)
               : ['contradicts','alternative_to'].includes(row.type)

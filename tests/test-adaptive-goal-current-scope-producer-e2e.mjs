@@ -978,6 +978,31 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(planGet.compatibility.eligible, true);
   assert.equal(planGet.compatibility.bindings.length, 9);
 
+  // An inactive IDLE Plan Graph wrapper cannot be a current source for a new
+  // Execution Graph. Readback and creation both fail closed, with no job write.
+  const inactiveIdlePlanDb = new DatabaseSync(dbPath);
+  inactiveIdlePlanDb.prepare("UPDATE jobs SET status='completed' WHERE job_id=?").run(planProposal.job_id);
+  inactiveIdlePlanDb.close();
+  const inactiveIdlePlanRead = await tool('adaptive_goal_plan_proposal_get', { job_id: planProposal.job_id });
+  assert.equal(inactiveIdlePlanRead.found, false);
+  assert.equal(inactiveIdlePlanRead.status, 'stale');
+  assert.ok(inactiveIdlePlanRead.blockers.some(item => item.code === 'SOURCE_PLAN_LIFECYCLE_INACTIVE'));
+  const beforeInactiveIdleCreateDb = new DatabaseSync(dbPath, { readOnly: true });
+  const jobsBeforeInactiveIdleCreate = beforeInactiveIdleCreateDb.prepare('SELECT COUNT(*) n FROM jobs').get().n;
+  beforeInactiveIdleCreateDb.close();
+  const blockedInactiveIdleExecution = await tool('adaptive_goal_execution_graph_proposal_create', {
+    plan_proposal_job_id: planProposal.job_id, task_bindings: verifiedTaskBindings,
+    title: 'TEST ONLY: inactive IDLE Plan Graph source must be rejected'
+  });
+  assert.equal(blockedInactiveIdleExecution.created, false);
+  assert.equal(blockedInactiveIdleExecution.status, 'blocked');
+  assert.ok(blockedInactiveIdleExecution.blockers.some(item => item.code === 'SOURCE_PLAN_LIFECYCLE_INACTIVE'));
+  const afterInactiveIdleCreateDb = new DatabaseSync(dbPath);
+  assert.equal(afterInactiveIdleCreateDb.prepare('SELECT COUNT(*) n FROM jobs').get().n, jobsBeforeInactiveIdleCreate);
+  afterInactiveIdleCreateDb.prepare("UPDATE jobs SET status='active' WHERE job_id=?").run(planProposal.job_id);
+  afterInactiveIdleCreateDb.close();
+  assert.equal((await tool('adaptive_goal_plan_proposal_get', { job_id: planProposal.job_id })).found, true);
+
   // Recomputing the wrapper plan hash must not legitimize a non-canonical
   // review goal that merely retains the required draft/binding digest strings.
   const planGoalBindingDb = new DatabaseSync(dbPath);
@@ -1018,6 +1043,50 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(planWrapperPreflight.ready, true, JSON.stringify(planWrapperPreflight.blockers || [], null, 2));
   assert.equal(planWrapperPreflight.review_only_graph_wrapper, true);
   assert.equal(planWrapperPreflight.execution_authorized, false);
+  // The MCP handler's fresh readback happens before WorkflowStore acquires its
+  // approval writer lock. Inject a source revision from an approval-row trigger
+  // after that readback but inside the approval transaction. The final locked
+  // Plan Graph guard must reject it and roll back both approval and plan pin.
+  const stalePlanApprovalDb = new DatabaseSync(dbPath);
+  const stalePlanNode = stalePlanApprovalDb.prepare(`SELECT n.id,n.current_revision
+    FROM adaptive_goal_knowledge_nodes n JOIN adaptive_goal_knowledge_memberships m ON m.node_id=n.id
+    WHERE m.goal_id=? ORDER BY n.id LIMIT 1`).get(knowledgeGoalId);
+  assert.ok(stalePlanNode, 'the Plan Graph approval race fixture must have a persisted source node');
+  stalePlanApprovalDb.exec(`CREATE TRIGGER test_advance_goal_revision_during_plan_approval BEFORE INSERT ON approvals
+    WHEN NEW.job_id='${planProposal.job_id}'
+    BEGIN
+      INSERT INTO adaptive_goal_knowledge_revisions(node_id,revision,content_json,evidence_refs_json,content_hash,status,provenance_json,created_at)
+      SELECT n.id,n.current_revision+1,r.content_json,r.evidence_refs_json,r.content_hash,r.status,r.provenance_json,strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      FROM adaptive_goal_knowledge_nodes n
+      JOIN adaptive_goal_knowledge_revisions r ON r.node_id=n.id AND r.revision=n.current_revision
+      JOIN adaptive_goal_knowledge_memberships m ON m.node_id=n.id
+      WHERE m.goal_id='${knowledgeGoalId}' AND n.id='${stalePlanNode.id}' LIMIT 1;
+      UPDATE adaptive_goal_knowledge_nodes SET current_revision=current_revision+1 WHERE id='${stalePlanNode.id}';
+    END`);
+  stalePlanApprovalDb.close();
+  const stalePlanApproval = await rawTool('workflow_approve', {
+    job_id: planProposal.job_id,
+    confirmation: 'TEST ONLY: this approval must fail because Goal/Idea source revision changes after handler readback.'
+  });
+  assert.equal(stalePlanApproval.isError, true,
+    'Plan Graph approval must revalidate the current Goal/Idea snapshot inside the writer transaction');
+  assert.match(stalePlanApproval.content?.map(item => item.text || '').join('\n') || '',
+    /KNOWLEDGE_ATTESTATION_STALE|SOURCE_IDEA_GRAPH_ATTESTATION_STALE|SOURCE_IDEA_GRAPH_SNAPSHOT_MISMATCH|AGG_PLAN_APPROVAL_SOURCE_REVALIDATION_FAILED/);
+  const stalePlanApprovalRead = await tool('workflow_get', { job_id: planProposal.job_id });
+  assert.equal(stalePlanApprovalRead.job.state, 'IDLE');
+  assert.equal(stalePlanApprovalRead.plan, null);
+  assert.equal(stalePlanApprovalRead.tasks.length, 0);
+  const afterStalePlanApprovalDb = new DatabaseSync(dbPath);
+  assert.equal(afterStalePlanApprovalDb.prepare('SELECT COUNT(*) n FROM approvals WHERE job_id=?').get(planProposal.job_id).n, 0,
+    'stale Plan Graph approval must leave no durable approval row');
+  assert.equal(afterStalePlanApprovalDb.prepare('SELECT COUNT(*) n FROM workflow_plans WHERE job_id=?').get(planProposal.job_id).n, 0,
+    'stale Plan Graph approval must leave no immutable review-plan pin');
+  assert.equal(afterStalePlanApprovalDb.prepare('SELECT current_revision FROM adaptive_goal_knowledge_nodes WHERE id=?').get(stalePlanNode.id).current_revision,
+    stalePlanNode.current_revision, 'the injected source revision must roll back with the rejected approval transaction');
+  afterStalePlanApprovalDb.exec('DROP TRIGGER test_advance_goal_revision_during_plan_approval');
+  afterStalePlanApprovalDb.close();
+  assert.equal((await tool('adaptive_goal_plan_proposal_get', { job_id: planProposal.job_id })).found, true,
+    'source and proposal remain valid after the injected transaction is rolled back');
   const planWrapperApproval = await tool('workflow_approve', {
     job_id: planProposal.job_id,
     confirmation: 'TEST ONLY: approve the Plan Graph review checklist in the disposable SQLite database; no mapped AGG action execution is approved.'
@@ -1026,6 +1095,53 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(planWrapperApproval.execution_authorized, false);
   assert.equal(planWrapperApproval.execution_enabled, false);
   assert.equal(planWrapperApproval.graph_review_kind, 'plan_graph');
+  const beforePlanApprovalRetryDb = new DatabaseSync(dbPath, { readOnly: true });
+  const approvalRowsBeforePlanRetry = beforePlanApprovalRetryDb.prepare('SELECT COUNT(*) n FROM approvals WHERE job_id=?').get(planProposal.job_id).n;
+  const planRowsBeforePlanRetry = beforePlanApprovalRetryDb.prepare('SELECT COUNT(*) n FROM workflow_plans WHERE job_id=?').get(planProposal.job_id).n;
+  beforePlanApprovalRetryDb.close();
+  const concurrentPlanApprovalRetries = await Promise.all([
+    tool('workflow_approve', { job_id: planProposal.job_id,
+      confirmation: 'TEST ONLY: exact concurrent Plan Graph approval retry; no mapped action execution is authorized.' }),
+    secondTool('workflow_approve', { job_id: planProposal.job_id,
+      confirmation: 'TEST ONLY: exact concurrent Plan Graph approval retry; no mapped action execution is authorized.' })
+  ]);
+  for (const retry of concurrentPlanApprovalRetries) {
+    assert.equal(retry.approved, true);
+    assert.equal(retry.graph_review_kind, 'plan_graph');
+    assert.equal(retry.execution_authorized, false);
+    assert.equal(retry.plan.plan_hash, planWrapperApproval.plan.plan_hash);
+  }
+  const afterPlanApprovalRetryDb = new DatabaseSync(dbPath, { readOnly: true });
+  assert.equal(afterPlanApprovalRetryDb.prepare('SELECT COUNT(*) n FROM approvals WHERE job_id=?').get(planProposal.job_id).n,
+    approvalRowsBeforePlanRetry, 'concurrent exact Plan Graph approval retries must not duplicate approval rows');
+  assert.equal(afterPlanApprovalRetryDb.prepare('SELECT COUNT(*) n FROM workflow_plans WHERE job_id=?').get(planProposal.job_id).n,
+    planRowsBeforePlanRetry, 'concurrent exact Plan Graph approval retries must not create another immutable plan pin');
+  assert.equal(afterPlanApprovalRetryDb.prepare("SELECT COUNT(*) n FROM events WHERE job_id=? AND type='workflow.plan_compiled'").get(planProposal.job_id).n, 1);
+  afterPlanApprovalRetryDb.close();
+  // Approval does not make an inactive Plan Graph source fresh again. The
+  // downstream Execution Graph writer must reject it before creating a job.
+  const inactiveApprovedPlanDb = new DatabaseSync(dbPath);
+  inactiveApprovedPlanDb.prepare("UPDATE jobs SET status='completed' WHERE job_id=?").run(planProposal.job_id);
+  inactiveApprovedPlanDb.close();
+  const inactiveApprovedPlanRead = await tool('adaptive_goal_plan_proposal_get', { job_id: planProposal.job_id });
+  assert.equal(inactiveApprovedPlanRead.found, false);
+  assert.equal(inactiveApprovedPlanRead.status, 'stale');
+  assert.ok(inactiveApprovedPlanRead.blockers.some(item => item.code === 'SOURCE_PLAN_LIFECYCLE_INACTIVE'));
+  const beforeInactiveApprovedCreateDb = new DatabaseSync(dbPath, { readOnly: true });
+  const jobsBeforeInactiveApprovedCreate = beforeInactiveApprovedCreateDb.prepare('SELECT COUNT(*) n FROM jobs').get().n;
+  beforeInactiveApprovedCreateDb.close();
+  const blockedInactiveApprovedExecution = await tool('adaptive_goal_execution_graph_proposal_create', {
+    plan_proposal_job_id: planProposal.job_id, task_bindings: verifiedTaskBindings,
+    title: 'TEST ONLY: inactive APPROVED Plan Graph source must be rejected'
+  });
+  assert.equal(blockedInactiveApprovedExecution.created, false);
+  assert.equal(blockedInactiveApprovedExecution.status, 'blocked');
+  assert.ok(blockedInactiveApprovedExecution.blockers.some(item => item.code === 'SOURCE_PLAN_LIFECYCLE_INACTIVE'));
+  const afterInactiveApprovedCreateDb = new DatabaseSync(dbPath);
+  assert.equal(afterInactiveApprovedCreateDb.prepare('SELECT COUNT(*) n FROM jobs').get().n, jobsBeforeInactiveApprovedCreate);
+  afterInactiveApprovedCreateDb.prepare("UPDATE jobs SET status='active' WHERE job_id=?").run(planProposal.job_id);
+  afterInactiveApprovedCreateDb.close();
+  assert.equal((await tool('adaptive_goal_plan_proposal_get', { job_id: planProposal.job_id })).found, true);
   const planWrapperDispatch = await rawTool('workflow_dispatch', { job_id: planProposal.job_id });
   assert.equal(planWrapperDispatch.isError, true, 'Plan Graph review wrapper must not be dispatchable after approval');
   assert.match(planWrapperDispatch.content?.map(item => item.text || '').join('\\n') || '', /Plan Graph approval pins only the review-checklist plan/);
@@ -1126,6 +1242,30 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(afterLegacyExecutionAttempt.prepare('SELECT COUNT(*) n FROM jobs').get().n, beforeLegacyExecutionJobs,
     'unverified source rejection must not persist an Execution Graph wrapper/job');
   afterLegacyExecutionAttempt.close();
+
+  // Exercise the Execution Graph wrapper's own writer boundary, not only the
+  // upstream Plan Graph transaction. A failure after createJob() but before
+  // its proposal event is durable must roll back the wrapper job as one unit.
+  const beforeExecutionWriteFailureDb = new DatabaseSync(dbPath, { readOnly: true });
+  const jobsBeforeExecutionWriteFailure = beforeExecutionWriteFailureDb.prepare('SELECT COUNT(*) n FROM jobs').get().n;
+  beforeExecutionWriteFailureDb.close();
+  const executionWriteFailureDb = new DatabaseSync(dbPath);
+  executionWriteFailureDb.exec(`CREATE TRIGGER test_fail_agg_execution_graph_proposal_event BEFORE INSERT ON events
+    WHEN NEW.type='job.proposal_requested' AND json_extract(NEW.payload_json,'$.adaptive_goal_execution_graph_proposal.schema_version')=1
+    BEGIN SELECT RAISE(ABORT, 'injected Execution Graph event write failure'); END`);
+  executionWriteFailureDb.close();
+  const injectedExecutionFailure = await rawTool('adaptive_goal_execution_graph_proposal_create', {
+    plan_proposal_job_id: planProposal.job_id, task_bindings: verifiedTaskBindings,
+    title: 'TEST ONLY: injected Execution Graph persistence failure'
+  });
+  assert.equal(injectedExecutionFailure.isError, true,
+    `injected Execution Graph event persistence failure must surface as a tool error: ${JSON.stringify(injectedExecutionFailure)}`);
+  const afterExecutionWriteFailureDb = new DatabaseSync(dbPath);
+  assert.equal(afterExecutionWriteFailureDb.prepare('SELECT COUNT(*) n FROM jobs').get().n, jobsBeforeExecutionWriteFailure,
+    'Execution Graph wrapper job must roll back when its proposal event cannot be persisted');
+  assert.equal(afterExecutionWriteFailureDb.prepare("SELECT COUNT(*) n FROM events WHERE type='job.proposal_requested' AND json_extract(payload_json,'$.adaptive_goal_execution_graph_proposal.schema_version')=1").get().n, 0);
+  afterExecutionWriteFailureDb.exec('DROP TRIGGER test_fail_agg_execution_graph_proposal_event');
+  afterExecutionWriteFailureDb.close();
 
   const executionProposal = await tool('adaptive_goal_execution_graph_proposal_create', {
     plan_proposal_job_id: planProposal.job_id, task_bindings: verifiedTaskBindings,
@@ -1334,6 +1474,49 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   const candidateBeforeReviewerProof = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
   assert.equal(candidateBeforeReviewerProof.status, 'fresh');
   assert.equal(candidateBeforeReviewerProof.sourceGraphVerification.attestationId, knowledgeAttestationStored.attestationId);
+  // Readback freshness includes the active/inactive lifecycle bit. An inactive
+  // wrapper must not be presented as a current reviewable proposal/candidate.
+  const inactiveProposalDb = new DatabaseSync(dbPath);
+  inactiveProposalDb.prepare("UPDATE jobs SET status='completed' WHERE job_id=?").run(executionProposal.job_id);
+  inactiveProposalDb.close();
+  const inactiveExecutionGraph = await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionProposal.job_id });
+  assert.equal(inactiveExecutionGraph.status, 'stale');
+  const inactiveCandidate = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(inactiveCandidate.status, 'stale');
+  const restoreActiveProposalDb = new DatabaseSync(dbPath);
+  restoreActiveProposalDb.prepare("UPDATE jobs SET status='active' WHERE job_id=?").run(executionProposal.job_id);
+  restoreActiveProposalDb.close();
+  assert.equal((await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionProposal.job_id })).status, 'fresh');
+  assert.equal((await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id })).status, 'fresh');
+  // Reopen the same disposable database through fresh server processes. This
+  // proves that Goal/Idea snapshot verification, Plan Graph lineage,
+  // Execution Graph proposal and candidate reconstruction are persisted
+  // contracts rather than in-process caches. Each process is short-lived and
+  // receives only isolated test trust roots.
+  const readAfterRuntimeRestart = async (toolName, args) => {
+    const response = await invokeToolWithAlternateRuntimeEnvironment(runtimeEntryPoint, runtimeEnvironment, toolName, args);
+    assert.notEqual(response?.isError, true, `${toolName} failed after runtime reload: ${response?.content?.[0]?.text || JSON.stringify(response)}`);
+    if (response?.structuredContent) return response.structuredContent;
+    const textItem = response?.content?.find(item => item.type === 'text');
+    return textItem ? JSON.parse(textItem.text) : response;
+  };
+  const reloadedKnowledge = await readAfterRuntimeRestart('adaptive_goal_knowledge_snapshot_get', { goal_id: knowledgeGoalId });
+  assert.equal(reloadedKnowledge.snapshot.snapshot_hash, knowledgeSnapshotRequest.snapshot.snapshot_hash);
+  assert.equal(reloadedKnowledge.currentVerification.verified, true);
+  assert.equal(reloadedKnowledge.currentVerification.attestationId, knowledgeAttestationStored.attestationId);
+  const reloadedPlan = await readAfterRuntimeRestart('adaptive_goal_plan_proposal_get', { job_id: planProposal.job_id });
+  assert.equal(reloadedPlan.found, true);
+  assert.equal(reloadedPlan.draft.draftHash, verifiedDraft.draftHash);
+  assert.equal(reloadedPlan.draft.source.verification.snapshotHash, knowledgeSnapshotRequest.snapshot.snapshot_hash);
+  const reloadedExecutionGraph = await readAfterRuntimeRestart('adaptive_goal_execution_graph_proposal_get', { job_id: executionProposal.job_id });
+  assert.equal(reloadedExecutionGraph.status, 'fresh');
+  assert.equal(reloadedExecutionGraph.proposal.proposalHash, executionProposal.proposalHash);
+  assert.equal(reloadedExecutionGraph.proposal.source.draftHash, verifiedDraft.draftHash);
+  const reloadedCandidate = await readAfterRuntimeRestart('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(reloadedCandidate.status, 'fresh');
+  assert.equal(reloadedCandidate.candidate.compiler.compilerPlanHash, candidateBeforeReviewerProof.candidate.compiler.compilerPlanHash);
+  assert.equal(reloadedCandidate.executionReviewReady, false,
+    'runtime reload must not infer reviewer identity or execution authorization from persisted graph/candidate bytes');
   assert.equal(candidateBeforeReviewerProof.reviewerIdentityVerified, false);
   assert.equal(candidateBeforeReviewerProof.executionReviewReady, false);
   const preReviewerPreflight = await tool('workflow_preflight', { job_id: executionProposal.job_id });
@@ -1462,6 +1645,12 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(candidateReadBack.reviewerIdentityVerified, true);
   assert.equal(candidateReadBack.executionReviewReady, true, JSON.stringify(candidateReadBack.blockers));
   assert.equal(candidateReadBack.sourceGraphVerification.attestationId, knowledgeAttestationStored.attestationId);
+  const reviewerAfterRestart = await readAfterRuntimeRestart('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(reviewerAfterRestart.status, 'fresh');
+  assert.equal(reviewerAfterRestart.reviewerIdentityVerified, true,
+    'reviewer identity must be independently reverified from persisted event bytes and trust ledger after runtime restart');
+  assert.equal(reviewerAfterRestart.executionReviewReady, true);
+  assert.equal(reviewerAfterRestart.reviewerAttestation.attestationEventId, reviewerAttestationEventId);
   const proposalHashDb = new DatabaseSync(dbPath, { readOnly: true });
   let wrapperProposalHash;
   try {
@@ -1575,6 +1764,40 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(executionPreflightReady.approval_policy_summary.required_approval_count, 2);
   assert.equal(executionPreflightReady.execution_started, false);
 
+  // The approval boundary must require the durable Execution Plan Candidate,
+  // not merely a valid signature envelope that can be assembled from a
+  // transient candidate object. Removing the candidate event in this disposable
+  // database models missing persistence; restore exact bytes before continuing.
+  const missingCandidateDb = new DatabaseSync(dbPath);
+  const missingCandidateRow = missingCandidateDb.prepare(`SELECT event_id,job_id,type,payload_json,created_at FROM events
+    WHERE job_id=? AND type=? ORDER BY created_at ASC,rowid ASC`).get(executionProposal.job_id, 'adaptive_goal.execution_plan_candidate_created');
+  assert.ok(missingCandidateRow, 'the reviewed candidate must be durable before the missing-persistence negative test');
+  missingCandidateDb.exec(`DROP TRIGGER IF EXISTS agg_approval_security_events_no_delete;
+    DROP TRIGGER IF EXISTS agg_approval_reviewer_security_events_no_delete`);
+  missingCandidateDb.prepare('DELETE FROM events WHERE event_id=?').run(missingCandidateRow.event_id);
+  missingCandidateDb.close();
+  const approvalWithoutPersistedCandidate = await rawTool('workflow_approve', {
+    job_id: executionProposal.job_id,
+    confirmation: 'TEST ONLY: approval without durable candidate must be denied.',
+    approval_evidence: approvalEvidence
+  });
+  assert.equal(approvalWithoutPersistedCandidate.isError, true,
+    'valid signed approval evidence must not pin/approve an Execution Graph wrapper after its durable candidate is missing');
+  assert.match(approvalWithoutPersistedCandidate.content?.map(item => item.text || '').join('\n') || '',
+    /AGG_EXECUTION_CANDIDATE_REQUIRED|AGG_EXECUTION_AUTHORIZATION_NOT_VERIFIED/);
+  const heldWithoutCandidate = await tool('workflow_get', { job_id: executionProposal.job_id });
+  assert.equal(heldWithoutCandidate.job.state, 'IDLE');
+  assert.equal(heldWithoutCandidate.plan, null, 'missing candidate must not pin an immutable plan');
+  assert.equal(heldWithoutCandidate.tasks.length, 0);
+  const restoreMissingCandidateDb = new DatabaseSync(dbPath);
+  restoreMissingCandidateDb.prepare('INSERT INTO events(event_id,job_id,type,payload_json,created_at) VALUES(?,?,?,?,?)')
+    .run(missingCandidateRow.event_id, missingCandidateRow.job_id, missingCandidateRow.type,
+      missingCandidateRow.payload_json, missingCandidateRow.created_at);
+  restoreMissingCandidateDb.close();
+  const restoredCandidate = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(restoredCandidate.status, 'fresh', JSON.stringify(restoredCandidate.blockers));
+  assert.equal(restoredCandidate.executionReviewReady, true);
+
   const executionApproval = await tool('workflow_approve', {
     job_id: executionProposal.job_id,
     confirmation: 'TEST ONLY: explicitly approve the exact trusted-review-bound immutable Execution Graph plan in disposable SQLite; no live or production authority.',
@@ -1590,33 +1813,59 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
   assert.equal(approvedExecutionReadBack.immutablePlanPinned, true);
   assert.equal(approvedExecutionReadBack.immutablePlanHash, candidateReadBack.candidate.compiler.compilerPlanHash);
   assert.equal(approvedExecutionReadBack.executionReviewReady, true);
+  const inactiveApprovedDb = new DatabaseSync(dbPath);
+  inactiveApprovedDb.prepare("UPDATE jobs SET status='completed' WHERE job_id=?").run(executionProposal.job_id);
+  inactiveApprovedDb.close();
+  const inactiveApprovedGraph = await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionProposal.job_id });
+  assert.equal(inactiveApprovedGraph.status, 'stale', 'an inactive approved wrapper must not retain fresh Execution Graph status');
+  const inactiveApprovedCandidate = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(inactiveApprovedCandidate.status, 'stale', 'an inactive approved wrapper must not retain fresh candidate status');
+  const restoreApprovedDb = new DatabaseSync(dbPath);
+  restoreApprovedDb.prepare("UPDATE jobs SET status='active' WHERE job_id=?").run(executionProposal.job_id);
+  restoreApprovedDb.close();
+  assert.equal((await tool('adaptive_goal_execution_graph_proposal_get', { job_id: executionProposal.job_id })).status, 'fresh');
+  assert.equal((await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id })).status, 'fresh');
 
-  // Re-check reviewer freshness at the final dispatch boundary, not only at
-  // approval time. A previously valid review event replaced with a validly
-  // signed but expired attestation must not leave the immutable plan executable.
-  // This mutation is restricted to the disposable test DB and restored exactly.
+  // Reviewer authorization is append-only anti-replay evidence. Even a
+  // correctly signed replacement must not be able to rewrite the persisted
+  // reviewer event through ordinary SQL. A separate privileged-tamper probe
+  // then verifies expiry is rechecked at dispatch even if DB triggers are removed.
   const reviewerExpiryDb = new DatabaseSync(dbPath);
   const reviewerExpiryRow = reviewerExpiryDb.prepare('SELECT event_id,payload_json FROM events WHERE job_id=? AND type=?')
     .get(executionProposal.job_id, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
   assert.ok(reviewerExpiryRow, 'the approved test candidate must retain its one trusted reviewer record');
   const reviewerExpiryOriginalBytes = reviewerExpiryRow.payload_json;
-  const expiredReviewerUnsigned = {
+  const replacementAttempt = {
     ...reviewerAttestationUnsigned,
     issued_at: new Date(Date.now() - 5 * 60_000).toISOString(),
     expires_at: new Date(Date.now() - 15_000).toISOString()
   };
-  const expiredReviewerAttestation = {
-    ...expiredReviewerUnsigned,
-    signature: crypto.sign(null, Buffer.from(canonicalJson(expiredReviewerUnsigned), 'utf8'), reviewerIdentityKeys.privateKey).toString('base64')
-  };
+  replacementAttempt.signature = crypto.sign(null, Buffer.from(canonicalJson(replacementAttempt), 'utf8'), reviewerIdentityKeys.privateKey).toString('base64');
+  assert.throws(() => reviewerExpiryDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
+    .run(JSON.stringify(replacementAttempt), reviewerExpiryRow.event_id), /AGG approval security events are append-only/);
+  assert.equal(reviewerExpiryDb.prepare('SELECT payload_json FROM events WHERE event_id=?').get(reviewerExpiryRow.event_id).payload_json,
+    reviewerExpiryOriginalBytes, 'the original reviewer attestation remains byte-identical after a rejected replacement');
+  // Remove both the legacy approval-only trigger name and the additive v2
+  // trigger name. Existing databases may carry either definition from an
+  // earlier runtime; this privileged-tamper probe must model trigger removal,
+  // not accidentally leave an older overlapping guard in place.
+  reviewerExpiryDb.exec(`DROP TRIGGER IF EXISTS agg_approval_reviewer_security_events_no_update;
+    DROP TRIGGER IF EXISTS agg_approval_security_events_no_update`);
   reviewerExpiryDb.prepare('UPDATE events SET payload_json=? WHERE event_id=?')
-    .run(JSON.stringify(expiredReviewerAttestation), reviewerExpiryRow.event_id);
+    .run(JSON.stringify(replacementAttempt), reviewerExpiryRow.event_id);
   reviewerExpiryDb.close();
+  const expiredReviewerCandidate = await tool('adaptive_goal_execution_plan_candidate_get', { job_id: executionProposal.job_id });
+  assert.equal(expiredReviewerCandidate.status, 'fresh', JSON.stringify(expiredReviewerCandidate.blockers));
+  assert.equal(expiredReviewerCandidate.reviewerIdentityVerified, false);
+  assert.equal(expiredReviewerCandidate.executionReviewReady, false);
+  assert.ok(expiredReviewerCandidate.blockers.some(item => item.code === 'AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED' &&
+    item.message === 'AGG_ACTION_INTENT_REVIEWER_IDENTITY_UNVERIFIED: reviewer attestation is stale, expired, future-dated or exceeds the 10-minute freshness window'),
+  JSON.stringify(expiredReviewerCandidate.blockers));
   const expiredReviewerDispatch = await rawTool('workflow_dispatch', { job_id: executionProposal.job_id });
   assert.equal(expiredReviewerDispatch.isError, true,
     'a validly signed but expired reviewer attestation must be rejected again immediately before dispatch');
-  assert.match(expiredReviewerDispatch.content?.map(item => item.text || '').join('\\n') || '',
-    /stale, expired|reviewer|REVIEWER|authorization/i);
+  assert.match(expiredReviewerDispatch.content?.map(item => item.text || '').join('\n') || '',
+    /AGG_EXECUTION_AUTHORIZATION_NOT_VERIFIED/);
   const heldAfterExpiredReviewer = await tool('workflow_get', { job_id: executionProposal.job_id });
   assert.equal(heldAfterExpiredReviewer.job.state, 'APPROVED');
   assert.equal(heldAfterExpiredReviewer.tasks.length, 0, 'expired reviewer evidence must not create a coordinator task');
@@ -1629,12 +1878,14 @@ test('actual isolated producers → nine-node Plan Graph DAG → durable readine
 
   // A structurally valid candidate and a previously approved immutable plan
   // are still not dispatchable when the independent reviewer record is absent.
-  // Remove only the reviewer event in this disposable DB, prove dispatch fails
-  // before task creation, then restore the exact durable event bytes.
+  // Model privileged schema tampering in this disposable DB only: local SQLite
+  // triggers do not claim protection against trigger removal or DB replacement.
   const missingReviewerDb = new DatabaseSync(dbPath);
   const missingReviewerRow = missingReviewerDb.prepare('SELECT event_id,job_id,type,payload_json,created_at FROM events WHERE job_id=? AND type=?')
     .get(executionProposal.job_id, ADAPTIVE_GOAL_REVIEWER_ATTESTATION_EVENT);
   assert.ok(missingReviewerRow, 'reviewer evidence must exist before the negative dispatch test');
+  missingReviewerDb.exec(`DROP TRIGGER IF EXISTS agg_approval_reviewer_security_events_no_delete;
+    DROP TRIGGER IF EXISTS agg_approval_security_events_no_delete`);
   missingReviewerDb.prepare('DELETE FROM events WHERE event_id=?').run(missingReviewerRow.event_id);
   missingReviewerDb.close();
   const missingReviewerDispatch = await rawTool('workflow_dispatch', { job_id: executionProposal.job_id });

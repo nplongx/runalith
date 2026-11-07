@@ -8,7 +8,7 @@ const dataDir = path.join(root, 'data');
 const dbPath = path.join(dataDir, 'workflow.db');
 fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 Object.assign(process.env, { WORKFLOW_DB: dbPath, WORKFLOW_DATA_DIR: dataDir, WORKFLOW_WORKSPACE: root, NODE_ENV: 'test' });
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { ExecutionManager } = await import('../src/runtime/execution-manager.js');
 const store = new WorkflowStore();
 const recoveryStore = new WorkflowStore();

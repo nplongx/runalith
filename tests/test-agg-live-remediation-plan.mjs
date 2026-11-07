@@ -55,6 +55,12 @@ function inputs() {
       adaptiveGoalGraph: { goals: [{ goalId: 'runalith-agg-e2e-20261026-clean', nodeCount: 4, edgeCount: 5, membershipCount: 6,
           snapshotHash: 'b'.repeat(64), evidenceAssessment: { declaredReferenceCount: 2, eligibleForExternalAttestation: false } }],
         findings: [{ code: 'PLANNER_SOURCE_BYTES_REPORTED_VERIFIED_BUT_CURRENT_SOURCE_INVALID', recordId: 'planner-1', detail: 'source_hash_mismatch', sourceArtifact: { path: '/tmp/recon.json', sha256: sha }, confidence: 'confirmed', cause: 'unknown' }],
+        plannerRuns: [{ run_id: 'planner-1', tool_name: 'adaptive_goal_graph_search', evidence: [{
+          evidenceReferenceSha256: 'b'.repeat(64), classification: 'source_bytes_verified_claim_unverified',
+          revalidation: 'source_hash_mismatch', sourceReference: 'file:src/runtime/example.js#sha256=' + 'c'.repeat(64),
+          expectedSourceSha256: 'c'.repeat(64), observedSourceSha256: 'd'.repeat(64),
+          sourceResolutionStatus: 'source_hash_mismatch', blockers: ['PLANNER_SOURCE_EVIDENCE_EXPECTED_DIGEST_MISMATCH']
+        }] }],
         proposalRecords: [proposal('plan-1'), proposal('plan-2'), proposal('plan-3'), { kind: 'execution_graph_proposal', jobId: 'exec-1' }] } },
     preflight: { schemaVersion: 1, readOnly: true, liveMutationPerformed: false, workflowDatabaseMutationPerformed: false,
       generatedAt: '2026-10-28T09:01:00.000Z', candidate: { version: '1.0.9-rc.29', path: '/tmp/candidate.mcpb', sha256: sha,
@@ -72,6 +78,12 @@ test('builds owner-authorized repair plan with precise findings and never author
   assert.equal(plan.currentFindings.sourceHashMismatchCount, 1);
   assert.equal(plan.schemaVersion, 2);
   assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].sourceArtifact.recordId, 'planner-1');
+  assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].plannerRunId, 'planner-1');
+  assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].sourceReference, 'file:src/runtime/example.js#sha256=' + 'c'.repeat(64));
+  assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].currentSourcePath, 'src/runtime/example.js');
+  assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].claimedSha256, 'c'.repeat(64));
+  assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].observedSourceSha256, 'd'.repeat(64));
+  assert.deepEqual(plan.currentFindings.sourceHashMismatchRecords[0].sourceBlockers, ['PLANNER_SOURCE_EVIDENCE_EXPECTED_DIGEST_MISMATCH']);
   assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].confidence, 'CONFIRMED_BY_CURRENT_READ_ONLY_REVALIDATION');
   assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].owner, 'source owner not recorded');
   assert.equal(plan.currentFindings.sourceHashMismatchRecords[0].prohibitedAction, 'do not rewrite history');
@@ -81,6 +93,8 @@ test('builds owner-authorized repair plan with precise findings and never author
   assert.equal(plan.currentFindings.executionGraph.persistedProposalCount, 1);
   assert.deepEqual(plan.currentFindings.goalEvidence, { goalId: 'runalith-agg-e2e-20261026-clean', nodes: 4, edges: 5,
     memberships: 6, evidenceRefs: 2, attestationEligible: false, snapshotHash: 'b'.repeat(64),
+    evidenceManifestHash: null, evidenceManifestCount: null, verified: null, currentVerificationStatus: null,
+    currentAttestationId: null, claimTruthVerified: null, independenceVerified: null, planningAuthorityEstablished: null,
     observationStatus: 'OBSERVED_IN_CURRENT_GRAPH_RECONCILIATION', finding: plan.currentFindings.goalEvidence.finding });
   assert.equal(plan.currentFindings.workflow.executingJobs, 1);
   assert.equal(plan.currentFindings.workflow.runningTasks, 1);
@@ -116,6 +130,45 @@ test('does not invent Goal/Idea graph counts or evidence eligibility when the cu
   assert.equal(plan.currentFindings.goalEvidence.attestationEligible, null);
   assert.equal(plan.currentFindings.goalEvidence.observationStatus, 'NOT_PRESENT_IN_GRAPH_RECONCILIATION');
   assert.equal(plan.repairSteps.find(step => step.id === 'goal-idea-evidence-manifest-rebuild').affected[0].nodeCount, null);
+});
+
+test('preserves a complete evidence manifest and plans independent attestation separately from trust and reviewer approval', () => {
+  const values = inputs();
+  values.dossier.findings = values.dossier.findings.filter(finding => finding.code !== 'KNOWLEDGE_EVIDENCE_MANIFEST_EMPTY');
+  values.dossier.findings.push({ code: 'GOAL_IDEA_EVIDENCE_READY_REQUIRES_INDEPENDENT_ATTESTATION',
+    sourceArtifact: { name: 'goalSnapshot', path: '/tmp/snapshot.json', sha256: sha } });
+  values.dossier.liveState.graph = { goalId: 'runalith-agg-e2e-20261026-clean', snapshotHash: 'b'.repeat(64),
+    evidenceManifestHash: 'c'.repeat(64), evidenceManifestCount: 9, evidenceReferenceCount: 9,
+    eligibleForAttestation: true, verified: false, currentVerificationStatus: 'verifier_unavailable',
+    currentAttestationId: null, claimTruthVerified: false, independenceVerified: false, planningAuthorityEstablished: false };
+  values.reconciliation.adaptiveGoalGraph.goals[0].evidenceAssessment = {
+    declaredReferenceCount: 9, eligibleForExternalAttestation: true
+  };
+  const plan = buildAggLiveRemediationPlan({ ...values, generatedAt: '2026-10-28T09:02:00.000Z' });
+  const attestation = plan.repairSteps.find(step => step.id === 'goal-idea-independent-attestation');
+  assert.ok(attestation, 'evidence-ready graph requires an independent attestation step');
+  assert.equal(plan.repairSteps.some(step => step.id === 'goal-idea-evidence-manifest-rebuild'), false,
+    'complete durable evidence must not trigger a graph/evidence rebuild');
+  assert.equal(attestation.affected[0].snapshotHash, 'b'.repeat(64));
+  assert.equal(attestation.affected[0].evidenceManifestHash, 'c'.repeat(64));
+  assert.equal(attestation.affected[0].evidenceManifestCount, 9);
+  assert.equal(attestation.affected[0].eligibleForAttestation, true);
+  assert.equal(attestation.affected[0].verified, false);
+  assert.equal(attestation.affected[0].claimTruthVerified, false);
+  assert.equal(attestation.affected[0].independenceVerified, false);
+  assert.equal(attestation.affected[0].planningAuthorityEstablished, false);
+  assert.ok(attestation.requiredOperationsAfterAuthority.some(item => /exact current snapshot hash and evidence-manifest hash/.test(item)));
+  assert.ok(attestation.requiredOperationsAfterAuthority.some(item => /reviewer approval.*separate subsequent gates/i.test(item)));
+  assert.ok(attestation.prohibitedOperations.some(item => /Do not self-sign/.test(item)));
+  assert.equal(plan.repairSteps.some(step => step.id === 'host-managed-agg-trust-provisioning'), true,
+    'missing verifier/reviewer trust configuration remains its own provisioning gate');
+  assert.equal(plan.currentFindings.goalEvidence.evidenceManifestCount, 9);
+  assert.equal(plan.currentFindings.goalEvidence.currentVerificationStatus, 'verifier_unavailable');
+  assert.equal(plan.currentFindings.goalEvidence.currentAttestationId, null);
+  assert.equal(plan.currentFindings.goalEvidence.planningAuthorityEstablished, false);
+  assert.equal(plan.decision.canActivateNow, false);
+  assert.equal(plan.decision.lifecycleMutationAuthorized, false);
+  assert.equal(attestation.mutationAuthorized, false);
 });
 
 test('recovery plan summaries and evidence requirements are derived from observed records, not hard-coded counts', () => {

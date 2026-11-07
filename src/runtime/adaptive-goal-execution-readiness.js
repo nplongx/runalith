@@ -1,5 +1,5 @@
-import { artifactSchemaForType } from './workflow/artifacts.js';
-import { getAgentArtifactType, getAgentContract } from './workflow/agent-contracts.js';
+import { artifactSchemaForType } from './workflow-contracts-public-api.js';
+import { getAgentArtifactType, getAgentContract } from './agent-contracts-public-api.js';
 import { assessAdaptiveGoalPlanCompatibility } from './adaptive-goal-compatibility.js';
 
 export const ADAPTIVE_GOAL_EXECUTION_READINESS_SCHEMA_VERSION = 1;

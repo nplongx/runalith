@@ -5,7 +5,7 @@ import { tempDir } from './test-temp-dir.js';
 const root = tempDir('m8-rework-');
 process.env.WORKFLOW_DB = path.join(root, 'workflow.db');
 process.env.WORKFLOW_DATA_DIR = root;
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 const { evaluateLangGraph, LangGraphActions } = await import('../src/runtime/langgraph-orchestrator.js');
 const store = new WorkflowStore();
 const job = store.createJob({ conversationKey: `m8-${process.pid}-${Date.now()}`, title: 'Software development M8 rework' });

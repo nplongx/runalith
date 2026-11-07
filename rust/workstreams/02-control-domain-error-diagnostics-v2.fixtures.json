@@ -1,0 +1,331 @@
+{
+  "fixture_set": "WS2-Control-Domain-Error-Diagnostics-v2",
+  "status": "DRAFT_NOT_RATIFIED",
+  "schema_version": 2,
+  "supersedes_fixture_sha256": "61e90ebbe5240e3d6803ebac0be51a7681ae33f0b9fedca16b9b45568e9b110e",
+  "previous_validator_sha256": "43c59c097e2ff56f8503f3e58e5ed6875de2c66385e6defd4af5c7f7b798e7eb",
+  "ws6_source": {
+    "governance_receipt_rs_sha256": "d5f682af74da93dd4899a4cdd31d791382eb580a7f9eeaa3e392c9f0be8bbe09",
+    "signed_envelope_rs_sha256": "1e7b638efa2577d1769254abe444ca18c77ea944df65d2cd526307b86f7c572f",
+    "trust_error_code_source": "rust/crates/runalith-trust/src/lib.rs",
+    "inventory_scope": "Exact code strings found in governance_receipt.rs and signed_envelope.rs plus TrustError::code() host crypto/database mappings. Not a claim to inventory every error in runalith-trust.",
+    "trust_error_code_source_sha256": "5fba5f3c618609c72e354e35488c92baf5b5c753754cda45f2c1e0484107be6f"
+  },
+  "field_contract": {
+    "domain_code": "Exact WS2 producer-domain category; does not carry verifier-specific spelling.",
+    "cause_code": "Exact case-sensitive source TrustError::code() value; preserve unchanged.",
+    "transport_rule": "W8 carries domain_code and cause_code as separate opaque fields; neither replaces, aliases, flattens or derives HTTP/retry semantics from the other.",
+    "automatic_retry_for_verifier_failure": false,
+    "valid_signed_rejected": "A verified Rejected receipt is a domain decision, not authentication/transport failure and never authorizes admission."
+  },
+  "cases": [
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_REQUEST_INVALID",
+      "domain_code": "MALFORMED_REQUEST",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_CLOCK_INVALID",
+      "domain_code": "EVIDENCE_UNRESOLVED",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_BINDING_INVALID",
+      "domain_code": "SUBJECT_MISMATCH",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_IDENTITY_UNAUTHORIZED",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_TIME_INVALID",
+      "domain_code": "EVIDENCE_UNRESOLVED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNER_KEY_MISMATCH",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_CANONICALIZATION_FAILED",
+      "domain_code": "EVIDENCE_UNRESOLVED",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_ENVELOPE_INVALID",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_TRUST_SNAPSHOT_MISMATCH",
+      "domain_code": "SUBJECT_MISMATCH",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_PAYLOAD_MISMATCH",
+      "domain_code": "SUBJECT_MISMATCH",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_DIGEST_MISMATCH",
+      "domain_code": "SUBJECT_MISMATCH",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_BINDING_MISMATCH",
+      "domain_code": "SUBJECT_MISMATCH",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_DIGEST_MISMATCH",
+      "domain_code": "SUBJECT_MISMATCH",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_LEDGER_UNAVAILABLE",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNKNOWN",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_NONCE_CONFLICT",
+      "domain_code": "IDEMPOTENCY_CONFLICT",
+      "resolution": "CONFLICT",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "GOVERNANCE_RECEIPT_SIGNATURE_INVALID",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_INVALID",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_NOT_OBSERVED",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNKNOWN",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs",
+        "signed_envelope.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_ROLLBACK",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_ROOT_OUTSIDE_VALIDITY",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_ROOT_REVOKED",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "governance_receipt.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_INVALID",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "signed_envelope.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_APPROVAL_EVIDENCE_NONCE_INVALID",
+      "domain_code": "MALFORMED_REQUEST",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "signed_envelope.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_APPROVAL_CLOCK_INVALID",
+      "domain_code": "EVIDENCE_UNRESOLVED",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "signed_envelope.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_EXPIRED",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNRESOLVED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "signed_envelope.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_APPROVAL_SIGNATURE_ENVELOPE_FUTURE_DATED",
+      "domain_code": "EVIDENCE_UNRESOLVED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "signed_envelope.rs"
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_OPENSSL_UNAVAILABLE",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNKNOWN",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "lib.rs TrustError::code()"
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_PUBLIC_KEY_INVALID",
+      "domain_code": "AUTHENTICATION_FAILED",
+      "resolution": "REJECTED",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "lib.rs TrustError::code()"
+      ]
+    },
+    {
+      "cause_code": "AGG_TRUST_CONFIG_LEDGER_UNAVAILABLE",
+      "domain_code": "AUTHORITY_UNAVAILABLE",
+      "resolution": "UNKNOWN",
+      "mapping_status": "DRAFT_PROPOSED",
+      "automatic_retry": false,
+      "sources": [
+        "lib.rs TrustError::code()"
+      ]
+    }
+  ],
+  "valid_rejected_receipt": {
+    "signature_and_subject_verified": true,
+    "decision": "Rejected",
+    "domain_code": null,
+    "cause_code": null,
+    "resolution": "REJECTED",
+    "admission_authorized": false,
+    "transport_error": false
+  },
+  "preservation_rules": [
+    "cause_code must equal exact case-sensitive source string; shortened aliases are invalid.",
+    "domain_code remains an independent WS2 category; it never replaces cause_code.",
+    "AUTHORITY_UNAVAILABLE retains exact cause_code and UNKNOWN/UNRESOLVED state.",
+    "Nonce conflict is IDEMPOTENCY_CONFLICT and never automatically retryable.",
+    "Invalid signature/issuer is not AUTHORITY_UNAVAILABLE.",
+    "A valid signed Rejected receipt is a domain decision, not an authentication or transport error."
+  ]
+}

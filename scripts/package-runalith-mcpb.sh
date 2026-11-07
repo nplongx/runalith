@@ -37,7 +37,7 @@ assert_regular_source() {
   done
   [[ "$(realpath -e "$current")" == "$current" ]] || { echo "Refusing non-canonical package source: $relative" >&2; exit 2; }
 }
-for SOURCE in README.md LICENSE package.json plugin/manifest.json "$ENTRY_POINT" tests/test-runalith-plugin.js tests/test-production-behavioral-qa.js tests/test-adaptive-goal-current-scope-producer-e2e.mjs tests/test-adaptive-goal-approval-subsystem.mjs tests/test-adaptive-goal-knowledge-verifier.mjs tests/test-adaptive-goal-trust-configuration.mjs tests/test-adaptive-goal-trust-entrypoint.mjs tests/test-adaptive-goal-reviewer-identity.js tests/test-reconcile-active-workflows.mjs tests/test-reconcile-active-workflows-v2.mjs tests/test-external-trust-checkpoint-contract.mjs tests/test-agg-acceptance-consistency.mjs scripts/reconcile-active-workflows.mjs scripts/reconcile-active-workflows-v2.mjs scripts/lib/external-trust-checkpoint-contract.mjs scripts/lib/sqlite-external-checkpoint-transition.mjs scripts/validate-agg-trust-config.mjs scripts/verify-agg-acceptance-consistency.mjs tests/test-extracted-package-tool-schemas.mjs tests/test-execution-lease-fencing.js tests/test-execution-control-process-boundary.js tests/test-mcp-stdio-backpressure.mjs tests/test-temp-dir.js tests/test-execution-batch.js tests/test-execution-batch-concurrency.js tests/test-execution-batch-terminal-recovery.js tests/test-execution-success-contract.js tests/test-phase5-recovery.js tests/test-workflow-terminal-failure-atomicity.js tests/test-provider-pre-send-recovery.js tests/test-agent-tool-guidance.js tests/test-mcp-graceful-signal-shutdown-20261017.js tests/test-mcp-shutdown-backpressure-deadline-20261017.js tests/test-mcp-eof-shutdown-framing-20261017.js tests/test-adaptive-goal-evidence-lineage.js scripts/build-agg-live-remediation-plan.mjs tests/test-agg-live-remediation-plan.mjs scripts/package-runalith-mcpb.sh scripts/collect-plugin-runtime.mjs scripts/plugin-package-metadata.mjs scripts/verify-mcpb-source-alignment.mjs benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs; do
+for SOURCE in README.md LICENSE package.json plugin/manifest.json job-store.js "$ENTRY_POINT" tests/test-runalith-plugin.js tests/test-production-behavioral-qa.js tests/test-adaptive-goal-current-scope-producer-e2e.mjs tests/test-adaptive-goal-approval-subsystem.mjs tests/test-adaptive-goal-knowledge-verifier.mjs tests/test-adaptive-goal-trust-configuration.mjs tests/test-adaptive-goal-trust-entrypoint.mjs tests/test-adaptive-goal-reviewer-identity.js tests/test-reconcile-active-workflows.mjs tests/test-reconcile-active-workflows-v2.mjs tests/test-external-trust-checkpoint-contract.mjs tests/test-agg-acceptance-consistency.mjs tests/test-case01-snapshot-service-boundary.mjs tests/test-adaptive-goal-action-intent-binding-resolver.mjs tests/test-agent-session-store-boundary.mjs scripts/reconcile-active-workflows.mjs scripts/reconcile-active-workflows-v2.mjs scripts/lib/external-trust-checkpoint-contract.mjs scripts/lib/sqlite-external-checkpoint-transition.mjs scripts/validate-agg-trust-config.mjs scripts/verify-agg-acceptance-consistency.mjs tests/test-extracted-package-tool-schemas.mjs tests/test-execution-lease-fencing.js tests/test-execution-control-process-boundary.js tests/test-mcp-stdio-backpressure.mjs tests/test-temp-dir.js tests/test-execution-batch.js tests/test-execution-batch-concurrency.js tests/test-execution-batch-terminal-recovery.js tests/test-execution-success-contract.js tests/test-phase5-recovery.js tests/test-workflow-terminal-failure-atomicity.js tests/test-workspace-write-capability-service.mjs tests/test-provider-pre-send-recovery.js tests/test-agent-tool-guidance.js tests/test-mcp-graceful-signal-shutdown-20261017.js tests/test-mcp-shutdown-backpressure-deadline-20261017.js tests/test-mcp-eof-shutdown-framing-20261017.js tests/test-adaptive-goal-evidence-lineage.js scripts/build-agg-live-remediation-plan.mjs tests/test-agg-live-remediation-plan.mjs scripts/package-runalith-mcpb.sh scripts/collect-plugin-runtime.mjs scripts/plugin-package-metadata.mjs scripts/verify-mcpb-source-alignment.mjs benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs; do
   assert_regular_source "$SOURCE"
 done
 
@@ -48,9 +48,14 @@ MANDATORY_VALIDATION_TESTS=(
   tests/test-execution-success-contract.js
   tests/test-phase5-recovery.js
   tests/test-workflow-terminal-failure-atomicity.js
+  tests/test-workspace-write-capability-service.mjs
+  tests/test-case01-snapshot-service-boundary.mjs
+  tests/test-adaptive-goal-action-intent-binding-resolver.mjs
+  tests/test-agent-session-store-boundary.mjs
   tests/test-provider-pre-send-recovery.js
   tests/test-agent-tool-guidance.js
   tests/test-adaptive-goal-trust-configuration.mjs
+  tests/test-adaptive-goal-store-dispatch-guard.mjs
   tests/test-adaptive-goal-trust-entrypoint.mjs
   tests/test-adaptive-goal-approval-subsystem.mjs
   tests/test-adaptive-goal-reviewer-identity.js
@@ -151,7 +156,7 @@ find "$PAYLOAD" -exec touch -h -t 198001010000 {} +
   # Feed ZIP a stable, locale-independent file order. Recursive zip traversal
   # can otherwise emit directory entries in filesystem enumeration order even
   # when every payload timestamp and byte is identical.
-  find manifest.json README.md LICENSE package.json server src protocol tests scripts -type f -print \
+  find manifest.json README.md LICENSE package.json job-store.js server src protocol tests scripts -type f -print \
     | LC_ALL=C sort \
     | zip -X -q "$BUNDLE" -@
 )
@@ -178,7 +183,7 @@ const { parseStrictJson } = await import(pathToFileURL(process.env.STRICT_JSON_M
 const file = process.argv[2];
 const manifest = parseStrictJson(execFileSync('unzip', ['-p', file, 'manifest.json'], { encoding: 'utf8' }), 'candidate package manifest');
 if (manifest.server?.entry_point !== process.env.EXPECTED_RUNTIME_ENTRY_POINT) throw new Error('bundle manifest entry point mismatch');
-for (const item of [process.env.EXPECTED_RUNTIME_ENTRY_POINT, 'server/index.js', 'src/runtime/job-store.js', 'src/runtime/execution-manager.js', 'protocol/cos-ap-v1/index.js']) {
+for (const item of ['job-store.js', process.env.EXPECTED_RUNTIME_ENTRY_POINT, 'server/index.js', 'src/runtime/job-store.js', 'src/runtime/runalith-runtime-composition.js', 'src/runtime/agent-session-api.js', 'src/runtime/agent-session-policy.js', 'src/runtime/execution-evidence.js', 'src/runtime/execution-manager.js', 'protocol/cos-ap-v1/index.js']) {
   execFileSync('unzip', ['-p', file, item], { stdio: 'ignore' });
 }
 const entries = execFileSync('unzip', ['-l', file], { encoding: 'utf8' });
@@ -268,13 +273,13 @@ run_extracted_validation_test() {
     # The package manifest declares the three opt-in AGG tools. Exercise that
     # full advertised schema surface here; the separate acceptance E2E below
     # still runs with the default environment and asserts that they stay hidden.
-    if env AGG_PHASE2_SHADOW_TOOL_ENABLED=1 AGG_PHASE3_MCTS_TOOL_ENABLED=1 \
+    if env -u NODE_TEST_CONTEXT AGG_PHASE2_SHADOW_TOOL_ENABLED=1 AGG_PHASE3_MCTS_TOOL_ENABLED=1 \
       AGG_PHASE4_KNOWLEDGE_CAPTURE_TOOL_ENABLED=1 node "$extracted"; then
       test_status=0
     else
       test_status=$?
     fi
-  elif node "$extracted"; then test_status=0; else test_status=$?; fi
+  elif env -u NODE_TEST_CONTEXT node "$extracted"; then test_status=0; else test_status=$?; fi
   printf 'EXTRACTED_VALIDATION_TEST_EXIT path=%s exit_code=%d context=archive-extracted\n' "$relative" "$test_status"
   return "$test_status"
 }
@@ -282,11 +287,16 @@ run_extracted_validation_test tests/test-execution-lease-fencing.js
 run_extracted_validation_test tests/test-execution-control-process-boundary.js
 run_extracted_validation_test tests/test-phase5-recovery.js
 run_extracted_validation_test tests/test-workflow-terminal-failure-atomicity.js
+run_extracted_validation_test tests/test-workspace-write-capability-service.mjs
+run_extracted_validation_test tests/test-case01-snapshot-service-boundary.mjs
+run_extracted_validation_test tests/test-adaptive-goal-action-intent-binding-resolver.mjs
+run_extracted_validation_test tests/test-agent-session-store-boundary.mjs
 run_extracted_validation_test tests/test-mcp-stdio-backpressure.mjs
 run_extracted_validation_test tests/test-mcp-graceful-signal-shutdown-20261017.js
 run_extracted_validation_test tests/test-mcp-shutdown-backpressure-deadline-20261017.js
 run_extracted_validation_test tests/test-mcp-eof-shutdown-framing-20261017.js
 run_extracted_validation_test tests/test-adaptive-goal-trust-configuration.mjs
+run_extracted_validation_test tests/test-adaptive-goal-store-dispatch-guard.mjs
 run_extracted_validation_test tests/test-adaptive-goal-trust-entrypoint.mjs
 run_extracted_validation_test tests/test-adaptive-goal-approval-subsystem.mjs
 run_extracted_validation_test tests/test-adaptive-goal-reviewer-identity.js
@@ -296,8 +306,8 @@ run_extracted_validation_test tests/test-external-trust-checkpoint-contract.mjs
 run_extracted_validation_test tests/test-agg-live-remediation-plan.mjs
 
 # Run the complete acceptance workflow against bytes extracted from the exact archive.
-env -u OPENAI_API_KEY node "$EXTRACTED/tests/test-adaptive-goal-current-scope-producer-e2e.mjs"
-env -u OPENAI_API_KEY node "$EXTRACTED/tests/test-runalith-plugin.js"
+env -u OPENAI_API_KEY -u NODE_TEST_CONTEXT node "$EXTRACTED/tests/test-adaptive-goal-current-scope-producer-e2e.mjs"
+env -u OPENAI_API_KEY -u NODE_TEST_CONTEXT node "$EXTRACTED/tests/test-runalith-plugin.js"
 
 # Publish only after every package check passes. The hard link is atomic and fails if
 # another process created OUT after the initial existence check; STAGE lives beside OUT.

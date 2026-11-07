@@ -1,0 +1,70 @@
+{
+  "fixture_id": "runalith.w5.provider-terminal-lineage-packaging.v1.golden-001",
+  "fixture_status": "CONSUMER_INTEGRATION_FIXTURE_FROM_W4_DRAFT_SCHEMA",
+  "w4_schema_sha256": "a6f4a80d7b55de904e646052b24961c95c42f80017c684dd9bee6ba7de9275b5",
+  "w4_example_sha256": "ed185999c8e38cdb34bcad05fcdfff628de898762ba76ea7bd0e37ef94fc2646",
+  "w4_validator_sha256": "dbbedf36fb4b76eafc00bf5c98ca7ac30642f4f5bf4615538225d811e670cc22",
+  "content_schema_id": "runalith.provider-terminal-lineage",
+  "content_schema_version": "1.0",
+  "examples": [
+    {
+      "case": "provider-terminal-lineage-without-governance-receipt",
+      "source": {
+        "producer_id": "worker-service",
+        "workflow_id": "workflow-1",
+        "task_id": "task-1",
+        "attempt": 2,
+        "correlation_id": "workflow-1",
+        "created_at": "2026-11-03T10:02:01Z"
+      },
+      "response_bytes_utf8": "{\"id\":998877,\"status\":\"completed\",\"conclusion\":\"success\"}",
+      "response_artifact": {
+        "artifact_id": "sha256:6288ab21d4f8c5aeeb32f9246262d1db5cc3363fcf5de6824baba6cbdc654c3d",
+        "sha256": "6288ab21d4f8c5aeeb32f9246262d1db5cc3363fcf5de6824baba6cbdc654c3d",
+        "byte_len": 57,
+        "media_type": "application/json"
+      },
+      "sidecar_bytes_utf8": "{\"schema_version\":1,\"lineage_id\":\"lineage-1\",\"producer_id\":\"worker-service\",\"correlation_id\":\"workflow-1\",\"subject\":{\"provider_id\":\"github-actions\",\"provider_account_id\":\"gha-installation:12345\",\"workflow_id\":\"workflow-1\",\"task_id\":\"task-1\",\"claim_id\":\"claim-1\",\"owner_epoch\":7,\"attempt\":2,\"lease_id\":\"lease-2\",\"worker_id\":\"worker-1\",\"plan_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"idempotency_key\":\"provider-idem-1\",\"payload_sha256\":\"6cf23e1c93ff820b7f8c042cd1d29aadb963b90608d7e514f81f73a311541ee3\",\"control_fence\":{\"fence_id\":\"fence-intent-1\",\"claim_id\":\"claim-1\",\"lease_id\":\"lease-2\",\"worker_id\":\"worker-1\",\"owner_epoch\":7,\"plan_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"side_effect_id\":\"intent-1\",\"kind\":\"provider_dispatch\",\"request_sha256\":\"26cabc038f1c4dd777737e9ced7901b7257904d5723271aaeb16e4dda87a4b71\",\"idempotency_key\":\"worker-fence:3fb92454c6212299cfe311513a70360a6df951e4146d37dc2eb3aa8e624ba6b8\",\"acl_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"state\":\"RESERVED\",\"receipt_sha256\":\"0c11801ac601003b6092fce2c14281cb3838761880437ca41e7fa5c636677ce2\"}},\"run\":{\"provider_id\":\"github-actions\",\"provider_account_id\":\"gha-installation:12345\",\"provider_run_id\":\"998877\",\"provider_run_url\":\"https://github.com/acme/repo/actions/runs/998877\"},\"provider_status\":\"completed\",\"provider_conclusion\":\"success\",\"completed_at\":\"2026-11-03T10:01:55Z\",\"observed_at\":\"2026-11-03T10:02:00Z\",\"proof_id\":\"proof-lineage-1\",\"proof_sha256\":\"51eab6c50b993e541e1426ed26c695b2d342c33690e501e18e6cfa5de317ed8e\",\"response_artifact\":{\"artifact_id\":\"sha256:6288ab21d4f8c5aeeb32f9246262d1db5cc3363fcf5de6824baba6cbdc654c3d\",\"sha256\":\"6288ab21d4f8c5aeeb32f9246262d1db5cc3363fcf5de6824baba6cbdc654c3d\",\"byte_len\":57,\"media_type\":\"application/json\"},\"verification_receipt_artifact\":null,\"created_at\":\"2026-11-03T10:02:01Z\"}",
+      "sidecar_sha256": "6eddee4ec8f0574ddcf21e0657a86acb96c81cc6ceaafcf613b238413f2ac72f",
+      "sidecar_expected_sha256": "6eddee4ec8f0574ddcf21e0657a86acb96c81cc6ceaafcf613b238413f2ac72f",
+      "verification_receipt_bytes_utf8": null,
+      "verification_receipt_artifact": null,
+      "w5_artifact_created_at": "2026-11-03T10:02:02Z"
+    },
+    {
+      "case": "provider-terminal-lineage-with-opaque-governance-receipt-artifact",
+      "source": {
+        "producer_id": "worker-service",
+        "workflow_id": "workflow-1",
+        "task_id": "task-1",
+        "attempt": 2,
+        "correlation_id": "workflow-1",
+        "created_at": "2026-11-03T10:03:02Z"
+      },
+      "response_bytes_utf8": "{\"status\":\"completed\",\"conclusion\":\"success\"}",
+      "response_artifact": {
+        "artifact_id": "sha256:ea2ee5dad6f525fecc34ddf4f410031753f33923febe8b5404e7f25ce00d9e7a",
+        "sha256": "ea2ee5dad6f525fecc34ddf4f410031753f33923febe8b5404e7f25ce00d9e7a",
+        "byte_len": 45,
+        "media_type": "application/json"
+      },
+      "sidecar_bytes_utf8": "{\"schema_version\":1,\"lineage_id\":\"lineage-with-receipt\",\"producer_id\":\"worker-service\",\"correlation_id\":\"workflow-1\",\"subject\":{\"provider_id\":\"github-actions\",\"provider_account_id\":\"gha-installation:12345\",\"workflow_id\":\"workflow-1\",\"task_id\":\"task-1\",\"claim_id\":\"claim-1\",\"owner_epoch\":7,\"attempt\":2,\"lease_id\":\"lease-2\",\"worker_id\":\"worker-1\",\"plan_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"idempotency_key\":\"provider-idem-1\",\"payload_sha256\":\"6cf23e1c93ff820b7f8c042cd1d29aadb963b90608d7e514f81f73a311541ee3\",\"control_fence\":{\"fence_id\":\"fence-intent-1\",\"claim_id\":\"claim-1\",\"lease_id\":\"lease-2\",\"worker_id\":\"worker-1\",\"owner_epoch\":7,\"plan_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"side_effect_id\":\"intent-1\",\"kind\":\"provider_dispatch\",\"request_sha256\":\"26cabc038f1c4dd777737e9ced7901b7257904d5723271aaeb16e4dda87a4b71\",\"idempotency_key\":\"worker-fence:3fb92454c6212299cfe311513a70360a6df951e4146d37dc2eb3aa8e624ba6b8\",\"acl_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"state\":\"RESERVED\",\"receipt_sha256\":\"0c11801ac601003b6092fce2c14281cb3838761880437ca41e7fa5c636677ce2\"}},\"run\":{\"provider_id\":\"github-actions\",\"provider_account_id\":\"gha-installation:12345\",\"provider_run_id\":\"998878\",\"provider_run_url\":null},\"provider_status\":\"completed\",\"provider_conclusion\":\"success\",\"completed_at\":null,\"observed_at\":\"2026-11-03T10:03:00Z\",\"proof_id\":\"proof-lineage-receipt\",\"proof_sha256\":\"950fc0d3eac6ba6f6f0d5defe8a37a58a12ebe305243c1ed36298783d96b630b\",\"response_artifact\":{\"artifact_id\":\"sha256:ea2ee5dad6f525fecc34ddf4f410031753f33923febe8b5404e7f25ce00d9e7a\",\"sha256\":\"ea2ee5dad6f525fecc34ddf4f410031753f33923febe8b5404e7f25ce00d9e7a\",\"byte_len\":45,\"media_type\":\"application/json\"},\"verification_receipt_artifact\":{\"artifact_id\":\"sha256:29f55159a79baecf9a66ed70a44c4895e789d89ca7b3410922c507ecef3de469\",\"sha256\":\"29f55159a79baecf9a66ed70a44c4895e789d89ca7b3410922c507ecef3de469\",\"byte_len\":32,\"media_type\":\"application/vnd.runalith.governance-terminal-proof-receipt\",\"verifier_id\":\"governance-verifier\",\"key_id\":\"key-2026-01\",\"receipt_id\":\"receipt-lineage-1\",\"proof_sha256\":\"950fc0d3eac6ba6f6f0d5defe8a37a58a12ebe305243c1ed36298783d96b630b\",\"verified_at\":\"2026-11-03T10:03:01Z\"},\"created_at\":\"2026-11-03T10:03:02Z\"}",
+      "sidecar_sha256": "b6206fc36ba7290bd8046c90781a8cdd49284fac828860d9704b0bb04408f7a2",
+      "sidecar_expected_sha256": "b6206fc36ba7290bd8046c90781a8cdd49284fac828860d9704b0bb04408f7a2",
+      "verification_receipt_bytes_utf8": "opaque-signed-governance-receipt",
+      "verification_receipt_artifact": {
+        "artifact_id": "sha256:29f55159a79baecf9a66ed70a44c4895e789d89ca7b3410922c507ecef3de469",
+        "sha256": "29f55159a79baecf9a66ed70a44c4895e789d89ca7b3410922c507ecef3de469",
+        "byte_len": 32,
+        "media_type": "application/vnd.runalith.governance-terminal-proof-receipt",
+        "verifier_id": "governance-verifier",
+        "key_id": "key-2026-01",
+        "receipt_id": "receipt-lineage-1",
+        "proof_sha256": "950fc0d3eac6ba6f6f0d5defe8a37a58a12ebe305243c1ed36298783d96b630b",
+        "verified_at": "2026-11-03T10:03:01Z"
+      },
+      "w5_artifact_created_at": "2026-11-03T10:03:03Z"
+    }
+  ],
+  "execution_host_service_id": "execution.host-fixture"
+}

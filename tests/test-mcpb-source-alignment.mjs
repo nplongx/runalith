@@ -10,6 +10,23 @@ import { validateZipEntryTypes } from '../benchmarks/plugin-workflow-benchmark/p
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const verifier = path.join(repoRoot, 'scripts/verify-mcpb-source-alignment.mjs');
 
+const verifierSource = fs.readFileSync(verifier, 'utf8');
+const buildInputStart = verifierSource.indexOf('const BUILD_INPUT_PATHS = Object.freeze([');
+const buildInputEnd = verifierSource.indexOf(']);', buildInputStart);
+assert.ok(buildInputStart >= 0 && buildInputEnd > buildInputStart, 'source alignment verifier must expose its frozen build-input list');
+const buildInputPaths = [...verifierSource.slice(buildInputStart, buildInputEnd).matchAll(/'([^']+)'/g)].map(match => match[1]);
+assert.equal(new Set(buildInputPaths).size, buildInputPaths.length, 'frozen build-input paths must be unique');
+function listRuntimeSources(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) return listRuntimeSources(absolute);
+    return entry.isFile() && /\.(?:js|mjs)$/.test(entry.name) ? [path.relative(repoRoot, absolute).split(path.sep).join('/')] : [];
+  });
+}
+const missingRuntimeBuildInputs = listRuntimeSources(path.join(repoRoot, 'src/runtime'))
+  .filter(relative => !buildInputPaths.includes(relative));
+assert.deepEqual(missingRuntimeBuildInputs, [], 'source snapshot must include every packaged src/runtime JavaScript module');
+
 function runVerifier(bundle, sourceRoot, output) {
   const args = [verifier, '--bundle', bundle, '--source-root', sourceRoot];
   if (output) args.push('--output', output);
@@ -50,11 +67,15 @@ try {
     'scripts/collect-plugin-runtime.mjs',
     'scripts/plugin-package-metadata.mjs',
     'scripts/verify-mcpb-source-alignment.mjs',
+    'scripts/audit-agg-v2-sql-mutation-callers.mjs',
+    'scripts/audit-agg-v2-event-callers.mjs',
+    'tests/test-agg-v2-event-callers.mjs',
     'scripts/verify-agg-acceptance-consistency.mjs',
     'scripts/validate-agg-trust-config.mjs',
     'scripts/reconcile-active-workflows.mjs',
     'scripts/reconcile-active-workflows-v2.mjs',
     'tests/test-reconcile-active-workflows-v2.mjs',
+    'tests/test-agg-v2-sql-mutation-audit.mjs',
     'tests/test-agg-acceptance-consistency.mjs',
     'benchmarks/plugin-workflow-benchmark/phase2-zip-entry-type-safety.mjs',
     'benchmarks/adaptive-goal-graph/run-benchmark.mjs',
@@ -101,6 +122,42 @@ try {
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v117.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v118.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v119.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v120.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v121.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v122.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v123.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v124.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v125.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v126.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v127.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v128.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v129.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v130.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v131.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v132.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v133.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v134.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v135.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v136.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v137.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v138.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v139.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v140.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v141.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v142.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v143.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v144.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v145.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v146.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v147.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v148.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v149.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v150.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v151.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v152.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v153.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v154.json',
+    'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v155.json',
     'tests/test-adaptive-goal-benchmark.mjs',
     'tests/test-mcp-eof-shutdown-framing-20261017.js',
     'tests/test-mcp-shutdown-backpressure-deadline-20261017.js',
@@ -132,7 +189,10 @@ try {
     'scripts/test-mcpb-candidate.mjs',
     'src/runtime/strict-json.js',
     'src/runtime/adaptive-goal-trust-configuration.js',
+    'src/runtime/adaptive-goal-approval-subsystem.js',
+    'src/runtime/job-store.js',
     'tests/test-adaptive-goal-trust-configuration.mjs',
+    'tests/test-adaptive-goal-approval-subsystem.mjs',
     'tests/test-adaptive-goal-trust-entrypoint.mjs',
     'tests/test-reconcile-active-workflows.mjs',
     'benchmarks/plugin-workflow-benchmark/phase2-inventory-diagnostics.mjs',
@@ -166,6 +226,9 @@ try {
     'scripts/runalith-hosted-build-policy.json',
     'scripts/runalith-rollout.mjs',
     'src/runtime/adaptive-goal-graph.js',
+    'src/runtime/adaptive-goal-trust-domains.js',
+    'src/runtime/adaptive-goal-approval-subsystem.js',
+    'src/runtime/job-store.js',
     'src/runtime/adaptive-goal-knowledge-store.js',
     'src/runtime/adaptive-goal-knowledge-verifier.js',
     'src/runtime/adaptive-goal-plan-adapter.js',
@@ -185,6 +248,7 @@ try {
     'tests/test-adaptive-goal-knowledge-verifier.mjs',
     'tests/test-adaptive-goal-reviewer-identity.js',
     'tests/test-adaptive-goal-evidence-lineage.js',
+    'tests/test-adaptive-goal-store-dispatch-guard.mjs',
     'tests/test-runalith-release-trust-contract.mjs',
     'tests/test-hosted-builder-attestation.mjs',
     'tests/test-hosted-verification-predicate.mjs',
@@ -197,6 +261,7 @@ try {
     'docs/runalith-hosted-builder-pipeline.md',
     'docs/runalith-release-evidence-verifier.md',
     'docs/agg-production-trust-provisioning-runbook.md',
+    'docs/agg-external-checkpoint-v2-design-20261030.md',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v78.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v79.json',
     'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v80.json',
@@ -263,6 +328,13 @@ try {
   ]) {
     writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
   }
+  // Materialize every frozen build input in the synthetic source tree. This
+  // keeps the fixture complete when the verifier adds a new runtime source pin.
+  for (const relative of buildInputPaths) {
+    if (!fs.existsSync(path.join(sourceRoot, relative))) {
+      writeFile(sourceRoot, relative, fs.readFileSync(path.join(repoRoot, relative)));
+    }
+  }
 
   for (const relative of ['README.md', 'LICENSE', 'server/index.js', 'src/runtime/example.js']) {
     writeFile(stage, relative, fs.readFileSync(path.join(sourceRoot, relative)));
@@ -305,6 +377,8 @@ try {
   assert.equal(evidence.buildInputs.some(item => item.sourcePath === 'docs/runalith-rollout-rc40-20261028.md'), false,
     'candidate-specific operator handoff must not be an input to its own reported source snapshot');
   const releaseTrustInputs = [
+    'docs/agg-production-trust-provisioning-runbook.md',
+    'docs/agg-external-checkpoint-v2-design-20261030.md',
     'scripts/lib/runalith-release-trust-contract.mjs',
     'scripts/verify-release-evidence.mjs',
     'scripts/lib/hosted-builder-attestation.mjs',
@@ -316,6 +390,7 @@ try {
     'scripts/lib/external-trust-checkpoint-contract.mjs',
     'scripts/lib/sqlite-external-checkpoint-transition.mjs',
     'tests/test-external-trust-checkpoint-contract.mjs',
+    'tests/test-adaptive-goal-approval-subsystem.mjs',
     'src/runtime/adaptive-goal-graph.js',
     'src/runtime/adaptive-goal-knowledge-store.js',
     'src/runtime/adaptive-goal-knowledge-verifier.js',
@@ -341,6 +416,22 @@ try {
     '.github/workflows/runalith-verification-attestation-signer.yml',
   ];
   const inputByPath = new Map(evidence.buildInputs.map(item => [item.sourcePath, item]));
+  const benchmarkFixtureInputs = Array.from({ length: 79 }, (_, index) =>
+    `benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v${77 + index}.json`);
+  for (const relative of benchmarkFixtureInputs) {
+    assert.match(inputByPath.get(relative)?.sha256 || '', /^[a-f0-9]{64}$/,
+      `every immutable benchmark fixture in the v77-v155 preserved history must be bound into the source snapshot: ${relative}`);
+  }
+  const benchmarkFixtureDriftRoot = path.join(temp, 'benchmark-fixture-drift-source');
+  fs.cpSync(sourceRoot, benchmarkFixtureDriftRoot, { recursive: true });
+  writeFile(benchmarkFixtureDriftRoot, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v155.json',
+    `${fs.readFileSync(path.join(benchmarkFixtureDriftRoot, 'benchmarks/adaptive-goal-graph/fixtures/recovery-verifier-v155.json'), 'utf8')}\n// benchmark fixture drift\n`);
+  const benchmarkFixtureDriftReportPath = path.join(temp, 'benchmark-fixture-drift-provenance.json');
+  const benchmarkFixtureDrift = runVerifier(bundle, benchmarkFixtureDriftRoot, benchmarkFixtureDriftReportPath);
+  assert.equal(benchmarkFixtureDrift.status, 0, benchmarkFixtureDrift.stderr);
+  const benchmarkFixtureDriftEvidence = JSON.parse(fs.readFileSync(benchmarkFixtureDriftReportPath, 'utf8'));
+  assert.notEqual(benchmarkFixtureDriftEvidence.sourceSnapshotSha256, evidence.sourceSnapshotSha256,
+    'source snapshot digest must change when any preserved benchmark fixture changes, even though fixture bytes are not MCPB archive entries');
   for (const relative of releaseTrustInputs) {
     assert.match(inputByPath.get(relative)?.sha256 || '', /^[a-f0-9]{64}$/,
       `release-critical trust policy/build input must be bound into the source snapshot: ${relative}`);
@@ -381,6 +472,17 @@ try {
   const frozenGateDriftEvidence = JSON.parse(fs.readFileSync(frozenGateDriftReportPath, 'utf8'));
   assert.notEqual(frozenGateDriftEvidence.sourceSnapshotSha256, evidence.sourceSnapshotSha256,
     'source snapshot digest must bind the frozen 71-path acceptance gate and its regression test');
+
+  const runtimeModuleDriftRoot = path.join(temp, 'runtime-module-drift-source');
+  fs.cpSync(sourceRoot, runtimeModuleDriftRoot, { recursive: true });
+  writeFile(runtimeModuleDriftRoot, 'src/runtime/distributed-scheduler.js',
+    `${fs.readFileSync(path.join(runtimeModuleDriftRoot, 'src/runtime/distributed-scheduler.js'), 'utf8')}\n// packaged runtime module drift fixture\n`);
+  const runtimeModuleDriftReportPath = path.join(temp, 'runtime-module-drift-provenance.json');
+  const runtimeModuleDrift = runVerifier(bundle, runtimeModuleDriftRoot, runtimeModuleDriftReportPath);
+  assert.equal(runtimeModuleDrift.status, 0, runtimeModuleDrift.stderr);
+  const runtimeModuleDriftEvidence = JSON.parse(fs.readFileSync(runtimeModuleDriftReportPath, 'utf8'));
+  assert.notEqual(runtimeModuleDriftEvidence.sourceSnapshotSha256, evidence.sourceSnapshotSha256,
+    'source snapshot digest must change when a packaged runtime module outside the original AGG-only pin set changes');
 
   // A bundle that matches a modified source tree may still be byte-aligned,
   // but the provenance must not imply that the Git commit alone describes it.

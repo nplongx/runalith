@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "generated_by_node": true,
+  "source": "src/runtime/workflow/plan.js::canonicalJson + node:crypto SHA-256",
+  "vectors": [
+    {
+      "name": "workflow-role-and-skill-definition-pinned-plan",
+      "workflow_definition_sha256": "601bf7a5689433a3a04ab29dca2f99f94edb35ae11200a65c980a24c791013d0",
+      "role_definition_sha256": "3f81cd5a4b235fd85da1d255163db5cd11089e349cab3ab72d22be901f71b853",
+      "canonical_json": "{\"role_definition_pins\":[{\"definition_sha256\":\"3f81cd5a4b235fd85da1d255163db5cd11089e349cab3ab72d22be901f71b853\",\"role_id\":\"custom-owner\",\"role_version\":1}],\"schema_version\":1,\"skill_pins\":[{\"bundle_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"role_id\":\"custom-owner\",\"role_version\":1,\"skill_id\":\"research-helper\"}],\"workflow_definition_pin\":{\"definition_sha256\":\"601bf7a5689433a3a04ab29dca2f99f94edb35ae11200a65c980a24c791013d0\",\"workflow_id\":\"skill-pinned-flow\",\"workflow_version\":3},\"workflow_plan\":{\"input_contract\":[\"job.request\"],\"name\":\"Skill Pinned Flow\",\"schema_version\":1,\"tasks\":[{\"depends_on\":[],\"deterministic\":false,\"execution_mode\":\"host-conversation\",\"input_contract\":[\"job.request\"],\"output_artifact_type\":\"requirements\",\"role_id\":\"custom-owner\",\"role_name\":\"Custom Owner\",\"role_version\":1,\"task_id\":\"requirements\"}],\"workflow_id\":\"skill-pinned-flow\",\"workflow_version\":3}}",
+      "sha256": "de11c97c8965f90532a9c516c572f2b830b6c973a2caaf71c1a99b7fc0ea50d8"
+    }
+  ]
+}

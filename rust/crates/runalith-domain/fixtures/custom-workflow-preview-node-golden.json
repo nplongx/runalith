@@ -1,0 +1,5 @@
+{
+  "generated_by": "Node v24.21.0 src/runtime/workflow/custom-workflows.js::previewCustomWorkflow",
+  "canonical_content": "{\"schema_version\":1,\"workflow_id\":\"custom-research-flow\",\"workflow_version\":1,\"name\":\"Custom research flow\",\"input_contract\":[\"job.request\"],\"tasks\":[{\"task_id\":\"collect\",\"role_id\":\"custom-researcher\",\"role_version\":1,\"role_name\":\"Custom Researcher\",\"input_contract\":[\"requirements\"],\"output_artifact_type\":\"research\",\"depends_on\":[\"requirements\"],\"execution_mode\":\"host-conversation\",\"deterministic\":false},{\"task_id\":\"requirements\",\"role_id\":\"custom-owner\",\"role_version\":1,\"role_name\":\"Custom Owner\",\"input_contract\":[\"job.request\"],\"output_artifact_type\":\"requirements\",\"depends_on\":[],\"execution_mode\":\"host-conversation\",\"deterministic\":false}]}",
+  "plan_hash": "e67db3ba0b5636f869427d9e430ef93eb7d77e95dbcbc34ea963f66de55f82e6"
+}

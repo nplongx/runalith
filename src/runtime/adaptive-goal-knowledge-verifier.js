@@ -23,6 +23,7 @@ const MAX_ATTESTATION_TTL_MS = 30 * 60 * 1000;
 // In-process provenance marker: reports that cross JSON/storage boundaries
 // lose this identity and must be re-read/reverified by the host.
 const authenticatedVerificationReports = new WeakSet();
+const verificationReportFreshnessChecks = new WeakMap();
 
 function freezeJsonTree(value, seen = new Set()) {
   if (!value || typeof value !== 'object' || seen.has(value)) return value;
@@ -31,19 +32,45 @@ function freezeJsonTree(value, seen = new Set()) {
   return Object.freeze(value);
 }
 
+function withAuthenticatedDecisionMetadata(report, metadata) {
+  const result = { ...report, ...metadata };
+  const freshnessCheck = verificationReportFreshnessChecks.get(report);
+  if (authenticatedVerificationReports.has(report) && typeof freshnessCheck === 'function') {
+    authenticatedVerificationReports.add(result);
+    verificationReportFreshnessChecks.set(result, freshnessCheck);
+    freezeJsonTree(result);
+  }
+  return result;
+}
+
 export function isAuthenticatedAdaptiveGoalKnowledgeVerificationReport(value, { now = Date.now() } = {}) {
-  if (!isRecord(value) || !authenticatedVerificationReports.has(value) || value.verified !== true || value.status !== 'verified' ||
-      value.claimVerified !== true || value.independenceVerified !== true ||
+  return isAuthenticatedAdaptiveGoalKnowledgeDecision(value, { now }) && value.verified === true &&
+    value.status === 'verified' && value.claimVerified === true;
+}
+
+/** True only for a current, independently signed Verified or Rejected decision. */
+export function isAuthenticatedAdaptiveGoalKnowledgeDecision(value, { now = Date.now() } = {}) {
+  const verified = value?.status === 'verified';
+  const rejected = value?.status === 'rejected';
+  if (!isRecord(value) || !authenticatedVerificationReports.has(value) || value.receiptVerified !== true ||
+      (!verified && !rejected) || value.verified !== verified || value.claimVerified !== verified ||
+      value.claimRejected !== rejected || value.independenceVerified !== true ||
       typeof value.providerId !== 'string' || !value.providerId.trim() ||
-      !SHA256.test(value.attestationId || '') || !SHA256.test(value.trustRootSha256 || '') ||
-      !SHA256.test(value.snapshotHash || '') || !SHA256.test(value.evidenceManifestHash || '') ||
+      typeof value.verifierId !== 'string' || !value.verifierId.trim() ||
+      !SHA256.test(value.verificationReceiptSha256 || '') || !SHA256.test(value.attestationId || '') ||
+      !SHA256.test(value.trustRootSha256 || '') || !SHA256.test(value.snapshotHash || '') ||
+      !SHA256.test(value.evidenceManifestHash || '') ||
       !isRecord(value.snapshot) || value.snapshot.goal_id !== value.goalId || value.snapshot.snapshot_hash !== value.snapshotHash ||
       !Number.isSafeInteger(now)) return false;
   const issued = typeof value.issuedAt === 'string' ? Date.parse(value.issuedAt) : NaN;
   const expires = typeof value.expiresAt === 'string' ? Date.parse(value.expiresAt) : NaN;
-  return Number.isFinite(issued) && Number.isFinite(expires) &&
+  const timeValid = Number.isFinite(issued) && Number.isFinite(expires) &&
     new Date(issued).toISOString() === value.issuedAt && new Date(expires).toISOString() === value.expiresAt &&
     issued <= now + 60_000 && expires > now && expires > issued && expires - issued <= MAX_ATTESTATION_TTL_MS;
+  if (!timeValid) return false;
+  const freshnessCheck = verificationReportFreshnessChecks.get(value);
+  if (typeof freshnessCheck !== 'function') return false;
+  try { return freshnessCheck(value) === true; } catch { return false; }
 }
 
 function isRecord(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
@@ -158,12 +185,14 @@ function assertAttestationSignatureShape(attestation, configured) {
   const exactStrings = [
     ['kind', 'adaptive_goal_verified_knowledge_graph_attestation'],
     ['scope', ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_SCOPE],
-    ['claim_status', 'verified'],
     ['independence_status', 'verified'],
     ['signature_algorithm', 'Ed25519']
   ];
   for (const [key, expected] of exactStrings) if (attestation[key] !== expected) {
     fail('KNOWLEDGE_ATTESTATION_SCOPE_INVALID', `${key} must exactly equal ${expected}`);
+  }
+  if (!['verified', 'rejected'].includes(attestation.claim_status)) {
+    fail('KNOWLEDGE_ATTESTATION_SCOPE_INVALID', 'claim_status must exactly equal verified or rejected');
   }
   if (attestation.schema_version !== ADAPTIVE_GOAL_KNOWLEDGE_VERIFICATION_SCHEMA_VERSION ||
       attestation.provider_id !== configured.providerId || !SHA256.test(attestation.trust_root_sha256 || '') ||
@@ -219,7 +248,10 @@ function normalizeEvidenceManifest(snapshot, resolveEvidenceRecords, resolveSour
   if (unsupported.length) fail('KNOWLEDGE_EVIDENCE_REFERENCE_UNSUPPORTED', `all Goal/Idea evidence must be a durable artifact:// reference or content-addressed file: reference; unsupported refs: ${unsupported.join(', ')}`);
 
   const evidenceNodes = snapshot.nodes.filter(node => node.type === 'evidence');
-  const actionNodes = snapshot.nodes.filter(node => node.type === 'experiment');
+  // Both task and experiment nodes are projected into Plan Graph action steps.
+  // Requiring evidence only for experiments lets an evidence-free task inherit
+  // the graph's unrelated non-empty manifest and be covered by its signature.
+  const actionNodes = snapshot.nodes.filter(node => node.type === 'experiment' || node.type === 'task');
   for (const node of actionNodes) {
     if (!node.evidence_refs?.some(ref => ref.startsWith('artifact://'))) {
       fail('KNOWLEDGE_ACTION_EVIDENCE_MISSING', `action/experiment node ${node.id} has no durable artifact:// evidence reference`);
@@ -340,7 +372,7 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       edge_ids: snapshot.edge_ids,
       membership_ids: snapshot.membership_ids,
       evidence_manifest_hash: evidenceManifest.hash,
-      claim_status: 'verified',
+      claim_status: attestation.claim_status,
       independence_status: 'verified',
       signature_algorithm: 'Ed25519'
     };
@@ -402,9 +434,14 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       const trustedRoot = validateForCurrentSnapshot(attestation, snapshot, configured, evidenceManifest);
       const nonceCount = store.db.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications WHERE nonce=?').get(attestation.nonce).n;
       if (nonceCount !== 1) fail('KNOWLEDGE_ATTESTATION_NONCE_REPLAY', 'knowledge verifier nonce appears in multiple durable attestation rows');
+      const claimVerified = attestation.claim_status === 'verified';
+      const claimRejected = attestation.claim_status === 'rejected';
       return {
-        verified: true, status: 'verified', providerId: configured.providerId, trustRootSha256: trustedRoot.trustRootSha256,
+        receiptVerified: true, verified: claimVerified, status: claimVerified ? 'verified' : 'rejected',
+        providerId: configured.providerId, verifierId: `${configured.providerId}/${trustedRoot.keyId}`,
+        trustRootSha256: trustedRoot.trustRootSha256,
         trustKeyId: row.trust_key_id || trustedRoot.keyId,
+        verificationReceiptSha256: sha256(canonicalAdaptiveGoalKnowledgeJson(attestation)),
         attestationConfigurationFingerprint: row.configuration_fingerprint || null,
         currentConfigurationFingerprint: configured.configurationFingerprint,
         trustConfigVersion: row.trust_config_version ?? null,
@@ -414,7 +451,7 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
         nonce: row.nonce, issuedAt: attestation.issued_at, expiresAt: attestation.expires_at,
         evidenceManifestHash: evidenceManifest.hash, evidenceRecordCount: evidenceManifest.records.length,
         verifiedNodeCount: snapshot.nodes.length, verifiedEdgeCount: snapshot.edges.length,
-        verifiedMembershipCount: snapshot.memberships.length, claimVerified: true, independenceVerified: true,
+        verifiedMembershipCount: snapshot.memberships.length, claimVerified, claimRejected, independenceVerified: true,
         note: 'Claim truth and evidence independence are asserted by the configured trusted verifier signature; artifact/source resolvers independently confirm current byte and lineage integrity.'
       };
     } catch (error) {
@@ -472,8 +509,26 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       report.blockers = [...(report.blockers || []), { code: 'KNOWLEDGE_TRUST_CONFIG_NOT_OBSERVED',
         message: 'current trust configuration is not registered at this exact version/fingerprint; no trust observation was written' }];
     }
-    if (report.verified === true && report.status === 'verified') {
+    if (report.receiptVerified === true && ['verified', 'rejected'].includes(report.status)) {
       authenticatedVerificationReports.add(report);
+      // A report is a short-lived in-process capability, not a permanent
+      // authorization. Re-read the exact current snapshot and trust config
+      // whenever a downstream Plan consumer presents it, so root revocation,
+      // trust rollback, evidence mutation, or a newer attestation invalidates
+      // capabilities already minted by this verifier instance.
+      verificationReportFreshnessChecks.set(report, issuedReport => {
+        const current = getCurrentVerification(goalId);
+        return current.receiptVerified === true && current.status === issuedReport.status &&
+          current.claimVerified === issuedReport.claimVerified &&
+          current.claimRejected === issuedReport.claimRejected &&
+          current.attestationId === issuedReport.attestationId &&
+          current.providerId === issuedReport.providerId &&
+          current.verifierId === issuedReport.verifierId &&
+          current.trustRootSha256 === issuedReport.trustRootSha256 &&
+          current.snapshotHash === issuedReport.snapshotHash &&
+          current.evidenceManifestHash === issuedReport.evidenceManifestHash &&
+          current.verificationReceiptSha256 === issuedReport.verificationReceiptSha256;
+      });
       // The WeakSet authenticates object identity, not mutable fields. Freeze
       // the full report/snapshot tree so a caller cannot mutate signed metadata
       // or snapshot content after verification while retaining that identity.
@@ -542,7 +597,7 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       eligibleForAttestation: evidenceManifest.eligibleForAttestation,
       attestationBlockers: evidenceManifest.blockers,
       requiredSignedFields: evidenceManifest.eligibleForAttestation
-        ? ['claim_status=verified', 'independence_status=verified'] : [],
+        ? ['claim_status=verified|rejected', 'independence_status=verified'] : [],
       warning: 'Hashes and lineage prove content integrity and origin only. A trusted verifier must independently adjudicate claim truth and evidence independence before signing this exact request.'
     };
   }
@@ -578,10 +633,16 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       if (existingIdentical) {
         if (existingIdentical.payload_json !== canonicalAttestation) fail('KNOWLEDGE_ATTESTATION_DURABLE_IDENTITY_MISMATCH', 'attestation ID is already bound to different canonical payload bytes');
         db.exec('COMMIT');
-        return { ...readPersistedAttestation(snapshot, configured), created: false, idempotent: true };
+        const currentDecision = getCurrentVerification(goalId);
+        if (!currentDecision.receiptVerified) {
+          fail('KNOWLEDGE_ATTESTATION_READBACK_INVALID', currentDecision.blockers?.map(item => item.code).join(', ') || 'stored verifier receipt did not validate');
+        }
+        return withAuthenticatedDecisionMetadata(currentDecision, { created: false, idempotent: true });
       }
       const current = readPersistedAttestation(snapshot, configured);
-      if (current.verified) fail('KNOWLEDGE_SNAPSHOT_ALREADY_ATTESTED', 'this exact snapshot already has a current trusted verifier attestation; refreshing it before expiry is not permitted');
+      if (current.verified || current.status === 'rejected') {
+        fail('KNOWLEDGE_SNAPSHOT_ALREADY_ATTESTED', 'this exact snapshot already has a current terminal verifier decision; a new decision requires a new immutable snapshot');
+      }
       const nonceCount = db.prepare('SELECT COUNT(*) AS n FROM adaptive_goal_knowledge_verifications WHERE nonce=?').get(attestationInput.nonce).n;
       if (nonceCount !== 0) fail('KNOWLEDGE_ATTESTATION_NONCE_REPLAY', 'attestation nonce has already been used in a durable record');
       const id = attestationId(attestationInput);
@@ -602,9 +663,9 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
         fail('KNOWLEDGE_ATTESTATION_PERSISTENCE_MISMATCH', 'durable verifier record failed exact canonical readback');
       }
       db.exec('COMMIT');
-      const verified = readPersistedAttestation(snapshot, configured);
-      if (!verified.verified) fail('KNOWLEDGE_ATTESTATION_READBACK_INVALID', verified.blockers?.map(item => item.code).join(', ') || 'stored verifier record did not validate');
-      return { ...verified, created: true, idempotent: false };
+      const verified = getCurrentVerification(goalId);
+      if (!verified.receiptVerified) fail('KNOWLEDGE_ATTESTATION_READBACK_INVALID', verified.blockers?.map(item => item.code).join(', ') || 'stored verifier receipt did not validate');
+      return withAuthenticatedDecisionMetadata(verified, { created: true, idempotent: false });
     } catch (error) {
       try { db.exec('ROLLBACK'); } catch {}
       throw error;
@@ -621,7 +682,7 @@ export function createAdaptiveGoalKnowledgeVerifier({ store, resolveEvidenceReco
       fail('KNOWLEDGE_GRAPH_ENDPOINT_INVALID', 'start and goal node IDs must be distinct current members of the verified Goal/Idea Graph');
     }
     if (nodes.get(goalNodeId).type !== 'goal') fail('KNOWLEDGE_GRAPH_GOAL_TYPE_INVALID', 'goal_node_id must identify a persisted node of type goal');
-    if (nodes.get(startNodeId).type === 'experiment') fail('KNOWLEDGE_GRAPH_START_TYPE_INVALID', 'start_node_id cannot be an action/experiment node');
+    if (['experiment', 'task'].includes(nodes.get(startNodeId).type)) fail('KNOWLEDGE_GRAPH_START_TYPE_INVALID', 'start_node_id cannot be an action/task node');
     const edges = snapshot.edges.filter(edge => edge.type !== 'recovers_to').map(edge => ({ from: edge.from_id, to: edge.to_id, type: edge.type }));
     const graph = {
       schemaVersion: 1,

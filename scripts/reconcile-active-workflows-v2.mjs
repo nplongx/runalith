@@ -647,7 +647,11 @@ function reportJob(db, job, { nowMs, staleAfterMs, procRoot }) {
   const state = String(job.state || '').toUpperCase();
   const status = String(job.status || '').toLowerCase();
   const flags = [...new Set(tasks.flatMap(entry => entry.flags))];
-  if (incompleteTaskCorrelationEventIds.some(eventId => ![...eventsByTaskId.values()].some(events => events.some(event => event.event_id === eventId)))) {
+  // Any truncated correlation scan makes the job-level task/event graph
+  // incomplete, even when one or more task IDs were found before the bound.
+  // Partial attribution must not suppress the job-scope warning: unseen IDs
+  // may belong to another task or may not resolve to a local task row at all.
+  if (incompleteTaskCorrelationEventIds.length > 0) {
     flags.push('EVENT_TASK_CORRELATION_SCAN_TRUNCATED');
   }
   const activeTaskCompletionAfterUpdate = currentTaskEntry && completionEvents.some(event => {

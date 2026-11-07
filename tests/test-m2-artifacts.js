@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { WorkflowStore } from '../src/runtime/job-store.js';
+import { WorkflowStore } from '../job-store.js';
 import { createArtifactRecord, validateArtifact } from '../src/runtime/workflow/artifacts.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm2-artifacts-'));

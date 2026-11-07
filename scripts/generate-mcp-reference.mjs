@@ -72,6 +72,7 @@ function renderReference(mcp) {
     '',
     '- Source: the runtime entry point declared by `package.json` and its runtime schema definitions.',
     '- Server identity reported by the checked-out source: `' + escMarkdown(mcp.initialize.result.serverInfo.name) + '`.',
+    '- Source package version reported at generation time: `' + escMarkdown(mcp.initialize.result.serverInfo.version) + '`.',
     `- Registered tools: **${tools.length}**.`,
     '',
     '## Choosing the right operation',

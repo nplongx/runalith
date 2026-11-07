@@ -9,7 +9,7 @@ process.env.WORKFLOW_DATA_DIR = dir;
 
 const { getAgentContract } = await import('../src/runtime/workflow/agent-contracts.js');
 const { assertAgentPermission } = await import('../src/runtime/workflow/governance.js');
-const { WorkflowStore } = await import('../src/runtime/job-store.js');
+const { WorkflowStore } = await import('../job-store.js');
 
 assertAgentPermission('engineer', 'workspace.write');
 assertAgentPermission('engineer', 'execution.request');
@@ -19,7 +19,8 @@ assert.equal(getAgentContract('product-owner').id, 'agent.product-owner');
 
 const store = new WorkflowStore();
 const job = store.getOrCreateJob({ conversationKey: `m9-${crypto.randomUUID()}`, title: 'M9 governance' });
-store.transition(job.job_id, 'EXECUTING');
+store.transition(job.job_id, 'PROPOSED');
+store.approve(job.job_id, 'approved for M9 governance session');
 const cto = store.dispatch(job.job_id, { role: 'cto', description: 'M9 governance session' });
 store.attachOpenClawRun(job.job_id, { runId: 'm9-run', sessionKey: 'agent:cto:m9' });
 const session = store.getSessionByTask(store.getJob(job.job_id).active_task_id);
